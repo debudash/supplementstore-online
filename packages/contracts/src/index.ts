@@ -42,3 +42,5 @@ export interface ApiError {
 // Present now: orders (T3), patients (T3). T4 adds payments and audit; T5 adds refunds; etc.
 export * from './orders'
 export * from './patients'
+export * from './payments'
+export * from './audit'
