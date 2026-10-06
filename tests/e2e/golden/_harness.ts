@@ -59,10 +59,22 @@ export const CANONICAL_STOCK: Record<string, number> = {
   [SKU.ZINC]: 0
 }
 
-/** Restore every SKU to its canonical on-hand with zero reserved. */
+/** Canonical unit COGS from the seed table. Restored each scenario because EVAL-11d
+ *  mutates MAG's COGS to force a MARGIN_NEGATIVE cycle hold. */
+export const CANONICAL_COGS: Record<string, number> = {
+  [SKU.MAG]: 1450,
+  [SKU.VITD]: 1125,
+  [SKU.OMEGA]: 2280,
+  [SKU.PROBIO]: 2675,
+  [SKU.ZINC]: 690
+}
+
+/** Restore every SKU to its canonical on-hand (reserved 0) and canonical unit COGS. */
 export async function resetStock(): Promise<void> {
-  for (const [sku, onHand] of Object.entries(CANONICAL_STOCK)) {
-    await db('products').where({ sku }).update({ on_hand_qty: onHand, reserved_qty: 0 })
+  for (const sku of Object.keys(CANONICAL_STOCK)) {
+    await db('products')
+      .where({ sku })
+      .update({ on_hand_qty: CANONICAL_STOCK[sku], reserved_qty: 0, unit_cogs_cents: CANONICAL_COGS[sku] })
   }
 }
 
@@ -147,16 +159,20 @@ export function isStub(res: { status: number }): boolean {
  * a probed route is still a 501 stub for a not-yet-merged task), which keeps the spec in
  * place so it auto-enables - and auto-asserts - the moment the behaviour lands.
  */
-export function evalCase(id: string, name: string, fn: () => Promise<void | Status>): void {
-  it(`${id} ${name}`, async () => {
-    let outcome: Status = 'pass'
-    try {
-      const r = await fn()
-      if (r === 'pending') outcome = 'pending'
-    } catch (err) {
-      recordResult(id, 'fail', err instanceof Error ? err.message : String(err))
-      throw err
-    }
-    recordResult(id, outcome)
-  })
+export function evalCase(id: string, name: string, fn: () => Promise<void | Status>, timeoutMs?: number): void {
+  it(
+    `${id} ${name}`,
+    async () => {
+      let outcome: Status = 'pass'
+      try {
+        const r = await fn()
+        if (r === 'pending') outcome = 'pending'
+      } catch (err) {
+        recordResult(id, 'fail', err instanceof Error ? err.message : String(err))
+        throw err
+      }
+      recordResult(id, outcome)
+    },
+    timeoutMs
+  )
 }

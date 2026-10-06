@@ -5,7 +5,7 @@ PASS = asserted against real Postgres this run; PENDING = spec written, product 
 not yet merged (auto-enables when the named task lands); CUT = task cut from scope, cannot pass;
 FAIL = ran and a real expectation did not hold (a product finding - investigate, do not weaken).
 
-Totals: PASS 34 | PENDING 0 | CUT 9 | FAIL 0
+Totals: PASS 39 | PENDING 0 | CUT 4 | FAIL 0
 
 | ID | Status | Area | Task | Scenario |
 |---|---|---|---|---|
@@ -30,10 +30,10 @@ Totals: PASS 34 | PENDING 0 | CUT 9 | FAIL 0
 | EVAL-09 | CUT | reports | T10 | admin metrics reconciliation (GMV/refunded/settled/fees/net margin) _(admin metrics endpoint is owned by T10 (cut); cannot pass in this slice)_ |
 | EVAL-09b | PASS | reports | T8 | provider payables: credits 7090, debits 4472, closing 2618; refunded order nets -64 (ADR-012) |
 | EVAL-10 | PASS | reports | T8 | late refund of a closed-month order: M statement frozen (credits 4408); current period debits 4472, closing -64 (ADR-014/016) |
-| EVAL-11 | CUT | recurring | T9 | schedule MAG x1@2999 cycle -> recurring_cycle paid, fee 22, margin 1527, MAG -1 |
-| EVAL-11b | CUT | recurring | T9 | schedule PROBIO x6 -> on_hold INSUFFICIENT_STOCK, no journal |
-| EVAL-11c | CUT | recurring | T9 | unauthorized schedule run -> on_hold NOT_AUTHORIZED |
-| EVAL-11d | CUT | recurring | T9 | raise MAG cogs to 3000, run cycle -> on_hold MARGIN_NEGATIVE |
+| EVAL-11 | PASS | recurring | T9 | authorized cycle pays: recurring_cycle, fee 22, margin 1527, MAG on_hand -1; balanced PAYMENT journal via T4 path |
+| EVAL-11b | PASS | recurring | T9 | schedule PROBIO x6 -> cycle on_hold INSUFFICIENT_STOCK, no journal, stock untouched |
+| EVAL-11c | PASS | recurring | T9 | unauthorized schedule run -> cycle on_hold NOT_AUTHORIZED, no journal |
+| EVAL-11d | PASS | recurring | T9 | raise MAG cogs to 3000, run cycle -> on_hold MARGIN_NEGATIVE (ADR-017 surfaced, not absorbed) |
 | EVAL-12 | PASS | privacy | T4 | GET /api/pay/:token strict whitelist; no cogs/fee/margin/provider economics |
 | EVAL-13 | CUT | demo | T10 | synthetic baseline + migration + reset; includeSynthetic toggle _(demo data generator/reset owned by T10 (cut))_ |
 | EVAL-15 | CUT | demo | T10 | DEMO_MODE=false -> /api/admin/demo/* returns 403 DEMO_DISABLED _(demo endpoints owned by T10 (cut); currently 501 stubs, not DEMO_DISABLED)_ |
@@ -49,17 +49,12 @@ Totals: PASS 34 | PENDING 0 | CUT 9 | FAIL 0
 | RT-10 | PASS | redteam | T4 | patient routes and error bodies never leak COGS/margin/fee |
 | RT-11 | PASS | redteam | T2 | direct SQL UPDATE/DELETE on ledger tables -> trigger raises; synthetic purge gated |
 | RT-12 | PASS | redteam | T3 | SQL injection via sku / date filters -> parameterized, no injection, table intact _(CSV-import row validation portion belongs to T10 (cut) and is reported separately)_ |
-| RT-13 | CUT | redteam | T9 | recurring cycle twice for same period -> one child order (unique schedule_id, cycle_number) |
+| RT-13 | PASS | redteam | T9 | recurring cycle triggered twice (concurrent) for the same period -> exactly ONE child order _(enforced by a schedule row lock + next_run_at due-gate, NOT a DB unique constraint (none exists on (schedule_id, cycle_number) in the approved data model))_ |
 | RT-14 | CUT | redteam | T10 | demo endpoints in production mode -> 403 DEMO_DISABLED |
 | RT-15 | PASS | redteam | T4 | pay an expired order after reservation released -> 409 ORDER_EXPIRED; no oversell |
 
 ## Not implemented - CUT from scope
 - EVAL-09 - T10: admin metrics reconciliation (GMV/refunded/settled/fees/net margin)
-- EVAL-11 - T9: schedule MAG x1@2999 cycle -> recurring_cycle paid, fee 22, margin 1527, MAG -1
-- EVAL-11b - T9: schedule PROBIO x6 -> on_hold INSUFFICIENT_STOCK, no journal
-- EVAL-11c - T9: unauthorized schedule run -> on_hold NOT_AUTHORIZED
-- EVAL-11d - T9: raise MAG cogs to 3000, run cycle -> on_hold MARGIN_NEGATIVE
 - EVAL-13 - T10: synthetic baseline + migration + reset; includeSynthetic toggle
 - EVAL-15 - T10: DEMO_MODE=false -> /api/admin/demo/* returns 403 DEMO_DISABLED
-- RT-13 - T9: recurring cycle twice for same period -> one child order (unique schedule_id, cycle_number)
 - RT-14 - T10: demo endpoints in production mode -> 403 DEMO_DISABLED
