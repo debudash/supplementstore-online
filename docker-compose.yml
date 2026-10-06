@@ -1,0 +1,42 @@
+# Local development stack. `docker compose up -d db` is enough to run tests and the dev servers.
+services:
+  db:
+    image: postgres:16
+    labels:
+      ao.session: ${AO_SESSION_ID:-}
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cerbo
+    ports:
+      - '5432:5432'
+    volumes:
+      - cerbo_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional: the full application image. Not required for `up -d db`.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    labels:
+      ao.session: ${AO_SESSION_ID:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/cerbo
+      PORT: '3000'
+      NODE_ENV: production
+      DEMO_MODE: 'true'
+    ports:
+      - '3000:3000'
+    profiles:
+      - full
+
+volumes:
+  cerbo_pgdata:

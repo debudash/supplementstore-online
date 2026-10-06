@@ -1,0 +1,22 @@
+{
+  "name": "@cerbo/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vue 3 SPA. Role switcher sets X-Demo-User; small fetch-based API client.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "vue": "^3.4.27",
+    "vue-router": "^4.3.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11",
+    "vue-tsc": "^2.0.19"
+  }
+}

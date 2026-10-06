@@ -1,0 +1,6 @@
+# Normalize line endings to LF in the repository so Linux CI (bash run steps,
+# shell scripts) is never tripped up by CRLF introduced on Windows checkouts.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

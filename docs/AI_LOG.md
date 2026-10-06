@@ -18,4 +18,5 @@ Required by the PRD deliverable. Workers append entries when they or a reviewer 
 | 2026-10-05 | Claude | Phase 1 | Flagged that "provider admin restock" conflicts with Cerbo holding a single inventory pool | Worked | ADR-009: restock under Cerbo Admin, demo only |
 | 2026-10-05 | Claude | Phase 1 | Owner's profit formula used a single margin % across orders; flagged it misstates profit when margins vary | Worked | ADR-015: compute per order from ledger, formula as reconciliation |
 | 2026-10-05 | Claude | Phase 1 | Time-box rule summed task estimates; with parallel agents the real constraint is critical path plus human review capacity | Worked | ADR-021: tier-ordered build, review concentrated on gates |
+| 2026-10-06 | Claude (planning context pack) | T0 | context pack specified GitHub Actions CI for a GitLab-hosted remote so no pipeline could run | Misled (infra) | worker and orchestrator both flagged it, owner approved adding .gitlab-ci.yml with the GitHub workflow retained |
 | | | | | | |

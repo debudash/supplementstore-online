@@ -1,0 +1,3 @@
+# End-to-end scenario + red-team suite lives here. Owned by T13.
+# T0 creates this directory so `npm run test:e2e` resolves (passes with no tests
+# until T13 adds them). golden/** will be protected (AGENTS.md section 4).
