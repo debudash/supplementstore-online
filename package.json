@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build -w packages/money -w packages/contracts && npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "vitest run --root tests/e2e --passWithNoTests",
     "build": "npm run build --workspaces --if-present",
