@@ -233,22 +233,50 @@ function journalRef(j: AuditJournal): string {
   max-width: 920px;
 }
 .order-id {
-  color: #555;
+  color: var(--muted);
 }
 .block {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.85rem 1.1rem;
   margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
 }
 .block h3 {
   margin-top: 0;
 }
+/* The invariants block must read unmistakably as PASS or FAIL. */
+.invariants-block {
+  border-width: 2px;
+}
 .invariants-block.ok-border {
-  border-color: #2d7d46;
+  border-color: var(--success);
+  background: var(--success-tint);
 }
 .invariants-block.bad-border {
-  border-color: #c0392b;
+  border-color: var(--danger);
+  background: var(--danger-tint);
+}
+.invariants-block h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.invariants-block h3 span {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+}
+.invariants-block h3 span.ok {
+  background: var(--success);
+  color: #fff;
+}
+.invariants-block h3 span.bad {
+  background: var(--danger);
+  color: #fff;
 }
 .data {
   border-collapse: collapse;
@@ -256,8 +284,8 @@ function journalRef(j: AuditJournal): string {
 }
 .data th,
 .data td {
-  border: 1px solid #e0e0e0;
-  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
   text-align: left;
 }
 .num {
@@ -267,7 +295,7 @@ function journalRef(j: AuditJournal): string {
 .kv {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem;
+  gap: 1.4rem;
   margin: 0;
 }
 .kv div {
@@ -275,8 +303,8 @@ function journalRef(j: AuditJournal): string {
   flex-direction: column;
 }
 .kv dt {
-  color: #555;
-  font-size: 0.8em;
+  color: var(--muted);
+  font-size: 0.78em;
 }
 .kv dd {
   margin: 0;
@@ -288,42 +316,38 @@ function journalRef(j: AuditJournal): string {
   margin: 0;
 }
 .invariants li {
-  padding: 0.2rem 0;
+  padding: 0.25rem 0;
   display: flex;
   gap: 0.5rem;
   align-items: baseline;
 }
 .mark {
   font-weight: 700;
-  font-family: monospace;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  min-width: 2.8rem;
 }
 .iname {
   flex: 0 0 auto;
 }
 .detail {
-  color: #777;
+  color: var(--muted);
   font-size: 0.85em;
 }
 .ok {
-  color: #2d7d46;
+  color: var(--success);
 }
 .bad {
-  color: #c0392b;
+  color: var(--danger);
 }
 .journal h4 {
-  margin: 0.6rem 0 0.3rem;
+  margin: 0.8rem 0 0.4rem;
   display: flex;
   gap: 0.75rem;
   align-items: baseline;
   flex-wrap: wrap;
 }
 .notice {
-  color: #666;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  color: var(--muted);
 }
 </style>

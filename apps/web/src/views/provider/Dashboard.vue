@@ -131,58 +131,63 @@ onMounted(load)
   font-size: 0.9em;
 }
 .period {
-  color: #555;
+  color: var(--muted);
 }
 .cards {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin: 1rem 0;
+  margin: 1rem 0 1.5rem;
 }
 .card {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.6rem 0.9rem;
-  min-width: 9rem;
+  gap: 0.3rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  min-width: 9.5rem;
+  box-shadow: var(--shadow-sm);
 }
 .card .label {
-  font-size: 0.8em;
-  color: #666;
+  font-size: 0.78em;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 .card .value {
-  font-size: 1.2em;
+  font-size: 1.3em;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 .report-table {
   border-collapse: collapse;
   width: 100%;
   margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 .report-table th,
 .report-table td {
-  border: 1px solid #ddd;
-  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
   text-align: left;
+}
+.report-table tbody tr:last-child td {
+  border-bottom: none;
 }
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .notice {
-  color: #555;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  color: var(--muted);
 }
 .actor-note {
   margin-top: 1.5rem;
-  color: #888;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 </style>

@@ -100,7 +100,7 @@ function submit(): void {
         <input v-model="marginInput" type="text" inputmode="decimal" placeholder="50" :disabled="busy" />
       </label>
 
-      <button type="submit" :disabled="busy">Add to order</button>
+      <button type="submit" class="btn-primary" :disabled="busy">Add to order</button>
     </div>
 
     <p v-if="inputError" class="inline-error" role="alert">{{ inputError }}</p>
@@ -110,30 +110,41 @@ function submit(): void {
 
 <style scoped>
 .add-line {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
   margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+.add-line h3 {
+  margin: 0 0 0.6rem;
 }
 .controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.85rem;
   align-items: flex-end;
 }
 .field {
   display: flex;
   flex-direction: column;
-  font-size: 0.85em;
-  gap: 0.2rem;
+  font-size: 0.82em;
+  color: var(--muted);
+  gap: 0.25rem;
 }
 .mode {
   display: flex;
   flex-direction: column;
-  font-size: 0.85em;
+  font-size: 0.82em;
+  gap: 0.1rem;
 }
 .inline-error {
-  color: #c0392b;
-  margin: 0.5rem 0 0;
+  color: var(--danger);
+  background: var(--danger-tint);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  margin: 0.6rem 0 0;
 }
 </style>

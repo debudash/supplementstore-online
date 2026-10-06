@@ -44,33 +44,42 @@ const feePercentLabel = computed(() => {
 
 <style scoped>
 .quote-summary {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.85rem 1.1rem;
+  box-shadow: var(--shadow-sm);
+}
+.quote-summary h3 {
+  margin: 0 0 0.5rem;
 }
 .row {
   display: flex;
   justify-content: space-between;
   gap: 2rem;
-  padding: 0.15rem 0;
+  padding: 0.22rem 0;
 }
 .row.total {
-  border-top: 1px solid #ddd;
-  margin-top: 0.3rem;
-  padding-top: 0.4rem;
-  font-weight: 600;
+  border-top: 1px solid var(--border);
+  margin-top: 0.4rem;
+  padding-top: 0.5rem;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.row.total dd {
+  color: var(--success);
 }
 dl {
   margin: 0;
 }
 dt {
-  color: #444;
+  color: var(--muted);
 }
 dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
 .empty {
-  color: #666;
+  color: var(--muted);
 }
 </style>

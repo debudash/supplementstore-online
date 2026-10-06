@@ -20,6 +20,23 @@ const error = ref<string | null>(null)
 
 const patientName = (id: string): string => patientNames.value[id] ?? id
 
+// Map an order status to a semantic badge class (colour means a data state).
+function statusClass(status: OrderStatus): string {
+  switch (status) {
+    case 'paid':
+      return 'badge-success'
+    case 'sent':
+      return 'badge-info'
+    case 'on_hold':
+    case 'refunded':
+      return 'badge-warning'
+    case 'expired':
+      return 'badge-danger'
+    default:
+      return 'badge-neutral'
+  }
+}
+
 async function loadPatients(): Promise<void> {
   try {
     const res = await apiRequest<{ patients: PatientView[] }>('/patients')
@@ -85,7 +102,7 @@ onMounted(async () => {
       <tbody>
         <tr v-for="o in orders" :key="o.id">
           <td>{{ patientName(o.patientId) }}</td>
-          <td>{{ o.status }}</td>
+          <td><span class="badge" :class="statusClass(o.status)">{{ o.status }}</span></td>
           <td class="num">{{ o.subtotalCents === null ? '-' : formatCents(o.subtotalCents) }}</td>
           <td>{{ new Date(o.createdAt).toLocaleString() }}</td>
           <td>{{ o.sentAt ? new Date(o.sentAt).toLocaleString() : '-' }}</td>
@@ -119,29 +136,29 @@ onMounted(async () => {
 .order-table {
   border-collapse: collapse;
   width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 .order-table th,
 .order-table td {
-  border: 1px solid #ddd;
-  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
   text-align: left;
+}
+.order-table tbody tr:last-child td {
+  border-bottom: none;
 }
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .notice {
-  color: #555;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  color: var(--muted);
 }
 .actor-note {
   margin-top: 1.5rem;
-  color: #888;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 </style>

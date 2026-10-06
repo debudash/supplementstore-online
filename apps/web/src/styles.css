@@ -1,0 +1,276 @@
+/* Shared app stylesheet (owner-approved styling pass).
+ *
+ * This is the single source of design tokens and base element styling for the SPA.
+ * Components keep scoped styles for their own layout but draw colour, spacing, radius
+ * and typography from the CSS custom properties defined here, so the whole app reads
+ * as one calm, legible system. No framework, no dependency - plain CSS only.
+ *
+ * Colour is used to MEAN something: brand (primary action), success, warning, danger
+ * (data states), and a distinct "demo" violet that marks demonstration-only affordances
+ * so a reviewer can tell at a glance they are not part of the production design. */
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* Surfaces and text */
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #f7f9fb;
+  --text: #1f2a37;
+  --muted: #5b6673;
+  --subtle: #8a94a1;
+  --border: #e3e7ec;
+  --border-strong: #cbd2da;
+
+  /* Brand / primary */
+  --brand: #20568f;
+  --brand-strong: #184877;
+  --brand-tint: #eef4fb;
+
+  /* Semantic data states */
+  --success: #1c7a3a;
+  --success-tint: #e9f5ec;
+  --warning: #92610a;
+  --warning-tint: #fbf1dd;
+  --danger: #bb3326;
+  --danger-tint: #fbeceb;
+
+  /* Demo / meta: deliberately distinct from brand and from every data state */
+  --demo: #5b3fa0;
+  --demo-tint: #f1ecf9;
+  --demo-border: #d6c9ee;
+
+  --radius: 8px;
+  --radius-sm: 5px;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow: 0 1px 3px rgba(16, 24, 40, 0.1), 0 1px 2px rgba(16, 24, 40, 0.06);
+  --focus-ring: 0 0 0 3px rgba(32, 86, 143, 0.35);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.25;
+  color: var(--text);
+  font-weight: 650;
+}
+h1 {
+  font-size: 1.6rem;
+  margin: 0 0 0.75rem;
+}
+h2 {
+  font-size: 1.35rem;
+  margin: 0 0 1rem;
+}
+h3 {
+  font-size: 1.08rem;
+  margin: 1.25rem 0 0.6rem;
+}
+h4 {
+  font-size: 0.98rem;
+  margin: 0.6rem 0 0.4rem;
+}
+
+p {
+  margin: 0 0 0.75rem;
+}
+
+a {
+  color: var(--brand);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  color: var(--muted);
+}
+
+/* ---- Forms ---- */
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.55rem;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: var(--focus-ring);
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background: var(--surface-2);
+  color: var(--subtle);
+  cursor: not-allowed;
+}
+
+/* ---- Buttons ---- */
+button {
+  font: inherit;
+  cursor: pointer;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.85rem;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn-primary {
+  color: #fff;
+  background: var(--brand);
+  border-color: var(--brand);
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--brand);
+  text-decoration: underline;
+  padding: 0;
+}
+.btn-link:hover:not(:disabled) {
+  background: none;
+}
+
+/* ---- Tables: additive polish shared by every table in the app ---- */
+th {
+  background: var(--surface-2);
+  font-weight: 600;
+  color: var(--muted);
+}
+tbody tr:nth-child(even) > td {
+  background: var(--surface-2);
+}
+
+/* ---- Shared helpers ---- */
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.notice {
+  color: var(--muted);
+}
+.muted {
+  color: var(--muted);
+}
+.page-error {
+  color: var(--danger);
+  background: var(--danger-tint);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+}
+
+/* Status / semantic pills (order status, etc.) */
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.badge-neutral {
+  background: var(--surface-2);
+  color: var(--muted);
+  border-color: var(--border);
+}
+.badge-info {
+  background: var(--brand-tint);
+  color: var(--brand-strong);
+  border-color: #cfe0f1;
+}
+.badge-success {
+  background: var(--success-tint);
+  color: var(--success);
+  border-color: #c3e4cd;
+}
+.badge-warning {
+  background: var(--warning-tint);
+  color: var(--warning);
+  border-color: #ecd8ac;
+}
+.badge-danger {
+  background: var(--danger-tint);
+  color: var(--danger);
+  border-color: #eec3bf;
+}
+
+/* ---- Demo affordance marker ----
+ * Used by DemoBadge.vue and reusable as a bare class. Deliberately violet so it never
+ * reads as a product data state (success/warning/danger) - it means "demonstration
+ * only, not part of the production design". */
+.demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--demo);
+  background: var(--demo-tint);
+  border: 1px solid var(--demo-border);
+  cursor: help;
+  white-space: nowrap;
+}

@@ -106,18 +106,24 @@ onMounted(load)
   font-size: 0.9em;
 }
 .period {
-  color: #555;
+  color: var(--muted);
 }
 .report-table {
   border-collapse: collapse;
   width: 100%;
   margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 .report-table th,
 .report-table td {
-  border: 1px solid #ddd;
-  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
   text-align: left;
+}
+.report-table tbody tr:last-child td {
+  border-bottom: none;
 }
 .balance {
   max-width: 28rem;
@@ -125,24 +131,18 @@ onMounted(load)
 .closing th,
 .closing td {
   font-weight: 700;
-  border-top: 2px solid #999;
+  border-top: 2px solid var(--border-strong);
 }
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .notice {
-  color: #555;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  color: var(--muted);
 }
 .actor-note {
   margin-top: 1.5rem;
-  color: #888;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 </style>

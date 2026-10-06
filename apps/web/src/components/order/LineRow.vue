@@ -123,35 +123,41 @@ function commit(): void {
 
 <style scoped>
 .line-row {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.85rem;
   margin-bottom: 0.75rem;
+  box-shadow: var(--shadow-sm);
 }
 .line-row.has-error {
-  border-color: #c0392b;
+  border-color: var(--danger);
 }
 .line-head {
   display: flex;
   gap: 0.5rem;
   align-items: baseline;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.name {
+  font-weight: 600;
 }
 .sku {
-  color: #777;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 .controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.85rem;
   align-items: flex-end;
 }
 .field {
   display: flex;
   flex-direction: column;
-  font-size: 0.85em;
-  gap: 0.2rem;
+  font-size: 0.82em;
+  color: var(--muted);
+  gap: 0.25rem;
 }
 .field input {
   width: 7rem;
@@ -159,28 +165,36 @@ function commit(): void {
 .mode {
   display: flex;
   flex-direction: column;
-  font-size: 0.85em;
+  font-size: 0.82em;
+  gap: 0.1rem;
 }
 .remove {
-  color: #c0392b;
+  color: var(--danger);
+  border-color: var(--border-strong);
 }
 .inline-error {
-  color: #c0392b;
-  margin: 0.4rem 0 0;
+  color: var(--danger);
+  background: var(--danger-tint);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  margin: 0.5rem 0 0;
 }
 .figures {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem;
-  margin: 0.6rem 0 0;
+  gap: 1.4rem;
+  margin: 0.75rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
 }
 .figures div {
   display: flex;
   flex-direction: column;
 }
 .figures dt {
-  color: #555;
-  font-size: 0.8em;
+  color: var(--muted);
+  font-size: 0.78em;
 }
 .figures dd {
   margin: 0;

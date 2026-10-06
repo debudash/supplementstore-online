@@ -219,7 +219,7 @@ function newOrder(): void {
           </select>
         </label>
         <p v-if="patients.length === 0" class="notice">No patients found for your practice.</p>
-        <button type="button" :disabled="busy || !selectedPatientId" @click="startOrder">Start draft order</button>
+        <button type="button" class="btn-primary" :disabled="busy || !selectedPatientId" @click="startOrder">Start draft order</button>
       </template>
       <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
     </section>
@@ -229,7 +229,7 @@ function newOrder(): void {
       <div class="order-meta">
         <span>Order <code>{{ order.id }}</code></span>
         <span class="status">status: {{ order.status }}</span>
-        <button type="button" class="link" :disabled="busy" @click="newOrder">Start another order</button>
+        <button type="button" class="btn-link" :disabled="busy" @click="newOrder">Start another order</button>
       </div>
 
       <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
@@ -259,7 +259,7 @@ function newOrder(): void {
       <QuoteSummary :totals="quote?.totals ?? null" />
 
       <div class="actions" v-if="isDraft">
-        <button type="button" :disabled="!canSend || busy" @click="send">Send to patient</button>
+        <button type="button" class="btn-primary" :disabled="!canSend || busy" @click="send">Send to patient</button>
       </div>
 
       <CopyLink v-if="sendResult" :payUrl="sendResult.payUrl" />
@@ -285,35 +285,25 @@ function newOrder(): void {
   display: flex;
   gap: 1rem;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
   flex-wrap: wrap;
+  padding: 0.6rem 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 .status {
-  color: #555;
-}
-.link {
-  background: none;
-  border: none;
-  color: #2a5db0;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 0;
+  color: var(--muted);
 }
 .notice {
-  color: #555;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  color: var(--muted);
 }
 .actions {
   margin-top: 1rem;
 }
 .actor-note {
   margin-top: 1.5rem;
-  color: #888;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 </style>

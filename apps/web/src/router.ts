@@ -11,6 +11,7 @@ import Recurring from './views/provider/Recurring.vue'
 import Dashboard from './views/provider/Dashboard.vue'
 import ProviderPayables from './views/provider/Payables.vue'
 import Pay from './views/patient/Pay.vue'
+import MyOrders from './views/patient/MyOrders.vue'
 import ScheduleAuthorize from './views/patient/ScheduleAuthorize.vue'
 import Metrics from './views/admin/Metrics.vue'
 import Inventory from './views/admin/Inventory.vue'
@@ -38,9 +39,11 @@ export const routes: RouteRecordRaw[] = [
   { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { roles: ['provider'], tab: 'Dashboard' } },
   { path: '/payables', name: 'payables', component: ProviderPayables, meta: { roles: ['provider'], tab: 'Payables' } },
 
-  // Patient (reached by link, not tabs)
-  { path: '/pay/:token', name: 'pay', component: Pay },
-  { path: '/pay/schedule/:token', name: 'pay-schedule', component: ScheduleAuthorize },
+  // Patient. My Orders is a real tab; the pay/authorize pages are reached by an
+  // unguessable token link (no tab), but are tagged as patient routes for clarity.
+  { path: '/my-orders', name: 'my-orders', component: MyOrders, meta: { roles: ['patient'], tab: 'My Orders' } },
+  { path: '/pay/:token', name: 'pay', component: Pay, meta: { roles: ['patient'] } },
+  { path: '/pay/schedule/:token', name: 'pay-schedule', component: ScheduleAuthorize, meta: { roles: ['patient'] } },
 
   // Cerbo Admin
   { path: '/admin/metrics', name: 'admin-metrics', component: Metrics, meta: { roles: ['cerbo_admin'], tab: 'Metrics' } },
