@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tsbuildinfo
+# The monorepo root lockfile (owned by T0) governs the workspace; no nested lockfile.
+package-lock.json
