@@ -26,6 +26,7 @@ Format: decision, options considered, trade-off, status. Approved = confirmed by
 | ADR-020 | Stack: TypeScript, Node/Express, Knex, Postgres, Vue 3, Vitest, Docker, GitHub Actions, Railway | MySQL; NestJS; Prisma | Within Cerbo's stack; Postgres triggers and constraints enforce ledger rules in the database | Approved (defaults within owner's stack) |
 | ADR-021 | No formal time box; build in tier order; human review concentrated on money gates G1 to G4 | Fixed time box with cut line | Fits a one-day deadline with limited review time; tier order guarantees a working core if time runs out | Approved |
 | ADR-022 | Single Railway service serving API and built SPA, plus Railway Postgres | Separate web and api services | Fewer moving parts for a demo; split later if needed | Proposed |
+| ADR-023 | Refunded patients are told to keep or safely dispose of the product; no returns are accepted | Accept returns and inspect before restocking; silent refund with no notice | Returned ingestibles are not resellable per ADR-013, so accepting returns pays return shipping for stock that is written off anyway; telling the patient nothing risks unnecessary returns and confusion about whether the refund is conditional | Approved |
 
 ## Open business risks (for the final write-up)
 - Card processing typically costs well above 0.75%. If Cerbo absorbs processing fees, each order loses money. Pricing model must account for it.

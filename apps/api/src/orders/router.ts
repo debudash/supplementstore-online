@@ -5,8 +5,8 @@
 import { Router, type Request, type Response } from 'express'
 import { db } from '../db/knex'
 import { createSeams } from '../seams'
-import { notImplemented } from '../http'
 import { loadAudit } from '../ledger'
+import { refundOrder, handleRefundError } from '../refunds'
 import { handleError, notFound } from './errors'
 import {
   createDraft,
@@ -93,11 +93,17 @@ ordersRouter.post('/:id/cancel', async (req: Request, res: Response) => {
   }
 })
 
-// Refund stays a 501 stub until T5. The audit route is implemented by T4 (FR-7 AC1):
-// T3 pre-registered this route as a stub explicitly reserved for T4. The audit query
-// itself lives in the T4-owned ledger module; this handler only does the provider
-// ownership check (not owned -> 404, no existence leak; RT-01) and delegates.
-ordersRouter.post('/:id/refund', (_req, res) => notImplemented(res, 'POST /api/orders/:id/refund'))
+// Refund (FR-8, T5). The stub reserved here for T5 is now wired to the T5 refunds
+// service. The service does the provider ownership check (not owned -> 404, no existence
+// leak; RT-01) and runs the whole refund in one locked transaction. handleRefundError
+// maps the refund-specific codes (ALREADY_REFUNDED, NOT_REFUNDABLE).
+ordersRouter.post('/:id/refund', async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(await refundOrder(db, actorOf(req), req.params.id, req.body, seams))
+  } catch (err) {
+    handleRefundError(res, err)
+  }
+})
 
 ordersRouter.get('/:id/audit', async (req: Request, res: Response) => {
   try {

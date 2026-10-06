@@ -4,16 +4,33 @@
 import { Router, type Request, type Response } from 'express'
 import { notImplemented, sendError } from '../../http'
 import { db } from '../../db/knex'
+import { createSeams } from '../../seams'
 import { loadAudit } from '../../ledger'
+import { refundOrder, handleRefundError } from '../../refunds'
+import { fulfillOrder } from '../../fulfillment'
 
 export const adminOperationsRouter: Router = Router()
 
-adminOperationsRouter.post('/orders/:id/fulfill', (_req, res) =>
-  notImplemented(res, 'POST /api/admin/orders/:id/fulfill')
-)
-adminOperationsRouter.post('/orders/:id/refund', (_req, res) =>
-  notImplemented(res, 'POST /api/admin/orders/:id/refund')
-)
+// Default seam container for runtime; tests drive the services directly with overrides.
+const seams = createSeams()
+
+// Fulfill (FR-9, T5). Cerbo Admin only (the admin router already requires the role).
+adminOperationsRouter.post('/orders/:id/fulfill', async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(await fulfillOrder(db, req.actor!, req.params.id, seams))
+  } catch (err) {
+    handleRefundError(res, err)
+  }
+})
+
+// Refund (FR-8, T5). Cerbo Admin can refund any order. Delegates to the T5 service.
+adminOperationsRouter.post('/orders/:id/refund', async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(await refundOrder(db, req.actor!, req.params.id, req.body, seams))
+  } catch (err) {
+    handleRefundError(res, err)
+  }
+})
 
 // Audit is implemented by T4 (FR-7 AC1/AC2). Cerbo Admin can view ANY order, so there is
 // no ownership filter here (the router already requires the cerbo_admin role). The audit
