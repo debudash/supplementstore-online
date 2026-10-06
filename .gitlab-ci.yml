@@ -168,4 +168,12 @@ deploy-railway:
     # RAILWAY_SERVICE is optional: set it as a CI variable only if the project has
     # more than one deployable service and `railway up` needs disambiguating.
     - npm i -g @railway/cli
-    - railway up ${RAILWAY_SERVICE:+--service "$RAILWAY_SERVICE"}
+    # `env -u CI` is deliberate. GitLab sets CI=true, and `railway up` treats CI=true
+    # (same as its --ci flag) as "stream build logs only, then exit" - it returns
+    # success as soon as the BUILD is queued, WITHOUT waiting for the app to run. That
+    # is the false green that let a crash-looping deploy (MODULE_NOT_FOUND at boot) pass
+    # as a successful pipeline. Unsetting CI runs `railway up` in attached mode, which
+    # waits for the deployment to reach a terminal state and exits non-zero if it failed
+    # or crashed - so a bad deploy now reds the pipeline. (Do NOT add --ci here; it is the
+    # opposite of what we want.)
+    - env -u CI railway up ${RAILWAY_SERVICE:+--service "$RAILWAY_SERVICE"}
