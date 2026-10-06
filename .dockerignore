@@ -1,0 +1,12 @@
+# Keep the build context clean and reproducible: never copy a host's installed
+# dependencies or build output into the image (wrong platform / stale artifacts).
+# The build stage runs `npm ci` and builds from source.
+**/node_modules
+**/dist
+.git
+.gitignore
+*.log
+.env
+.env.*
+Dockerfile
+.dockerignore
