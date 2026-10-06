@@ -9,6 +9,7 @@ import { apiRequest, ApiError } from '../../api/client'
 import { currentUserId } from '../../api/session'
 import type { OrderSummary, OrderStatus, PatientView } from '@cerbo/contracts'
 import { formatCents } from '../../components/order/format'
+import CopyLink from '../../components/order/CopyLink.vue'
 
 const STATUSES: OrderStatus[] = ['draft', 'sent', 'paid', 'cancelled', 'expired', 'refunded', 'on_hold']
 
@@ -64,6 +65,17 @@ async function loadOrders(): Promise<void> {
 
 const empty = computed(() => !loading.value && orders.value.length === 0)
 
+// Which orders have their pay link expanded (UI-only state). The pay link is stored on
+// the order and surfaced here so a provider can recover it after send (payPath is
+// non-null only for sent/non-draft orders - we show the control off that, not status).
+const expanded = ref<Set<string>>(new Set())
+function toggleLink(id: string): void {
+  const next = new Set(expanded.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expanded.value = next
+}
+
 onMounted(async () => {
   await Promise.all([loadPatients(), loadOrders()])
 })
@@ -96,20 +108,32 @@ onMounted(async () => {
           <th>Subtotal</th>
           <th>Created</th>
           <th>Sent</th>
+          <th>Pay link</th>
           <th>Audit</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="o in orders" :key="o.id">
-          <td>{{ patientName(o.patientId) }}</td>
-          <td><span class="badge" :class="statusClass(o.status)">{{ o.status }}</span></td>
-          <td class="num">{{ o.subtotalCents === null ? '-' : formatCents(o.subtotalCents) }}</td>
-          <td>{{ new Date(o.createdAt).toLocaleString() }}</td>
-          <td>{{ o.sentAt ? new Date(o.sentAt).toLocaleString() : '-' }}</td>
-          <td>
-            <RouterLink :to="{ name: 'order-audit', params: { id: o.id } }">View audit</RouterLink>
-          </td>
-        </tr>
+        <template v-for="o in orders" :key="o.id">
+          <tr>
+            <td>{{ patientName(o.patientId) }}</td>
+            <td><span class="badge" :class="statusClass(o.status)">{{ o.status }}</span></td>
+            <td class="num">{{ o.subtotalCents === null ? '-' : formatCents(o.subtotalCents) }}</td>
+            <td>{{ new Date(o.createdAt).toLocaleString() }}</td>
+            <td>{{ o.sentAt ? new Date(o.sentAt).toLocaleString() : '-' }}</td>
+            <td>
+              <button v-if="o.payPath" type="button" class="btn-link" @click="toggleLink(o.id)">
+                {{ expanded.has(o.id) ? 'Hide link' : 'Show link' }}
+              </button>
+              <span v-else class="dash">-</span>
+            </td>
+            <td>
+              <RouterLink :to="{ name: 'order-audit', params: { id: o.id } }">View audit</RouterLink>
+            </td>
+          </tr>
+          <tr v-if="o.payPath && expanded.has(o.id)" class="link-row">
+            <td colspan="7"><CopyLink :payUrl="o.payPath" /></td>
+          </tr>
+        </template>
       </tbody>
     </table>
 
@@ -152,6 +176,13 @@ onMounted(async () => {
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+.dash {
+  color: var(--subtle);
+}
+.link-row td {
+  background: var(--surface-2);
+  padding: 0 0.7rem 0.6rem;
 }
 .notice {
   color: var(--muted);

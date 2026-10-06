@@ -13,6 +13,7 @@ import { useRoute } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
 import type { AuditResponse, AuditJournal, AuditLedgerEntry } from '@cerbo/contracts'
 import { formatCents } from '../../components/order/format'
+import CopyLink from '../../components/order/CopyLink.vue'
 
 const route = useRoute()
 const orderId = computed(() => String(route.params.id))
@@ -105,6 +106,7 @@ function journalRef(j: AuditJournal): string {
           <div><dt>Paid</dt><dd>{{ when(audit.order.paidAt) }}</dd></div>
           <div v-if="audit.order.refundedAt"><dt>Refunded</dt><dd>{{ when(audit.order.refundedAt) }}</dd></div>
         </dl>
+        <CopyLink v-if="audit.order.payPath" :payUrl="audit.order.payPath" />
       </section>
 
       <!-- Status history -->

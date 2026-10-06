@@ -15,6 +15,7 @@ import { apiRequest, ApiError } from '../../api/client'
 import { currentUserId } from '../../api/session'
 import type { RefundReasonCode, RefundResult, FulfillResult } from '@cerbo/contracts'
 import { formatCents } from '../../components/order/format'
+import DemoBadge from '../../components/DemoBadge.vue'
 
 // The refund reason codes for the dropdown. The web imports ONLY types from
 // @cerbo/contracts (every other view does the same); the canonical runtime list lives in
@@ -142,7 +143,7 @@ async function run(tag: string, fn: () => Promise<void>): Promise<void> {
       </div>
     </div>
 
-    <h3>Demo jobs</h3>
+    <h3>Demo jobs <DemoBadge reason="Demo affordance - runs on demand what a background scheduler does automatically in production, so a demo is deterministic." /></h3>
     <div class="jobs">
       <div class="job">
         <button type="button" :disabled="busy !== null" @click="expireReservations">
@@ -155,11 +156,14 @@ async function run(tag: string, fn: () => Promise<void>): Promise<void> {
       </div>
 
       <div class="job">
-        <button type="button" :disabled="busy !== null" @click="runDueSchedules">
-          {{ busy === 'schedules' ? 'Running...' : 'Run due schedules' }}
-        </button>
+        <div class="job-action">
+          <button type="button" :disabled="busy !== null" @click="runDueSchedules">
+            {{ busy === 'schedules' ? 'Running...' : 'Run due schedules' }}
+          </button>
+          <DemoBadge label="Stub" reason="Demo affordance - the recurring engine is not switched on in this version, so this reports nothing to run rather than charging anything." />
+        </div>
         <p class="job-note">
-          Charges recurring orders whose next cycle is due. The recurring engine that does
+          Charges recurring orders whose next cycle is due. <!-- run-due-schedules note --> The recurring engine that does
           this is a separate part of the build and is not switched on in this version, so
           this button is the hook it plugs into - clicking it reports that there is nothing
           to run yet rather than charging anything.
@@ -180,19 +184,22 @@ async function run(tag: string, fn: () => Promise<void>): Promise<void> {
 }
 .intro,
 .job-note {
-  color: #555;
+  color: var(--muted);
 }
 .order-box {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.8rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
   margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-sm);
 }
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9em;
+  gap: 0.25rem;
+  font-size: 0.85em;
+  color: var(--muted);
   margin-bottom: 0.75rem;
 }
 .field.inline {
@@ -216,29 +223,30 @@ async function run(tag: string, fn: () => Promise<void>): Promise<void> {
   margin-bottom: 1rem;
 }
 .job {
-  border: 1px solid #eee;
-  border-radius: 6px;
-  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+}
+.job-action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 .job-note {
   margin: 0.4rem 0 0;
   font-size: 0.9em;
 }
 .notice-ok {
-  color: #1e7e34;
-  border: 1px solid #1e7e34;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
+  color: var(--success);
+  background: var(--success-tint);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
 }
 .actor-note {
   margin-top: 1.5rem;
-  color: #888;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 </style>
