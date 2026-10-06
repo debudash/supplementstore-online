@@ -75,5 +75,10 @@ The real-migration path is now exercised and passing, so the deploy build is pro
 ## Cost
 Railway has no permanent free tier. New users get a one-time 5 USD trial credit. The Hobby plan is 5 USD/month and includes 5 USD of usage; a small always-on API + Postgres typically adds a few USD of usage on top. The owner approved Hobby plus small usage. The worker does not spend anything.
 
+## Redeploy / recovery (in priority order)
+1. **Railway dashboard "Redeploy" on the last successful deployment - fastest, use this mid-demo.** It re-runs the already-built image with no rebuild (seconds), so if the live deployment dies during a demo this is the quickest way back. No CI involved.
+2. **Rebuild-from-source redeploy via CI.** Trigger a fresh build+deploy without manufacturing a commit: either click **"Run pipeline" on `main`** in the GitLab UI (pipeline source `web`), or fire one programmatically with `glab api --method POST "projects/2107/pipeline?ref=main"` (source `api`). Both are admitted by `workflow:rules`; the `deploy-railway` job still only runs on `main` with `$RAILWAY_TOKEN`, so this rebuilds and redeploys after the guardrail + test stages pass. Slower than option 1 (full pipeline, a few minutes) but refreshes the image from source.
+3. **Push to `main`** also redeploys: any merge to `main` fires a push pipeline whose `deploy-railway` job deploys the new build.
+
 ## Rollback
-Redeploy the previous successful deployment from the Railway dashboard. Migrations are additive only, so rolling back code does not require rolling back schema.
+Redeploy the previous successful deployment from the Railway dashboard (option 1 above). Migrations are additive only, so rolling back code does not require rolling back schema.

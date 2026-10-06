@@ -12,11 +12,18 @@ stages:
   - deploy
 
 # Run on merge requests and on branch pushes (so a pipeline is visible immediately
-# after pushing, before an MR exists).
+# after pushing, before an MR exists). `web` and `api` are also admitted so a deploy
+# can be re-fired on demand without manufacturing a commit: `web` is the GitLab UI
+# "Run pipeline" button, `api` is POST /projects/:id/pipeline. Both were previously
+# excluded, which is why a manual/api pipeline on main was refused. This only lets the
+# pipeline START; the deploy-railway job's own rules still gate it to main AND
+# $RAILWAY_TOKEN, so a web/api run on a feature branch runs guardrails + build-test only.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "api"'
 
 variables:
   # Postgres service (see api-tests job). Host is the service alias.
