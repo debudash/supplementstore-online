@@ -1,0 +1,3 @@
+# Transient per-run results log written by golden/reporter.ts and consumed by the
+# global teardown to build RESULTS.md. Regenerated on every `npm run test:e2e`.
+.results.ndjson
