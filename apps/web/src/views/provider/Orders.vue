@@ -7,7 +7,7 @@ import { onMounted, ref, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
 import { currentUserId } from '../../api/session'
-import type { OrderSummary, OrderStatus, PatientView } from '../../components/order/contracts'
+import type { OrderSummary, OrderStatus, PatientView } from '@cerbo/contracts'
 import { formatCents } from '../../components/order/format'
 
 const STATUSES: OrderStatus[] = ['draft', 'sent', 'paid', 'cancelled', 'expired', 'refunded', 'on_hold']

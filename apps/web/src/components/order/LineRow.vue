@@ -5,7 +5,7 @@
 // COGS, fee, net margin) - it never computes money. A per-line error (MARGIN_NEGATIVE
 // or INSUFFICIENT_STOCK) renders inline against this line, not as a page banner.
 import { ref, watch } from 'vue'
-import type { OrderLineView } from './contracts'
+import type { OrderLineView } from '@cerbo/contracts'
 import { formatCents, centsToPlain, dollarsToCents, marginPercentToBps } from './format'
 
 const props = defineProps<{

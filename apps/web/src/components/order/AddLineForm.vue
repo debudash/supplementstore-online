@@ -4,7 +4,7 @@
 // (FR-3 AC3). Sends unitPriceCents or marginBps; the server derives and stores the
 // canonical price. Page-level add errors (e.g. INSUFFICIENT_STOCK) render here.
 import { ref } from 'vue'
-import type { ProductView } from './contracts'
+import type { ProductView } from '@cerbo/contracts'
 import { formatCents, dollarsToCents, marginPercentToBps } from './format'
 
 defineProps<{

@@ -15,7 +15,7 @@ import type {
   QuoteResponse,
   SendResponse,
   PatientView
-} from '../../components/order/contracts'
+} from '@cerbo/contracts'
 import { insufficientStockMessage } from '../../components/order/format'
 import AddLineForm from '../../components/order/AddLineForm.vue'
 import LineRow from '../../components/order/LineRow.vue'

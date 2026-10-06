@@ -2,7 +2,7 @@
 // Order-level live quote (FR-2 AC2): subtotal (price), COGS, platform fee, net margin.
 // Every figure comes from the server quote endpoint; this component only formats.
 import { computed } from 'vue'
-import type { OrderTotals } from './contracts'
+import type { OrderTotals } from '@cerbo/contracts'
 import { formatCents } from './format'
 
 const props = defineProps<{ totals: OrderTotals | null }>()
