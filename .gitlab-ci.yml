@@ -93,8 +93,16 @@ ai03-protected:
 
 # Lint, typecheck, build, unit + api tests across ALL workspaces (incl. packages/money
 # once it lands). API tests run against a Postgres 16 service container.
+#
+# `needs: []` decouples this job from stage ordering so it ALWAYS runs and reports,
+# even when a guardrail job fails. Without it, a failed `guardrails` stage skips the
+# whole `test` stage, which meant the owner lost all test evidence on exactly the
+# gated MRs that legitimately touch protected paths (T2 G2, T4 G3, T13 goldens).
+# Enforcement is unchanged: ai01-floats and ai03-protected still run and a failure in
+# either still fails the pipeline overall - this only stops build-test being skipped.
 build-test:
   stage: test
+  needs: []
   services:
     - name: postgres:16
       alias: postgres
