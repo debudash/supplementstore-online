@@ -29,6 +29,8 @@ export interface AuditOrder {
   cancelledAt: string | null
   expiredAt: string | null
   refundedAt: string | null
+  payToken: string | null
+  payPath: string | null
 }
 
 export interface AuditLine {

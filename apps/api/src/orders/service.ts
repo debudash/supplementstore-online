@@ -598,6 +598,8 @@ export async function listOrders(
   subtotalCents: number | null
   createdAt: string
   sentAt: string | null
+  payToken: string | null
+  payPath: string | null
 }>> {
   let q = db<OrderRow>('orders')
     .where('provider_id', actor.providerId as string)
@@ -606,13 +608,19 @@ export async function listOrders(
   if (filters.from) q = q.andWhere('created_at', '>=', filters.from)
   if (filters.to) q = q.andWhere('created_at', '<=', filters.to)
   const rows = await q
+  // Surface the pay link so the provider can recover it after send (the token is stored
+  // on the order but was previously only returned by create/add/send). This is the
+  // provider's OWN order (the query is scoped to actor.providerId above), so returning
+  // their token leaks nothing they are not already entitled to. Null for drafts.
   return rows.map((o) => ({
     id: o.id,
     status: o.status,
     patientId: o.patient_id,
     subtotalCents: o.subtotal_cents,
     createdAt: new Date(o.created_at).toISOString(),
-    sentAt: iso(o.sent_at)
+    sentAt: iso(o.sent_at),
+    payToken: o.pay_token,
+    payPath: o.pay_token ? `/pay/${o.pay_token}` : null
   }))
 }
 

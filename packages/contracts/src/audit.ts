@@ -29,6 +29,11 @@ export interface AuditOrder {
   cancelledAt: string | null
   expiredAt: string | null
   refundedAt: string | null
+  /** The patient pay token so the audit view can recover the link after send (null for
+   * drafts). Provider/Cerbo-Admin surface only; never patient-facing. */
+  payToken: string | null
+  /** Ready-made pay path, e.g. "/pay/<token>", or null when there is no token. */
+  payPath: string | null
 }
 
 /** A line with every amount (provider-facing economics). */

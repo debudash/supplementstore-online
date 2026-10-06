@@ -38,6 +38,7 @@ interface OrderRow {
   cancelled_at: Date | null
   expired_at: Date | null
   refunded_at: Date | null
+  pay_token: string | null
 }
 
 interface LineRow {
@@ -162,7 +163,11 @@ export async function loadAudit(db: Knex, orderId: string): Promise<AuditRespons
       fulfilledAt: iso(order.fulfilled_at),
       cancelledAt: iso(order.cancelled_at),
       expiredAt: iso(order.expired_at),
-      refundedAt: iso(order.refunded_at)
+      refundedAt: iso(order.refunded_at),
+      // The pay link, so the audit view can surface it after send (provider/admin surface,
+      // already ownership/role-guarded upstream). Null for drafts.
+      payToken: order.pay_token,
+      payPath: order.pay_token ? `/pay/${order.pay_token}` : null
     },
     lines,
     statusHistory: events.map((e) => ({

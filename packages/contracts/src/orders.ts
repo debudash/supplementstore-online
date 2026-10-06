@@ -117,4 +117,9 @@ export interface OrderSummary {
   subtotalCents: number | null
   createdAt: string
   sentAt: string | null
+  /** The patient pay token for this order so the provider can recover the link after
+   * send (null for drafts). Safe on this provider-owned, ownership-scoped list. */
+  payToken: string | null
+  /** Ready-made pay path, e.g. "/pay/<token>", or null when there is no token. */
+  payPath: string | null
 }
