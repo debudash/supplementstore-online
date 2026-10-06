@@ -114,7 +114,7 @@ onMounted(load)
 
       <p v-if="declined" class="page-error" role="alert">{{ DECLINE_NOTICE }}</p>
 
-      <button type="button" class="pay-button" :disabled="submitting" @click="pay">
+      <button type="button" class="pay-button btn-primary" :disabled="submitting" @click="pay">
         {{ submitting ? 'Processing...' : declined ? `Try again - pay ${formatCents(view.totalCents)}` : `Pay ${formatCents(view.totalCents)}` }}
       </button>
     </template>
@@ -134,60 +134,60 @@ onMounted(load)
 <style scoped>
 .pay {
   max-width: 560px;
-  margin: 2rem auto;
-  padding: 0 1rem;
+  margin: 2.5rem auto;
+  padding: 1.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.pay h1 {
+  font-size: 1.4rem;
 }
 .greeting {
   font-weight: 600;
 }
 .lead {
-  color: #555;
+  color: var(--muted);
 }
 .items {
   border-collapse: collapse;
   width: 100%;
-  margin: 1rem 0;
+  margin: 1.25rem 0;
 }
 .items th,
 .items td {
-  border: 1px solid #ddd;
-  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.6rem;
   text-align: left;
 }
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.total {
+.items tfoot .total {
   font-weight: 700;
+  font-size: 1.05rem;
+  border-top: 2px solid var(--border-strong);
 }
 .pay-button {
+  width: 100%;
   font-size: 1.05rem;
-  padding: 0.6rem 1.2rem;
-  cursor: pointer;
-}
-.pay-button:disabled {
-  cursor: default;
-  opacity: 0.6;
+  padding: 0.7rem 1.2rem;
+  margin-top: 0.5rem;
 }
 .notice {
-  color: #555;
+  color: var(--muted);
 }
 .success {
-  color: #1e7e34;
+  color: var(--success);
   font-weight: 600;
 }
 .amount {
   font-weight: 600;
 }
 .ref {
-  color: #888;
+  color: var(--subtle);
   font-size: 0.9em;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
 }
 </style>

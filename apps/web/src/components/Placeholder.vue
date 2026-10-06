@@ -13,8 +13,15 @@ defineProps<{ title: string; note?: string }>()
 
 <style scoped>
 .placeholder {
-  padding: 1rem;
-  border: 1px dashed #bbb;
-  border-radius: 6px;
+  padding: 1.5rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  max-width: 720px;
+}
+.placeholder h2 {
+  color: var(--text);
+  margin-top: 0;
 }
 </style>
