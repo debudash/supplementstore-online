@@ -46,9 +46,15 @@ describe('demo-user auth middleware', () => {
     expect(res.body.error.code).toBe('FORBIDDEN')
   })
 
-  it('lets an authorized role through to the (not-yet-implemented) route (501)', async () => {
+  it('lets an authorized role (provider) pass the role guard', async () => {
+    // The guard must ADMIT an authorized actor. We assert only that: the response is
+    // not a guard rejection (401/403, FORBIDDEN/UNAUTHENTICATED). This stays true for
+    // the life of the project regardless of whether the route is still a 501 stub or
+    // has since been implemented (200, 404, 500, ...) by a later task - so no other
+    // task has to edit this file when it implements the route behind the guard.
     const res = await request(app()).get('/api/orders').set('X-Demo-User', 'prov-ana')
-    expect(res.status).toBe(501)
-    expect(res.body.error.code).toBe('NOT_IMPLEMENTED')
+    expect(res.status).not.toBe(401)
+    expect(res.status).not.toBe(403)
+    expect(['UNAUTHENTICATED', 'FORBIDDEN']).not.toContain(res.body?.error?.code)
   })
 })
