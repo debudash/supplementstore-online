@@ -1,0 +1,40 @@
+# METRICS.md - Metric definitions
+
+All metrics are computed from ledger entries, refunds, and baseline tables, in integer cents, UTC calendar periods.
+Every query takes `includeSynthetic` (default false). Basis: payment events count on `paid_at`, refund events on refund `created_at`.
+
+## Headline: GMV and platform revenue
+| Metric | Definition | Source |
+|---|---|---|
+| Total GMV | Sum of PAYMENT journal CASH_CLEARING debits in period | ledger_entries |
+| Refunded GMV | Sum of refunds.amount_cents in period | refunds |
+| Settled GMV | Total GMV - Refunded GMV | derived |
+| Platform fee revenue | -(sum of PLATFORM_FEE_REVENUE entries) in period. Includes fees on orders later refunded (retained) | ledger_entries |
+| Sunk fees on refunded GMV | Sum of refunds.fee_retained_cents in period. Approximately Refunded GMV x 0.0075 (exact cents may differ by rounding) | refunds |
+| Order count, AOV | Paid orders in period; Total GMV / order count (integer division, display only) | orders |
+| Recurring share | GMV from `recurring_cycle` orders / Total GMV | orders, ledger |
+
+## Provider economics
+| Metric | Definition |
+|---|---|
+| Provider margin % (per order) | (subtotal - cogs) / subtotal |
+| Provider net margin from settled sales | Sum of margin_cents over orders paid in period and not refunded |
+| Reconciliation check | Per order: subtotal x (margin% - 0.0075) = subtotal - cogs - subtotal x 0.0075. Summed across orders it must match the ledger figure within 1 cent per order. Shown as a pass/fail line in the report |
+| Provider net after sunk fees | Provider net margin from settled sales - sunk fees |
+| Payable balance | -(sum of PROVIDER_PAYABLE entries) up to period end |
+
+Note: the formula Settled GMV x (margin% - 0.0075) is only valid per order. Applying one blended margin % across orders with different margins produces a wrong number, so the report sums per-order cents and uses the formula as a check.
+
+## Leading indicator: migration off third-party marketplaces
+| Metric | Definition |
+|---|---|
+| Baseline monthly GMV (per provider) | Sum of baseline_orders.gmv_cents / number of distinct months covered in that provider's baseline |
+| Migration % (per provider, per month) | In-house Total GMV for the month / baseline monthly GMV. Can exceed 100% (growth beyond prior external volume) |
+| Migration % (overall) | Sum of in-house GMV for providers with a baseline / sum of their baseline monthly GMV |
+| Adoption | Providers with at least 1 in-house paid order in period / providers with a baseline |
+| No baseline | Providers without baseline rows are listed separately and excluded from migration % |
+
+## Known limitations
+- Migration % assumes baseline demand is stable; seasonality is not adjusted
+- External purchases made after go-live are not observed; migration is inferred from in-house growth against baseline
+- Real baseline source is not defined; CSV import is the interim mechanism

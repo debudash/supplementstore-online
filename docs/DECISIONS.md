@@ -1,0 +1,33 @@
+# DECISIONS.md - Architecture and product decision log
+
+Format: decision, options considered, trade-off, status. Approved = confirmed by the project owner.
+
+| ID | Decision | Options considered | Trade-off | Status |
+|---|---|---|---|---|
+| ADR-001 | Platform fee = 0.75% of patient-paid subtotal | Fee on margin; fee on COGS | Matches the PRD headline metric (GMV x 75 bps); simplest to explain | Approved |
+| ADR-002 | Provider bears the fee (deducted from margin); patient sees no fee line | Separate patient-facing fee | Clean patient experience; provider margin slightly lower | Approved |
+| ADR-003 | Integer cents everywhere; fee computed once per order, half-up; allocated to lines by largest remainder | Per-line rounding; banker's rounding; decimal library | Order fee is exact and line fees always sum to it; per-line rounding drifts by cents | Approved |
+| ADR-004 | Line margin after allocated fee must be >= 0; zero margin allowed | Allow negative lines if order is positive | Prevents providers unknowingly paying to sell; minimum price on a line is about COGS / 0.9925 | Approved |
+| ADR-005 | Price is canonical; margin % is an input mode that derives price | Store margin as canonical | One stored truth; margin % defined as (price - COGS) / price to match the owner's formula | Approved |
+| ADR-006 | Snapshot COGS and price at send; paid orders immutable; corrections are new journals | Recompute from catalog | Auditability: history never changes when catalog costs change | Approved |
+| ADR-007 | Append-only double-entry ledger, posted per line, enforced by DB triggers | Single split row per order | Every cent traceable to a SKU and account; slightly more rows | Approved |
+| ADR-008 | Idempotency key on pay; posting, status, and stock change in one transaction with row lock | Best-effort checks | No double charge or oversell under concurrency | Approved |
+| ADR-009 | Cerbo owns one inventory pool; restock lives under Cerbo Admin, labeled demo only | Per-practice inventory; provider admin restock | Matches PRD ("we hold the inventory"); provider-side restock would change stock for every practice | Approved |
+| ADR-010 | Provider and practice are separate entities, 1:1 in seed; ledger records provider (attribution) and practice (payee) | Single entity | One extra table now; avoids retrofitting an immutable ledger when payouts, admin roles, or provider departures need a practice | Approved |
+| ADR-011 | Stock check at add-to-cart (UX gate) plus reservation at send (7-day expiry) plus recheck at pay | Check at add only | Add-time check alone allows oversell while orders await payment | Approved |
+| ADR-012 | Refund returns 100% to patient; platform fee is retained and charged to the provider | Refund the fee; split the fee | Mirrors common payment-processor practice of keeping fees on refunds; some marketplaces refund commission instead. Must be disclosed in provider terms | Approved |
+| ADR-013 | Refund before fulfillment restocks; after fulfillment writes off and Cerbo bears COGS | Always restock; provider bears COGS | Returned ingestibles are generally not resellable. Risk: Cerbo absorbs COGS on post-fulfillment refunds; mitigated later by a refund policy; reason codes recorded now | Approved |
+| ADR-014 | Whole-order refunds only; late refunds post to the current period; closed statements never rewritten | Partial refunds; restating closed periods | Simpler v1; partial refunds are common in e-commerce and listed as next | Approved |
+| ADR-015 | Metrics computed from ledger cents; owner's margin formula used as reconciliation, applied per order | Blended margin % across orders | A single blended margin % misstates profit when margins vary | Approved |
+| ADR-016 | Payable report monthly by default, any range on demand; Cerbo Admin closes months into immutable statements | Live balance only | Gives a periodic artifact for payouts; payout itself stubbed | Approved |
+| ADR-017 | Recurring = schedule generating child orders per cycle; patient authorizes once; locked price, fresh COGS; on_hold on stock, margin, or auth failure | Single long-lived order | Each cycle is a normal, auditable order; on_hold surfaces cost increases instead of silently eating margin | Approved |
+| ADR-018 | Baseline from CSV import of historical marketplace orders; migration % = in-house GMV / baseline monthly average | Self-reported estimates | Measurable and repeatable; real source TBD (possibly existing marketplace integrations) | Approved |
+| ADR-019 | Synthetic demo data flagged `is_synthetic`, excluded from metrics by default, generated through real split and posting code, bypasses inventory, purgeable only via one guarded path | Separate demo database | Demo realism without polluting real metrics; one narrow exception to append-only | Approved |
+| ADR-020 | Stack: TypeScript, Node/Express, Knex, Postgres, Vue 3, Vitest, Docker, GitHub Actions, Railway | MySQL; NestJS; Prisma | Within Cerbo's stack; Postgres triggers and constraints enforce ledger rules in the database | Approved (defaults within owner's stack) |
+| ADR-021 | No formal time box; build in tier order; human review concentrated on money gates G1 to G4 | Fixed time box with cut line | Fits a one-day deadline with limited review time; tier order guarantees a working core if time runs out | Approved |
+| ADR-022 | Single Railway service serving API and built SPA, plus Railway Postgres | Separate web and api services | Fewer moving parts for a demo; split later if needed | Proposed |
+
+## Open business risks (for the final write-up)
+- Card processing typically costs well above 0.75%. If Cerbo absorbs processing fees, each order loses money. Pricing model must account for it.
+- Post-fulfillment refunds cost Cerbo full COGS while the provider loses only the fee.
+- Migration measurement depends on a trustworthy baseline source.
