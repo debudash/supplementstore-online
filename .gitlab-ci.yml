@@ -120,7 +120,12 @@ build-test:
     - name: postgres:16
       alias: postgres
   script:
-    - npm ci --prefer-offline || npm install
+    # Strict, reproducible install. NO `|| npm install` fallback: the fallback
+    # silently masked root lockfile drift, so every "green" pipeline was really
+    # green on npm install, never on npm ci. A green build-test here now proves the
+    # committed package-lock.json is actually in sync (and the Railway Dockerfile,
+    # which uses strict `npm ci`, will build).
+    - npm ci --prefer-offline
     - npm run lint
     - npm run typecheck
     - npm run build
