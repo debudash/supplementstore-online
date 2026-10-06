@@ -51,7 +51,7 @@ export function allocateFee(lines: AllocationLine[], orderFeeCents: number): num
     return { index, rem: num % subtotal, position: line.position };
   });
 
-  let leftover = orderFeeCents - baseSum;
+  const leftover = orderFeeCents - baseSum;
 
   // Distribute leftover cents to the largest remainders; ties -> lower position first.
   order.sort((a, b) => {
