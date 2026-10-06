@@ -1,0 +1,32 @@
+{
+  "name": "cerbo-supplement-store",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cerbo supplement store vertical slice - provider-dispensed supplement ordering with a double-entry ledger",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "vitest run --root tests/e2e --passWithNoTests",
+    "build": "npm run build --workspaces --if-present",
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "eslint": "^9.4.0",
+    "eslint-plugin-vue": "^9.26.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

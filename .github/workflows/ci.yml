@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guardrails:
+    name: Guardrails (AI-01 floats, AI-03 protected paths)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # AI-01: no float money. Fail if toFixed / parseFloat appear in money-sensitive code.
+      - name: AI-01 - no float money math
+        run: |
+          set -e
+          PATTERN='toFixed|parseFloat'
+          TARGETS="packages/money apps/api/src/ledger apps/api/src/payments apps/api/src/refunds apps/api/src/reports apps/api/src/orders"
+          FOUND=0
+          for d in $TARGETS; do
+            if [ -d "$d" ]; then
+              if grep -rnE "$PATTERN" "$d"; then
+                echo "::error::AI-01 violation: float money math in $d"
+                FOUND=1
+              fi
+            fi
+          done
+          if [ "$FOUND" = "1" ]; then exit 1; fi
+          echo "AI-01 check passed"
+
+      # AI-03: protected paths must not change without an explicit human-approval label.
+      - name: AI-03 - protected paths unchanged
+        env:
+          HAS_APPROVAL: ${{ contains(github.event.pull_request.labels.*.name, 'approved-protected-change') }}
+        run: |
+          set -e
+          PROTECTED='packages/money/test apps/api/test/invariants tests/e2e/golden AGENTS.md CLAUDE.md docs/SPEC.md docs/ARCHITECTURE.md docs/DECISIONS.md docs/METRICS.md docs/EVALS.md'
+          BASE="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE" ]; then
+            git fetch origin main --depth=1 || true
+            BASE=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
+          fi
+          if [ -z "$BASE" ]; then
+            echo "No base ref to diff against; skipping protected-path check."
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only "$BASE" HEAD)
+          HITS=""
+          for p in $PROTECTED; do
+            MATCH=$(echo "$CHANGED" | grep -E "^$p" || true)
+            if [ -n "$MATCH" ]; then HITS="$HITS\n$MATCH"; fi
+          done
+          if [ -n "$HITS" ]; then
+            echo -e "Protected paths changed:$HITS"
+            if [ "$HAS_APPROVAL" = "true" ]; then
+              echo "Human approval label present; allowing."
+            else
+              echo "::error::AI-03 violation: protected path changed without 'approved-protected-change' label"
+              exit 1
+            fi
+          else
+            echo "AI-03 check passed: no protected paths changed"
+          fi
+
+  build-test:
+    name: Lint, typecheck, unit + api tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cerbo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/cerbo
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit + API tests
+        run: npm test
