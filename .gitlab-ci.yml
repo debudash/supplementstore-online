@@ -165,15 +165,37 @@ deploy-railway:
     - when: never
   script:
     # RAILWAY_TOKEN (project-scoped) is read automatically from the environment.
-    # RAILWAY_SERVICE is optional: set it as a CI variable only if the project has
-    # more than one deployable service and `railway up` needs disambiguating.
+    # RAILWAY_SERVICE is the app service NAME; required because the project has more
+    # than one service (Postgres + the app) so `railway up` knows which to deploy to.
     - npm i -g @railway/cli
-    # `env -u CI` is deliberate. GitLab sets CI=true, and `railway up` treats CI=true
-    # (same as its --ci flag) as "stream build logs only, then exit" - it returns
-    # success as soon as the BUILD is queued, WITHOUT waiting for the app to run. That
-    # is the false green that let a crash-looping deploy (MODULE_NOT_FOUND at boot) pass
-    # as a successful pipeline. Unsetting CI runs `railway up` in attached mode, which
-    # waits for the deployment to reach a terminal state and exits non-zero if it failed
-    # or crashed - so a bad deploy now reds the pipeline. (Do NOT add --ci here; it is the
-    # opposite of what we want.)
-    - env -u CI railway up ${RAILWAY_SERVICE:+--service "$RAILWAY_SERVICE"}
+    # `railway up` returns once the deployment is QUEUED, not when the app is actually
+    # running. Verified at runtime: it exits a few seconds after upload, before the
+    # build/boot/healthcheck - even with CI unset. So `railway up` alone is NOT a gate;
+    # on its own it produced a false green while the app crash-looped (@cerbo/money
+    # MODULE_NOT_FOUND). The real gate is the health poll below.
+    - railway up ${RAILWAY_SERVICE:+--service "$RAILWAY_SERVICE"}
+    # GATE: poll the live health URL until it returns HTTP 200; fail the job if it never
+    # does, so a crashed or unhealthy deploy reds the pipeline. Fail LOUDLY (not skip) if
+    # the URL is unset - a silently skipped gate is how the earlier false green happened.
+    # Budget ~5 min (30 x 10s): `railway up` returns at queue time, so this must outlast
+    # the full remote Docker build (~2-3 min observed) plus container boot and edge/DNS
+    # propagation, with margin, without hanging the runner indefinitely.
+    - |
+      if [ -z "$RAILWAY_HEALTHCHECK_URL" ]; then
+        echo "RAILWAY_HEALTHCHECK_URL is not set - cannot verify the deploy is healthy."
+        echo "Failing loudly rather than skipping the post-deploy health gate."
+        exit 1
+      fi
+      echo "Polling $RAILWAY_HEALTHCHECK_URL for HTTP 200 (up to 30 attempts, 10s apart)..."
+      last="000"
+      for i in $(seq 1 30); do
+        last="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$RAILWAY_HEALTHCHECK_URL")" || true
+        echo "attempt $i/30: HTTP $last"
+        if [ "$last" = "200" ]; then
+          echo "Deploy healthy: $RAILWAY_HEALTHCHECK_URL returned 200."
+          exit 0
+        fi
+        sleep 10
+      done
+      echo "DEPLOY HEALTHCHECK FAILED: $RAILWAY_HEALTHCHECK_URL never returned 200 (last status: $last) after ~5 min."
+      exit 1
