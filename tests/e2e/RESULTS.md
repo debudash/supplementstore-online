@@ -5,7 +5,7 @@ PASS = asserted against real Postgres this run; PENDING = spec written, product 
 not yet merged (auto-enables when the named task lands); CUT = task cut from scope, cannot pass;
 FAIL = ran and a real expectation did not hold (a product finding - investigate, do not weaken).
 
-Totals: PASS 39 | PENDING 0 | CUT 4 | FAIL 0
+Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 
 | ID | Status | Area | Task | Scenario |
 |---|---|---|---|---|
@@ -27,7 +27,7 @@ Totals: PASS 39 | PENDING 0 | CUT 4 | FAIL 0
 | EVAL-07b | PASS | refund | T5 | refund again -> 409 ALREADY_REFUNDED |
 | EVAL-08 | PASS | refund | T5 | pay EVAL-02, fulfill, refund damaged: no restock (OMEGA stays 29); writeoff_cogs 2280 |
 | EVAL-08b | PASS | refund | T5 | refund a sent order -> 409 NOT_REFUNDABLE |
-| EVAL-09 | CUT | reports | T10 | admin metrics reconciliation (GMV/refunded/settled/fees/net margin) _(admin metrics endpoint is owned by T10 (cut); cannot pass in this slice)_ |
+| EVAL-09 | PASS | metrics | T10 | admin metrics (groupBy=provider): GMV 13496, refunded 8497, settled 4999, fee revenue 101, sunk fees 64, net margin 2682, net after sunk fees 2618; reconciliation passes |
 | EVAL-09b | PASS | reports | T8 | provider payables: credits 7090, debits 4472, closing 2618; refunded order nets -64 (ADR-012) |
 | EVAL-10 | PASS | reports | T8 | late refund of a closed-month order: M statement frozen (credits 4408); current period debits 4472, closing -64 (ADR-014/016) |
 | EVAL-11 | PASS | recurring | T9 | authorized cycle pays: recurring_cycle, fee 22, margin 1527, MAG on_hand -1; balanced PAYMENT journal via T4 path |
@@ -35,8 +35,8 @@ Totals: PASS 39 | PENDING 0 | CUT 4 | FAIL 0
 | EVAL-11c | PASS | recurring | T9 | unauthorized schedule run -> cycle on_hold NOT_AUTHORIZED, no journal |
 | EVAL-11d | PASS | recurring | T9 | raise MAG cogs to 3000, run cycle -> on_hold MARGIN_NEGATIVE (ADR-017 surfaced, not absorbed) |
 | EVAL-12 | PASS | privacy | T4 | GET /api/pay/:token strict whitelist; no cogs/fee/margin/provider economics |
-| EVAL-13 | CUT | demo | T10 | synthetic baseline + migration + reset; includeSynthetic toggle _(demo data generator/reset owned by T10 (cut))_ |
-| EVAL-15 | CUT | demo | T10 | DEMO_MODE=false -> /api/admin/demo/* returns 403 DEMO_DISABLED _(demo endpoints owned by T10 (cut); currently 501 stubs, not DEMO_DISABLED)_ |
+| EVAL-13 | PASS | demo | T10 | synthetic baseline + migration generated via real split/posting: includeSynthetic=false metrics identical before/after; =true surfaces migration %; reset purges synthetic to 0 and leaves real ledger untouched |
+| EVAL-15 | PASS | demo | T10 | DEMO_MODE=false -> every /api/admin/demo/* returns 403 DEMO_DISABLED |
 | RT-01 | PASS | redteam | T3/T4 | IDOR: another provider reads/edits an order -> 404, no leak |
 | RT-02 | PASS | redteam | T4 | bad/foreign patient token -> 404; tokens are 24 random bytes, no sequential ids |
 | RT-03 | PASS | redteam | T4 | client-sent amount/price at pay is ignored; charged snapshot subtotal |
@@ -50,11 +50,5 @@ Totals: PASS 39 | PENDING 0 | CUT 4 | FAIL 0
 | RT-11 | PASS | redteam | T2 | direct SQL UPDATE/DELETE on ledger tables -> trigger raises; synthetic purge gated |
 | RT-12 | PASS | redteam | T3 | SQL injection via sku / date filters -> parameterized, no injection, table intact _(CSV-import row validation portion belongs to T10 (cut) and is reported separately)_ |
 | RT-13 | PASS | redteam | T9 | recurring cycle triggered twice (concurrent) for the same period -> exactly ONE child order _(enforced by a schedule row lock + next_run_at due-gate, NOT a DB unique constraint (none exists on (schedule_id, cycle_number) in the approved data model))_ |
-| RT-14 | CUT | redteam | T10 | demo endpoints in production mode -> 403 DEMO_DISABLED |
+| RT-14 | PASS | redteam | T10 | demo endpoints refused in production mode (403 DEMO_DISABLED); no real data purged; payable_statements never deletable even with the purge flag set |
 | RT-15 | PASS | redteam | T4 | pay an expired order after reservation released -> 409 ORDER_EXPIRED; no oversell |
-
-## Not implemented - CUT from scope
-- EVAL-09 - T10: admin metrics reconciliation (GMV/refunded/settled/fees/net margin)
-- EVAL-13 - T10: synthetic baseline + migration + reset; includeSynthetic toggle
-- EVAL-15 - T10: DEMO_MODE=false -> /api/admin/demo/* returns 403 DEMO_DISABLED
-- RT-14 - T10: demo endpoints in production mode -> 403 DEMO_DISABLED

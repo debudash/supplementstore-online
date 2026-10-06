@@ -152,6 +152,55 @@ export function isStub(res: { status: number }): boolean {
   return res.status === 501
 }
 
+// ---------------------------------------------------------------------------
+// Fresh provider "world" helpers - for aggregate/global cases (metrics) that must be
+// deterministic regardless of what other specs leave in the shared DB. Each world is a
+// brand-new practice/provider/patient/user, so a provider-scoped aggregate sees only its
+// own orders.
+// ---------------------------------------------------------------------------
+export interface ProviderWorld {
+  practiceId: string
+  providerId: string
+  patientId: string
+  userId: string
+}
+
+/** Insert a fresh practice/provider/patient/user and return their ids. */
+export async function makeProviderWorld(tag = 't13'): Promise<ProviderWorld> {
+  const { randomUUID } = await import('node:crypto')
+  const practiceId = randomUUID()
+  const providerId = randomUUID()
+  const patientId = randomUUID()
+  const userId = `${tag}-${randomUUID().slice(0, 12)}`
+  await db('practices').insert({ id: practiceId, name: `${tag} Practice` })
+  await db('providers').insert({ id: providerId, practice_id: practiceId, name: `Dr. ${tag}`, email: `${userId}@example.com` })
+  await db('patients').insert({ id: patientId, practice_id: practiceId, name: `Pat ${tag}`, email: `${patientId}@example.com`, ship_to: '1 Test St' })
+  await db('users').insert({ id: userId, role: 'provider', provider_id: providerId, patient_id: null, display_name: `Dr. ${tag}` })
+  return { practiceId, providerId, patientId, userId }
+}
+
+/** Draft -> lines -> send -> pay as this world's provider, over HTTP. Returns the order id. */
+export async function payNewOrderAs(world: ProviderWorld, lines: Line[]): Promise<string> {
+  const { randomUUID } = await import('node:crypto')
+  const draft = await asUser(world.userId).post('/api/orders').send({ patientId: world.patientId })
+  expect(draft.status).toBe(201)
+  const orderId = draft.body.id as string
+  for (const l of lines) {
+    const r = await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, unitPriceCents: l.price })
+    expect(r.status).toBe(200)
+  }
+  const send = await asUser(world.userId).post(`/api/orders/${orderId}/send`).send({})
+  expect(send.status).toBe(200)
+  const pay = await anon.post(`/api/pay/${send.body.order.payToken}`).send({ idempotencyKey: randomUUID() })
+  expect(pay.status).toBe(200)
+  return orderId
+}
+
+/** Refund an order through the Cerbo Admin route. */
+export async function refundAsAdmin(orderId: string, reasonCode = 'patient_request') {
+  return asUser(ADMIN).post(`/api/admin/orders/${orderId}/refund`).send({ reasonCode })
+}
+
 /**
  * Register an eval/red-team case. On success the id is recorded `pass`; on a thrown
  * assertion it is recorded `fail` (a real product finding) and rethrown so vitest also

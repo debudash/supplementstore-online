@@ -64,7 +64,7 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'EVAL-08b', area: 'refund', task: 'T5', plan: 'live', summary: 'refund a sent order -> 409 NOT_REFUNDABLE' },
 
   // Reports / payables (T8, pending) and admin metrics (T10, cut).
-  { id: 'EVAL-09', area: 'reports', task: 'T10', plan: 'cut:T10', summary: 'admin metrics reconciliation (GMV/refunded/settled/fees/net margin)', note: 'T10 has now MERGED; implementable - awaiting orchestrator greenlight to add (held out of this pass per the agreed gate)' },
+  { id: 'EVAL-09', area: 'metrics', task: 'T10', plan: 'live', summary: 'admin metrics (groupBy=provider): GMV 13496, refunded 8497, settled 4999, fee revenue 101, sunk fees 64, net margin 2682, net after sunk fees 2618; reconciliation passes' },
   { id: 'EVAL-09b', area: 'reports', task: 'T8', plan: 'live', summary: 'provider payables: credits 7090, debits 4472, closing 2618; refunded order nets -64 (ADR-012)' },
   { id: 'EVAL-10', area: 'reports', task: 'T8', plan: 'live', summary: 'late refund of a closed-month order: M statement frozen (credits 4408); current period debits 4472, closing -64 (ADR-014/016)' },
 
@@ -76,8 +76,8 @@ export const MANIFEST: ManifestEntry[] = [
 
   // Privacy + demo isolation.
   { id: 'EVAL-12', area: 'privacy', task: 'T4', plan: 'live', summary: 'GET /api/pay/:token strict whitelist; no cogs/fee/margin/provider economics' },
-  { id: 'EVAL-13', area: 'demo', task: 'T10', plan: 'cut:T10', summary: 'synthetic baseline + migration + reset; includeSynthetic toggle', note: 'T10 has now MERGED; implementable - awaiting orchestrator greenlight to add (held out of this pass per the agreed gate)' },
-  { id: 'EVAL-15', area: 'demo', task: 'T10', plan: 'cut:T10', summary: 'DEMO_MODE=false -> /api/admin/demo/* returns 403 DEMO_DISABLED', note: 'T10 has now MERGED; implementable - awaiting orchestrator greenlight to add (held out of this pass per the agreed gate)' },
+  { id: 'EVAL-13', area: 'demo', task: 'T10', plan: 'live', summary: 'synthetic baseline + migration generated via real split/posting: includeSynthetic=false metrics identical before/after; =true surfaces migration %; reset purges synthetic to 0 and leaves real ledger untouched' },
+  { id: 'EVAL-15', area: 'demo', task: 'T10', plan: 'live', summary: 'DEMO_MODE=false -> every /api/admin/demo/* returns 403 DEMO_DISABLED' },
 
   // RT-A application attacks.
   { id: 'RT-01', area: 'redteam', task: 'T3/T4', plan: 'live', summary: 'IDOR: another provider reads/edits an order -> 404, no leak' },
@@ -93,7 +93,7 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'RT-11', area: 'redteam', task: 'T2', plan: 'live', summary: 'direct SQL UPDATE/DELETE on ledger tables -> trigger raises; synthetic purge gated' },
   { id: 'RT-12', area: 'redteam', task: 'T3', plan: 'live', summary: 'SQL injection via sku / date filters -> parameterized, no injection, table intact', note: 'CSV-import row validation portion belongs to T10 (cut) and is reported separately' },
   { id: 'RT-13', area: 'redteam', task: 'T9', plan: 'live', summary: 'recurring cycle triggered twice (concurrent) for the same period -> exactly ONE child order', note: 'enforced by a schedule row lock + next_run_at due-gate, NOT a DB unique constraint (none exists on (schedule_id, cycle_number) in the approved data model)' },
-  { id: 'RT-14', area: 'redteam', task: 'T10', plan: 'cut:T10', summary: 'demo endpoints in production mode -> 403 DEMO_DISABLED', note: 'T10 has now MERGED; implementable - awaiting orchestrator greenlight to add (held out of this pass per the agreed gate)' },
+  { id: 'RT-14', area: 'redteam', task: 'T10', plan: 'live', summary: 'demo endpoints refused in production mode (403 DEMO_DISABLED); no real data purged; payable_statements never deletable even with the purge flag set' },
   { id: 'RT-15', area: 'redteam', task: 'T4', plan: 'live', summary: 'pay an expired order after reservation released -> 409 ORDER_EXPIRED; no oversell' }
 ]
 
