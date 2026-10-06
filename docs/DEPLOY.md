@@ -2,7 +2,7 @@
 
 Verify each step against Railway's current dashboard and docs; names may drift.
 
-> T12 status (2026-10-06): image built and verified locally against Postgres, including strict `npm ci` on updated `main` (see "Verified locally"). Deploy path approved by the owner: **Path A - a GitLab CI job on `main` runs `railway up`** and Railway builds our `Dockerfile`. The deploy build is now proven reproducible, but the deploy is NOT live until the owner creates the Railway project + Postgres and adds the `RAILWAY_TOKEN` CI variable, and the real-migration boot re-verification is still OUTSTANDING pending T2 (gate G2). The live deploy is human gate G5. Do not deploy, create accounts, or spend without the owner.
+> T12 status (2026-10-06): image built and verified locally against Postgres, including strict `npm ci` on updated `main` AND the real-migration boot against T2's merged schema + seed (see "Verified locally"). Deploy path approved by the owner: **Path A - a GitLab CI job on `main` runs `railway up`** and Railway builds our `Dockerfile`. The deploy build is now proven end to end against the actual migrations and seed. The remaining steps are owner-side: create the Railway project + Postgres and add the `RAILWAY_TOKEN` CI variable; the deploy fires on the next main pipeline once the token exists. The live deploy is human gate G5. Do not deploy, create accounts, or spend without the owner.
 
 ## Topology
 - One Railway service built from the repo `Dockerfile` (the API serves the built Vue SPA).
@@ -62,7 +62,15 @@ Re-verified 2026-10-06 on updated `main` (after the root lockfile was synced wit
 - The SPA is served at `/` (built `apps/web/dist`); unknown `/api/*` routes return the standard 404 envelope.
 - `process.env.PORT` is honored (verified binding to an injected `PORT`, e.g. 8080), which is how Railway assigns the listen port.
 
-**OUTSTANDING - real-migration boot re-verification (hard prerequisite for G5):** every check above used a ZERO-migration boot. T2's migrations and seed are not yet merged (gate G2, awaiting the owner's `approved-protected-change` label). Once T2 lands, the image must be re-run against the real migrations + real seed to confirm the boot migrates, seeds a non-empty `products` table, and `GET /api/health` returns 200. Zero-migration boot is not the same test, and the deploy must not be called verified without it.
+### Real-migration boot - VERIFIED 2026-10-06 (after T2 merged, gate G2, merge e2cce72)
+The image was rebuilt on `main` with T2's real schema + seed present and booted against Postgres. Actual results (not expectations):
+- `migrate.latest()` applied all 5 T2 migrations cleanly, loaded as compiled `.js` (confirming the production contract below): `20261005120001_reference_and_catalog.js`, `20261005120002_orders_and_inventory.js`, `20261005120003_ledger.js`, `20261005120004_reports_and_baseline.js`, `20261005120005_protections.js`.
+- Seed-if-empty RAN this time (boot logged "products table empty; running seeds") and populated the catalog to match the `docs/EVALS.md` seed table exactly: `products` = 5 - MAG-GLY-120 (cogs 1450, on_hand 50), VITD3-K2 (1125, 40), OMEGA3-1000 (2280, 30), PROBIO-50B (2675, 5), ZINC-30 (690, 0); all `reserved_qty` = 0. Also `practices` = 2, `providers` = 2, `patients` = 2, `users` = 5.
+- Idempotency: a second boot against the same database logged "products table has 5 rows; skipping seed", `migrate.latest()` was a no-op, no errors, and `products` stayed at 5 (no duplicate seeding).
+- `GET /api/health` returned `200 {"status":"ok","db":{"connected":true}}`; the SPA still served at `/`; `process.env.PORT` still honored.
+- Strict `npm ci` still succeeded in the image on this updated `main` ("added 420 packages").
+
+The real-migration path is now exercised and passing, so the deploy build is proven end to end against the actual schema and seed. The only remaining steps for the live deploy (G5) are owner-side: add `RAILWAY_TOKEN` and create the Railway project + Postgres.
 
 ## Cost
 Railway has no permanent free tier. New users get a one-time 5 USD trial credit. The Hobby plan is 5 USD/month and includes 5 USD of usage; a small always-on API + Postgres typically adds a few USD of usage on top. The owner approved Hobby plus small usage. The worker does not spend anything.
