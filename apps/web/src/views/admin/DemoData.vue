@@ -9,6 +9,7 @@ import { ref } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
 import { currentUserId } from '../../api/session'
 import DemoBadge from '../../components/DemoBadge.vue'
+import { formatCents } from '../../components/order/format'
 import type {
   BaselineImportResult,
   BaselineRegenerateResult,
@@ -62,7 +63,7 @@ const generateMigration = () =>
         method: 'POST',
         body: { seed: seed.value, months: migrationMonths.value }
       }),
-    (r) => `Generated ${r.orderCount} synthetic order(s), GMV ${(r.gmvCents / 100).toLocaleString('en-US')} dollars.`
+    (r) => `Generated ${r.orderCount} synthetic order(s), GMV ${formatCents(r.gmvCents)}.`
   )
 
 const reset = () =>
