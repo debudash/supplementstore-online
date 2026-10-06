@@ -34,13 +34,25 @@ cache:
   paths:
     - .npm/
 
-# AI-01: no float money. Fail if toFixed / parseFloat appear in money-sensitive code.
+# AI-01: no float money (AGENTS.md money rule 1). Fail if a float-formatting CALL
+# appears in money-sensitive code. We match call syntax, not bare tokens, so a comment
+# or string merely naming "toFixed"/"parseFloat" no longer trips the guard (that false
+# positive once skipped build-test repo-wide). Matched calls:
+#   x.toFixed(          .toFixed\s*\(
+#   parseFloat(         \bparseFloat\s*\(   (also covers Number.parseFloat's trailing call)
+#   Number.parseFloat(  \bNumber\.parseFloat\s*\(   (explicit, so the form is never missed)
+# Math.round is intentionally NOT grepped: rule 1 forbids it on dollar values, but a
+# regex cannot tell a dollar argument from legitimate integer/non-money rounding (e.g.
+# days, percentages, chart values in reports), and with only_allow_merge_if_pipeline_succeeds
+# a false positive would hard-block every merge. Math.round-on-money is caught instead by
+# packages/money's property tests and code review (all money math must route through
+# packages/money). Searched scope is unchanged: money, ledger, payments, refunds, reports.
 ai01-floats:
   stage: guardrails
   script:
     - |
       set -e
-      PATTERN='toFixed|parseFloat'
+      PATTERN='\.toFixed\s*\(|\bparseFloat\s*\(|\bNumber\.parseFloat\s*\('
       TARGETS="packages/money apps/api/src/ledger apps/api/src/payments apps/api/src/refunds apps/api/src/reports apps/api/src/orders"
       FOUND=0
       for d in $TARGETS; do

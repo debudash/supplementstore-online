@@ -18,11 +18,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      # AI-01: no float money. Fail if toFixed / parseFloat appear in money-sensitive code.
+      # AI-01: no float money (AGENTS.md money rule 1). Match float-formatting CALL
+      # syntax, not bare tokens, so a comment/string naming "toFixed"/"parseFloat" does
+      # not trip the guard. Matches: x.toFixed(, parseFloat(, Number.parseFloat(.
+      # Math.round is intentionally not grepped (a regex cannot distinguish a dollar
+      # argument from legitimate integer rounding; enforced via packages/money tests and
+      # review). Kept equivalent in intent to .gitlab-ci.yml, which is the executing pipeline.
       - name: AI-01 - no float money math
         run: |
           set -e
-          PATTERN='toFixed|parseFloat'
+          PATTERN='\.toFixed\s*\(|\bparseFloat\s*\(|\bNumber\.parseFloat\s*\('
           TARGETS="packages/money apps/api/src/ledger apps/api/src/payments apps/api/src/refunds apps/api/src/reports apps/api/src/orders"
           FOUND=0
           for d in $TARGETS; do
