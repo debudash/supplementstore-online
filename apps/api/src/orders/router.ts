@@ -6,7 +6,8 @@ import { Router, type Request, type Response } from 'express'
 import { db } from '../db/knex'
 import { createSeams } from '../seams'
 import { notImplemented } from '../http'
-import { handleError } from './errors'
+import { loadAudit } from '../ledger'
+import { handleError, notFound } from './errors'
 import {
   createDraft,
   addLine,
@@ -92,6 +93,22 @@ ordersRouter.post('/:id/cancel', async (req: Request, res: Response) => {
   }
 })
 
-// Owned by T5 (refund) and T4 (audit): left as 501 stubs until those tasks land.
+// Refund stays a 501 stub until T5. The audit route is implemented by T4 (FR-7 AC1):
+// T3 pre-registered this route as a stub explicitly reserved for T4. The audit query
+// itself lives in the T4-owned ledger module; this handler only does the provider
+// ownership check (not owned -> 404, no existence leak; RT-01) and delegates.
 ordersRouter.post('/:id/refund', (_req, res) => notImplemented(res, 'POST /api/orders/:id/refund'))
-ordersRouter.get('/:id/audit', (_req, res) => notImplemented(res, 'GET /api/orders/:id/audit'))
+
+ordersRouter.get('/:id/audit', async (req: Request, res: Response) => {
+  try {
+    const actor = actorOf(req)
+    const audit = await loadAudit(db, req.params.id)
+    if (!audit || audit.order.providerId !== actor.providerId) {
+      handleError(res, notFound('No such order', { orderId: req.params.id }))
+      return
+    }
+    res.status(200).json(audit)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
