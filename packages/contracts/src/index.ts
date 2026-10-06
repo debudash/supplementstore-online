@@ -35,3 +35,10 @@ export interface ApiError {
     details?: Record<string, unknown>
   }
 }
+
+// Per-module contract re-exports. Every file under packages/contracts/src/ is surfaced
+// here so consumers import request/response types from '@cerbo/contracts' (one source of
+// truth, no local mirrors). Each module's task adds its own line as its file lands.
+// Present now: orders (T3), patients (T3). T4 adds payments and audit; T5 adds refunds; etc.
+export * from './orders'
+export * from './patients'
