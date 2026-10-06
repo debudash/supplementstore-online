@@ -8,10 +8,26 @@
 // ledger tables cannot be deleted except through the synthetic-purge path, which is
 // itself under test. CI runs against a fresh database each pipeline, so leftover
 // synthetic fixtures are harmless.
+import { execFileSync } from 'node:child_process'
+import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { db } from '../../src/db/knex'
 import { seedCore } from '../../src/db/seeds/01_core'
+
+// Apply migrations through the tsx-powered CLI (the same path as `npm run db:migrate`
+// and server boot), NOT via db.migrate.latest() here: knex would try to import the
+// `.ts` migration files directly, which the plain Node runtime under vitest cannot
+// parse. The CLI runs under tsx, so it loads `.ts` fine, and `migrate latest` is
+// idempotent against a fresh CI service DB or an already-migrated local DB.
+const apiRoot = path.resolve(__dirname, '../..')
+function migrateViaCli(): void {
+  execFileSync('npm', ['run', 'db:migrate'], {
+    cwd: apiRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32'
+  })
+}
 
 // Shared fixtures (a practice, provider, patient, and a draft order to hang journals on).
 const practiceId = randomUUID()
@@ -34,7 +50,7 @@ async function makeOrder(isSynthetic = true): Promise<string> {
 }
 
 beforeAll(async () => {
-  await db.migrate.latest()
+  migrateViaCli()
   await db('practices').insert({ id: practiceId, name: 'Invariant Test Practice' })
   await db('providers').insert({
     id: providerId,
