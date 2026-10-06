@@ -138,6 +138,30 @@ build-test:
     - npm run build
     - npm test
 
+# E2E + red-team suite (docs/EVALS.md, docs/RED_TEAM.md RT-A) against real Postgres.
+# Owned by T13; required by AGENTS.md section 2 ('npm run test:e2e' must exist and pass)
+# and T13's acceptance ('runs in CI as npm run test:e2e'). It had never executed in CI -
+# only on a worker's laptop - so the project's most important evidence was unverified on
+# a clean machine. Wired here as a SEPARATE job (option b) so an e2e failure reads as an
+# e2e failure in the pipeline view, distinct from unit/api. `needs: []` so it always runs
+# and reports independently, in parallel with build-test. No allow_failure: a failing
+# EVAL/RT case reds the pipeline (and blocks the deploy stage, which waits on `test`).
+# Same Postgres 16 service and inherited env (DATABASE_URL etc.) as build-test; the suite
+# applies migrations/seed itself in beforeAll (like the api suite), so no explicit db step.
+# `npm run build` first so @cerbo/money (and contracts) dist exists for the app the suite
+# exercises. Until T13 lands, tests/e2e holds only a placeholder and `test:e2e` passes with
+# --passWithNoTests, so this job is correct now and becomes real evidence when T13 merges.
+e2e:
+  stage: test
+  needs: []
+  services:
+    - name: postgres:16
+      alias: postgres
+  script:
+    - npm ci --prefer-offline
+    - npm run build
+    - npm run test:e2e
+
 # Deploy to Railway on merge to main (docs/DEPLOY.md, Path A). Railway's native Git
 # integration is GitHub-only and cannot source from this self-hosted GitLab remote, so
 # we deploy from CI: the Railway CLI uploads the repo and Railway builds the Dockerfile.
