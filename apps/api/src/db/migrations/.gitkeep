@@ -1,2 +1,0 @@
-# Knex migrations live here. Owned by T2 (schema, migrations, protections, seed).
-# T0 leaves this directory empty on purpose - the knex config points here.
