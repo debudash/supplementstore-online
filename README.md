@@ -6,17 +6,22 @@ append-only double-entry ledger: cost of goods to Cerbo, margin to the provider,
 and a 0.75% platform fee to Cerbo.
 
 This repository is a vertical slice, not a product. It builds the core money flow
-end to end (order, payment, ledger, audit, refund) and leaves everything outside
-that flow as a clearly marked stub or a documented cut.
+end to end (order, payment, ledger, audit, refund) plus recurring orders, Cerbo Admin
+metrics and the migration report, and the demo tooling, and it keeps every external
+integration behind a clearly marked stub.
 
 Live demo: https://cerbo-api-production.up.railway.app
 Health endpoint: https://cerbo-api-production.up.railway.app/api/health
 
-> Status note (2026-10-06): every Tier 1 and Tier 2 task is merged. Three Tier 3
-> tasks were cut for time (recurring orders, admin metrics/demo data, admin
-> inventory/operations); they are listed honestly under "What was deliberately
-> cut". The eval and red-team pass counts below come from the CI-run suite, not a
-> local claim. See "Build status" at the bottom.
+> Status note (2026-10-06): every task in the plan is merged, including all of Tier 3.
+> Tier 3 (recurring orders, admin metrics and demo data, admin inventory and operations)
+> was initially cut for time and then reinstated and completed when the build finished
+> early, so the cut list is now empty. The eval and red-team suite covers every id in the
+> specification - 43 pass, 0 fail, 0 cut - and those counts come from the CI-run suite,
+> not a local claim. See "Build status" at the bottom. The final UI follow-up (styling,
+> DEMO badges, pay-link recovery, My Orders) has now merged too; the one caveat is that the
+> author has not clicked through every styled screen, so the owner confirms visual polish at
+> gate G5.
 
 ## The business problem
 
@@ -189,6 +194,17 @@ the product:
   and Cerbo bears that loss (also a business risk below). Reason codes are recorded.
 - **ADR-014 - Whole-order refunds only; late refunds post to the current period; closed
   statements are never rewritten.**
+- **ADR-015 - Metrics are summed from per-order ledger cents, with the owner's margin formula
+  used only as a per-order reconciliation check.** A single blended margin percent across orders
+  with different margins misstates profit, so the report sums real cents and uses the formula to
+  verify them.
+- **ADR-017 - Recurring is a schedule that generates one child order per cycle.** Each cycle
+  takes the schedule's locked prices but a fresh COGS snapshot, and if stock is short, the margin
+  would go negative, or the schedule is not authorized, the cycle is parked `on_hold` with a
+  reason rather than silently absorbing the problem.
+- **ADR-018 - Migration off marketplaces is measured against a CSV-imported baseline.** Migration
+  percent is in-house GMV divided by the baseline monthly average. The real baseline source is
+  still to be defined (a business risk below).
 - **ADR-023 - Refunded patients are told to keep or safely dispose of the product; no returns
   are accepted.** Returned ingestibles are not resellable anyway (ADR-013), so accepting
   returns would pay return shipping for stock that is written off regardless, and telling the
@@ -220,55 +236,71 @@ Other stubs:
   24-byte token in the URL, not a header. Every route still enforces role and ownership
   (a resource the actor does not own returns 404, not 403, so existence is not leaked).
 
-Routes that still return `501 NOT_IMPLEMENTED` on `main`. Every one belongs to a task that
-was cut (see "What was deliberately cut"); nothing on the core flow is stubbed:
+Only one route still returns `501 NOT_IMPLEMENTED` on `main`:
 
-- `GET /api/admin/metrics`, `POST /api/admin/demo/baseline/regenerate`,
-  `POST /api/admin/demo/migration/generate`, `POST /api/admin/demo/reset`,
-  `POST /api/admin/baseline/import` - T10 admin metrics and demo data. CUT.
-- `GET /api/admin/inventory`, `POST /api/admin/inventory/:sku/restock` - T11 admin
-  inventory. CUT.
-- `POST /api/admin/jobs/expire-reservations`, `POST /api/admin/jobs/run-due-schedules` -
-  T11 admin job endpoints. CUT. (The reservation-expiry logic itself runs: it is wired to the
-  in-process 60s timer and exercised by EVAL-14; only the on-demand admin HTTP trigger is
-  stubbed.)
-- `GET/POST /api/schedules`, `POST /api/schedules/:id/(pause|resume|cancel|run)`,
-  `GET/POST /api/pay/schedule/:token`, `.../authorize` - T9 recurring orders. CUT.
+- `POST /api/admin/jobs/run-due-schedules` - the admin console's on-demand "run every due
+  recurring cycle now" button. The recurring engine behind it (`runDueSchedules`) is merged and
+  works; this one admin HTTP trigger was simply never wired to it. Recurring cycles still run two
+  ways that are wired: the provider action `POST /api/schedules/:id/run`, and the per-schedule
+  run exercised by EVAL-11. The sibling job endpoint `POST /api/admin/jobs/expire-reservations`
+  is wired.
 
-Everything on the core flow is implemented and merged: order build and send, patient pay
-(page and routes, T7), payment and ledger posting, audit, refunds and fulfillment (T5), and
-the provider sales dashboard and payable reports including month close (T8). The admin
-fulfill, refund, and audit routes are also wired.
+Everything else is implemented and merged: order build and send, patient pay, payment and
+ledger posting, audit, refunds and fulfillment, the provider sales dashboard and payable
+reports with month close, recurring schedules, Cerbo Admin metrics and the migration report,
+CSV baseline import, the guarded demo reset, and admin inventory restock.
 
-## What was deliberately cut, and what is next
+## Tier 3: cut, then reinstated
 
-These were cut for time against a one-day deadline, under the owner's rule to stop starting
-Tier 3 work if time runs short (ADR-021). They are cuts, not failures, and are listed
-honestly:
+The owner's rule (ADR-021) was to build in tier order and stop starting Tier 3 work if time
+ran short, so the three Tier 3 tasks - recurring orders, Cerbo Admin metrics and demo data,
+and Cerbo Admin inventory and operations - were cut partway through. The build finished the
+core and Tier 2 ahead of schedule, so Tier 3 was reinstated and completed. All three are now
+merged, and the eval suite covers them. Nothing in the plan is cut. That is the honest story,
+and it is a better one than the earlier draft told.
 
-- **T9 - Recurring orders (FR-12).** A schedule that generates a child order each cycle with
-  a fresh COGS snapshot and locked prices, a one-time patient authorization, and an on-hold
-  path when stock or margin fails. To finish: the schedule and cycle services, the
-  `run-due-schedules` job, the authorize page, and EVAL-11 to 11d. The schema tables already
-  exist; the reason it is safe to cut is that the core one-off order path it would reuse is
-  done.
-- **T10 - Cerbo Admin metrics, baseline import, and demo data (FR-13, FR-14).** The GMV and
-  migration dashboard, CSV baseline import, synthetic demo-data generation through the real
-  posting code, and the synthetic-only reset. To finish: the metric queries in
-  `docs/METRICS.md`, the CSV validator, the demo generator using the Clock seam, and
-  EVAL-09, 13, 15. Cut because it is Tier 3 and sits on top of reports (T8).
-- **T11 - Cerbo Admin inventory and operations console (FR-9 UI, FR-15, admin refund/fulfill
-  buttons).** Demo restock with movement records, and buttons for fulfill, refund, and
-  running the jobs. The fulfill, refund, and audit backend routes are already wired (T5/T4);
-  what is cut is the admin UI and the demo-only restock endpoint (providers must get 403), plus
-  the on-demand HTTP job triggers. To finish: the restock endpoint and the admin console views.
+## What the slice does beyond the core flow
 
-Also out of scope by design (`docs/SPEC.md` "Out of scope"), with what each would take next:
+These capabilities are implemented and merged, and each is covered by at least one eval
+(see `tests/e2e/RESULTS.md`):
 
-- **Partial (line-level) refunds** - the ledger already supports them; only whole-order
-  refunds are wired. Next: a line-selection UI and a partial posting path.
+- **Recurring orders (FR-12, ADR-017).** A provider creates a schedule for a patient with
+  locked line prices and an interval. Each cycle creates a child order (`kind =
+  recurring_cycle`) with a fresh COGS snapshot, reusing the same payment and posting path as a
+  one-off order, so every cycle is a normal auditable order. If stock is short, the margin would
+  go negative, or the patient has not authorized the schedule, the cycle is parked `on_hold`
+  with a reason instead of silently charging or absorbing a loss (EVAL-11 to 11d).
+- **Cerbo Admin metrics with a synthetic toggle (FR-13, ADR-015).** GMV, refunded GMV, settled
+  GMV, platform fee revenue, sunk fees, provider net margin, and the migration view, all summed
+  from ledger cents. Each figure carries the per-order reconciliation check, and an
+  `includeSynthetic` toggle (default off) decides whether demo rows are counted (EVAL-09, 13).
+- **CSV baseline import and the migration percentage (FR-14, ADR-018).** A Cerbo Admin uploads
+  historical marketplace volume as CSV; rows are validated one by one and bad rows are reported
+  rather than inserted. Migration percent is then in-house GMV against the baseline monthly
+  average.
+- **Guarded demo reset.** The demo data tools generate synthetic baseline and migration activity
+  through the real split and posting code (backdated via the `Clock` seam, flagged
+  `is_synthetic`, never touching inventory), and the reset purges only `is_synthetic` rows
+  through the one narrow append-only exception. Real ledger rows are untouched, and
+  `payable_statements` are never deletable even with the purge flag set (EVAL-13, EVAL-15, RT-14).
+- **Admin inventory restock, labeled demo only (FR-15, ADR-009).** Cerbo Admin can raise a SKU's
+  on-hand stock, recorded as an inventory movement with the actor. Providers get 403. The control
+  carries a demo badge because real stock would come from procurement.
+- **Patient My Orders view.** A patient has a page listing their orders, not just the single
+  pay link.
+- **Provider-recoverable pay links.** The patient pay link can be recovered later from the
+  provider's Orders list and the order audit view (both now render a copy control bound to the
+  order's pay path), so a demo does not depend on copying the link at the moment the order is
+  sent. The link is also reachable via the send response and the Notifier stub log.
+
+### Still out of scope by design
+
+From `docs/SPEC.md` "Out of scope"; none of these is a cut, they were never in scope:
+
+- **Partial (line-level) refunds** - the ledger supports them, but only whole-order refunds are
+  wired. Next: a line-selection UI and a partial posting path.
 - **Refund policy enforcement** - only reason codes are recorded; no rules are applied.
-- **A real job scheduler** - demo endpoints stand in for cron; next is a real scheduler.
+- **A real job scheduler** - the admin "run jobs" endpoints stand in for cron.
 - **A real baseline source** - CSV import is the interim mechanism; the real source for
   historical marketplace volume is undefined.
 - **A card-processing cost model** - processing fees are ignored in this slice (see risks).
@@ -337,36 +369,67 @@ Several failures passed CI and were only caught by independently exercising the 
 
 ## Build status
 
-As of 2026-10-06, merged to `main`: T0 (scaffold, CI, seams, auth stub), T1 (`packages/money`,
-gate G1), T2 (schema, migrations, DB protections, seed, gate G2), T3 (order lifecycle,
-inventory, `GET /api/patients`), T4 (patient payment, per-line ledger posting, audit, gate G3),
-T5 (refunds and fulfillment, gate G4), T6 (provider UI), T7 (patient pay page and recurring
-authorize UI), T8 (provider dashboard and payable reports), T12 (Railway deploy), T13 (end-to-end
-eval and red-team suite), and `docs/DIAGRAMS.md`. The three cut tasks (T9, T10, T11) are listed
-above.
+As of 2026-10-06, every task in the plan is merged to `main`: T0 (scaffold, CI, seams, auth
+stub), T1 (`packages/money`, gate G1), T2 (schema, migrations, DB protections, seed, gate G2),
+T3 (order lifecycle, inventory, `GET /api/patients`), T4 (patient payment, per-line ledger
+posting, audit, gate G3), T5 (refunds and fulfillment, gate G4), T6 (provider UI), T7 (patient
+pay page and recurring authorize UI), T8 (provider dashboard and payable reports), T9 (recurring
+orders), T10 (Cerbo Admin metrics, baseline import, demo data), T11 (Cerbo Admin inventory and
+operations), T12 (Railway deploy), T13 (end-to-end eval and red-team suite), and
+`docs/DIAGRAMS.md`.
+
+The final UI follow-up (styling pass, DEMO badges on the admin views, the pay-link copy control,
+and the My Orders list rendering real data) has merged; see the scope note under "User interface"
+for the one remaining caveat (visual polish is owner-confirmed at gate G5, not author-verified).
 
 The setup and run commands in this README were verified on a clean checkout on 2026-10-06:
 `npm install`, `npm run db:migrate`, `npm run db:seed` (seeds exactly the 5-SKU catalog, 2
 practices, 2 providers, 2 patients, 5 users), `npm run typecheck`, `npm run lint`, `npm run
 build`, and `npm test` (101 api and unit tests plus 24 web tests) all passed. `docker compose up
--d db` is the documented way to start Postgres.
+-d db` is the documented way to start Postgres. (That verification run predates the final Tier 3
+merges; the eval results below are the authoritative post-merge check.)
 
 ### Eval and red-team results (CI-verified)
 
 These counts are from the `e2e` CI job against real Postgres, not a local run. The full
 id-by-id table is `tests/e2e/RESULTS.md`; read it rather than trusting this summary.
 
-**Totals: PASS 34, FAIL 0, PENDING 0, CUT 9.**
+**Totals: PASS 43, FAIL 0, PENDING 0, CUT 0 - every EVAL and RT id in the specification is
+covered.**
 
-- **Passed (34):** money EVAL-01, 02, 03, 04, 04b, P1; inventory EVAL-05, 05b, 05c, 14;
-  payment and ledger EVAL-06, 06b, 06c, 06d, 12; refunds EVAL-07, 07b, 08, 08b; reports
-  EVAL-09b, 10; red-team RT-01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 15.
-- **Cut (9), because the owning task was cut:** recurring EVAL-11, 11b, 11c, 11d and RT-13 (T9);
-  admin metrics and demo EVAL-09, 13, 15 and RT-14 (T10). These cannot pass in this slice; they
-  are reported as cut, not as failures.
+The passing set spans the money core, inventory and reservations, payment and ledger,
+refunds, provider reports, recurring cycles including the `on_hold` paths, Cerbo Admin metrics
+with the reconciliation check, synthetic demo data and the guarded reset, and the full
+red-team suite (IDOR, token brute force, client-supplied amounts, parallel pay and refund,
+concurrent oversell, injection, ledger-tamper, and demo-in-production). There are no cut or
+pending ids.
 
-Every money, inventory, payment, ledger, refund, privacy, and concurrency red-team case that is
-in scope passes. The only non-passing ids are the ones whose feature was deliberately cut.
+## User interface and the demo-badge convention
+
+`AGENTS.md` section 10 says "basic usable layout only, no styling work". The owner approved an
+explicit exception for this submission: a styling pass was applied so the app reads as a
+finished piece rather than a wireframe. This is an owner-approved deviation from the no-styling
+guardrail, recorded here so it is not mistaken for scope creep.
+
+The styling pass comes with one honest convention. Every control that exists only to make the
+slice demonstrable carries a violet **DEMO** badge with a tooltip saying what the real system
+would do instead. The badge (`apps/web/src/components/DemoBadge.vue`, violet on purpose so it is
+never confused with a data state) marks, among others:
+
+- the role switcher, which stands in for real authentication,
+- the pay-link copy control, which stands in for an email or SMS to the patient,
+- the admin run-job buttons, which stand in for a real scheduler,
+- admin inventory restock, which stands in for procurement,
+- the demo data tools, which generate and reset synthetic data.
+
+The point of the convention is that a reviewer can tell a demo affordance from production design
+at a glance, so no demo-only control is misread as a design flaw.
+
+Scope note: the styling pass, the DEMO badges on the admin views, the pay-link copy control, and
+the My Orders list rendering real data have all merged (the Orders list and the order audit view
+now render a pay-link copy control, and My Orders fetches `GET /api/patient/orders`). The caveat
+is only that the author of this README has not personally clicked through every styled screen, so
+treat the visual polish as merged but owner-confirmed at gate G5 rather than author-verified.
 
 ## Repository map
 

@@ -4,12 +4,14 @@ A step-by-step script someone can follow live without improvising. It uses the e
 seed data, so the expected numbers are printed at every step; if a number on screen does
 not match, something is wrong and you can see it immediately.
 
-> Status note (2026-10-06): every step below is implemented and merged to `main`. The only
-> admin features that are not in the build (metrics, demo data, restock, on-demand job
-> buttons) are called out in Act 6 as cut, with the reason. Run the live demo against the
-> deployment produced by the final merge-to-`main`; if you are demoing before that deploy
+> Status note (2026-10-06): every step below is implemented and merged to `main`, including
+> recurring orders and all the Cerbo Admin screens (nothing is cut). Run the live demo against
+> the deployment produced by the final merge-to-`main`; if you are demoing before that deploy
 > lands, run locally. The expected numbers come from `docs/EVALS.md` and the CI-verified
-> `tests/e2e/RESULTS.md`.
+> `tests/e2e/RESULTS.md` (PASS 43, FAIL 0, CUT 0). The final UI follow-up (styling, DEMO badges on
+> admin views, the pay-link copy control, and the My Orders list) has merged; the only caveat is
+> that the author has not clicked through every styled screen, so the owner confirms visual polish
+> live at gate G5.
 
 ## Before you start
 
@@ -67,7 +69,12 @@ margin of 50% (5000 bps). The derived unit price should be exactly **2900**. (Th
 
 Now click **Send**. The order moves to `sent`, stock for the two SKUs is reserved, and the
 UI shows a **copyable patient pay link** (the Notifier stub also logs the link to the server
-console). Copy that link - the patient uses it in Act 3.
+console). The patient uses this link in Act 3.
+
+You do not have to copy the link at this exact moment. It can be recovered later from the
+provider **Orders** list and from the order **Audit** view (both render a copy control bound to
+the order's pay path), so if you miss it or it scrolls away you can get it back. The link is also
+in the send response and the server console log.
 
 ## Act 2 - The guardrails (show these fail on purpose)
 
@@ -157,30 +164,82 @@ Post-fulfillment contrast (optional, EVAL-08, also a CI-verified pass): pay the 
 (OMEGA3-1000 stays at 29) and `writeoff_cogs_cents` records **2280** - Cerbo bears the full
 COGS. That is the post-fulfillment refund risk called out in the README.
 
-## Act 6 - Cerbo Admin
+## Act 6 - Provider reports
+
+Still as **Dr. Ana Reyes**, open **Payables**. For the month in which the EVAL-01 order was paid
+and then refunded, the report shows **credits 7090, debits 4472, closing 2618** (EVAL-09b, a
+CI-verified pass). The refunded EVAL-01 order nets the provider to -64 inside those figures.
+
+Closed-month behaviour (EVAL-10, also verified): if a statement is closed in month M and a refund
+is posted later, the M statement stays frozen at **credits 4408** while the later refund shows up
+as **debits 4472, closing -64** in the current period. Closed statements are never rewritten
+(ADR-014). This is the point about late refunds not rewriting history.
+
+Open the **Dashboard** for the same range. It shows GMV, refunded GMV, settled GMV, platform fee
+revenue, and net margin, all read from the ledger rather than recomputed from order lines.
+
+## Act 7 - Cerbo Admin oversight and metrics
 
 Switch to **Cerbo Admin**.
 
-- **Audit any order.** Cerbo Admin can open the audit for any order (`GET
-  /api/admin/orders/:id/audit`), not just one practice's.
-- **Fulfill and refund any order.** Cerbo Admin can fulfill a paid order and refund any order
-  (`POST /api/admin/orders/:id/fulfill` and `.../refund`). These are the same backend used in
-  Act 5.
-- **Provider payables report (T8, CI-verified).** Switch to **Dr. Ana Reyes** and open
-  **Payables**. For the month in which the EVAL-01 order was paid and then refunded, the report
-  shows **credits 7090, debits 4472, closing 2618** (EVAL-09b). The refunded EVAL-01 order nets
-  the provider to -64 inside those figures. If you also run the closed-month scenario (EVAL-10),
-  a statement closed in month M stays frozen at **credits 4408** while the later refund shows up
-  as **debits 4472, closing -64** in the current period - closed statements are never rewritten
-  (ADR-014).
-- **Provider sales dashboard (T8).** The Dashboard shows GMV, refunded GMV, settled GMV,
-  platform fee revenue, and net margin from the ledger. For the EVAL-01-plus-EVAL-02 month the
-  spec figures (EVALS.md EVAL-09) are GMV **13496**, refunded **8497**, settled **4999**, fee
-  revenue **101**, net margin from settled **2682**. Note: the id-level CI-verified report
-  assertions are EVAL-09b and EVAL-10; the admin-metrics reconciliation version of these totals
-  (EVAL-09 as a test) belongs to the cut T10 and is reported as CUT, not failing.
-- **Metrics, demo data, inventory/restock, and the on-demand job buttons.** `CUT` (T10, T11).
-  Not in this slice. See the README cut list. The admin tabs for these are placeholders.
+- **Audit, fulfill, or refund any order.** Cerbo Admin can open the audit for any order (`GET
+  /api/admin/orders/:id/audit`), fulfill a paid order, and refund any order - the same backend
+  used in Acts 4 and 5, but not scoped to one practice.
+- **Metrics with the reconciliation check (EVAL-09, CI-verified).** Open **Metrics**. For the
+  month that holds the EVAL-01 order (paid then refunded) and the EVAL-02 order (paid, fulfilled,
+  refunded as the write-off example), grouped by provider, the figures are GMV **13496**,
+  refunded **8497**, settled **4999**, platform fee revenue **101**, sunk fees **64**, provider
+  net margin **2682**, and net after sunk fees **2618**. The reconciliation line reads **pass** -
+  it recomputes provider margin per order from the owner's formula and confirms it matches the
+  ledger cents (ADR-015).
+- **Synthetic toggle.** The **Include synthetic demo data** toggle defaults OFF. With it off the
+  numbers above are unchanged; flip it on and the synthetic demo activity (Act 9) is included and
+  the migration percentage appears.
+
+## Act 8 - Recurring orders
+
+Still useful to show from the provider side. Switch to **Dr. Ana Reyes** and open **Recurring**.
+
+- Create a schedule for **Cara Lopez**: **MAG-GLY-120 x1 @ 2999**, interval 30 days. The patient
+  authorizes once via their schedule pay link (stubbed saved payment method).
+- Run one cycle (the provider "Run cycle" action). Expected (EVAL-11): a child order of kind
+  `recurring_cycle` is created and paid, with **fee 22, margin 1527**, and MAG-GLY-120 on-hand
+  drops by 1. It uses the same payment and posting path as a one-off order, so it is fully
+  auditable.
+- The `on_hold` story (ADR-017), any one of these:
+  - Schedule **PROBIO-50B x6** and run: the cycle is parked **on_hold, INSUFFICIENT_STOCK**, no
+    journal, stock untouched (EVAL-11b).
+  - Run an **unauthorized** schedule: **on_hold, NOT_AUTHORIZED** (EVAL-11c).
+  - Raise a product's COGS so margin would go negative, then run: **on_hold, MARGIN_NEGATIVE**
+    (EVAL-11d).
+  The point: a cost increase or a stock shortage parks the cycle with a reason instead of silently
+  charging the patient or eating the provider's margin.
+
+## Act 9 - Demo data, migration, and the guarded reset
+
+As **Cerbo Admin**, open **Demo Data**. These tools exist to make the metrics demo realistic and
+are all marked with the DEMO badge.
+
+- **Import a baseline** (or regenerate a synthetic one): historical marketplace GMV per provider.
+  Rows are validated one at a time; a bad row is reported, not inserted.
+- **Generate synthetic migration activity.** It runs through the real split and posting code,
+  backdated via the `Clock` seam and flagged `is_synthetic`, and it does not touch inventory. Go
+  back to **Metrics**, turn **Include synthetic** on, and the **migration percentage** now appears
+  (in-house GMV against the baseline monthly average, ADR-018).
+- **Reset demo data.** This purges only `is_synthetic` rows, through the one guarded append-only
+  exception. Real orders, payments, and ledger entries are untouched, and `payable_statements` can
+  never be deleted even with the purge flag set (EVAL-13, RT-14). After reset, turn the synthetic
+  toggle off and the real numbers from Act 7 are exactly as they were.
+- **Production guard.** With `DEMO_MODE=false`, every `/api/admin/demo/*` endpoint returns **403
+  DEMO_DISABLED** (EVAL-15). The live demo runs with `DEMO_MODE=true`.
+
+## Act 10 - Inventory restock (demo only)
+
+As **Cerbo Admin**, open **Inventory**. Raise **ZINC-30** on-hand from 0 to, say, 20. It is
+recorded as an inventory movement with the actor, and the control carries a **DEMO** badge because
+real stock would come from procurement, not a button (ADR-009). Switch to a provider and confirm
+the provider has no restock control - the API returns **403** if a provider calls it (RT-09). Now
+a ZINC-30 order that failed in Act 2 would succeed.
 
 ## If something fails mid-demo
 
@@ -206,13 +265,18 @@ If a specific step misbehaves rather than the whole site:
 Fallback if the live site cannot be recovered in time: run the whole script locally against
 `http://localhost:5173`, which does not depend on Railway at all.
 
-## What is and is not in this script
+## What is verified, and the remaining caveats
 
-Everything in Acts 1 through 5, and the audit, fulfill, refund, and report steps in Act 6, is
-implemented, merged, and (for the figures tied to an EVAL id) CI-verified against real Postgres.
-The id-by-id results are in `tests/e2e/RESULTS.md` (PASS 34, FAIL 0, CUT 9).
+Every act above is implemented and merged, and every figure tied to an EVAL id is CI-verified
+against real Postgres. The id-by-id results are in `tests/e2e/RESULTS.md` (**PASS 43, FAIL 0,
+CUT 0** - every id in the specification). Nothing in the plan is cut.
 
-Not in this slice, and called out as cut in Act 6: Cerbo Admin metrics and demo data (T10),
-admin inventory/restock and the on-demand job buttons (T11), and recurring orders (T9). The
-EVAL ids for those (EVAL-09, 11, 11b-d, 13, 15 and RT-13, 14) are marked CUT in RESULTS.md, not
-failing. Do not demo those tabs; they are placeholders.
+The one caveat is visual, not behavioural: the final UI follow-up (styling pass, DEMO badges on
+the admin views, the pay-link copy control, and the My Orders list rendering real data) has
+merged, but the author of this script has not personally clicked through every styled screen. The
+underlying endpoints and data all work and are tested. Treat the visual polish as merged and
+owner-confirmed at gate G5 rather than author-verified.
+
+One honesty note on the numbers: the single `POST /api/admin/jobs/run-due-schedules` admin button
+is still a 501 stub, so run recurring cycles from the provider **Recurring** screen's "Run cycle"
+action (Act 8), which is wired and tested, not from that admin button.
