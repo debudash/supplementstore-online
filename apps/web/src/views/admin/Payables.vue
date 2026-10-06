@@ -129,53 +129,55 @@ onMounted(load)
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9em;
+  gap: 0.25rem;
+  font-size: 0.85em;
+  color: var(--muted);
 }
 .period {
-  color: #555;
+  color: var(--muted);
 }
 .tag-closed {
-  color: #1e7e34;
+  color: var(--success);
   font-weight: 700;
 }
 .tag-open {
-  color: #b8860b;
+  color: var(--warning);
   font-weight: 700;
 }
 .report-table {
   border-collapse: collapse;
   width: 100%;
   margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 .report-table th,
 .report-table td {
-  border: 1px solid #ddd;
-  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
   text-align: left;
+}
+.report-table tbody tr:last-child td {
+  border-bottom: none;
 }
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .notice {
-  color: #555;
+  color: var(--muted);
 }
 .notice-ok {
-  color: #1e7e34;
-  border: 1px solid #1e7e34;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
+  color: var(--success);
+  background: var(--success-tint);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
 }
 .actor-note {
   margin-top: 1.5rem;
-  color: #888;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 </style>

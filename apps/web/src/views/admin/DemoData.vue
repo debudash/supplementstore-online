@@ -8,6 +8,7 @@
 import { ref } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
 import { currentUserId } from '../../api/session'
+import DemoBadge from '../../components/DemoBadge.vue'
 import type {
   BaselineImportResult,
   BaselineRegenerateResult,
@@ -75,7 +76,10 @@ const reset = () =>
 
 <template>
   <section class="demo-data">
-    <h2>Demo Data</h2>
+    <div class="head">
+      <h2>Demo Data</h2>
+      <DemoBadge reason="Demo affordance - this entire screen is demonstration tooling. It generates and removes synthetic data and does not exist in the production product." />
+    </div>
 
     <p class="demo-notice">
       Demo-only tooling. These controls generate and remove SYNTHETIC demonstration data.
@@ -98,7 +102,7 @@ const reset = () =>
       <button type="button" :disabled="busy" @click="importCsv">Import baseline CSV</button>
     </div>
 
-    <h3>Synthetic demo data (DEMO_MODE only)</h3>
+    <h3>Synthetic demo data (DEMO_MODE only) <DemoBadge reason="Demo affordance - generates synthetic baseline and in-house migration activity through the real posting code, flagged synthetic and excluded from metrics by default." /></h3>
     <div class="row">
       <label class="field">Seed <input v-model.number="seed" type="number" :disabled="busy" /></label>
       <label class="field">
@@ -111,7 +115,10 @@ const reset = () =>
     <div class="row">
       <button type="button" :disabled="busy" @click="regenerate">Regenerate synthetic baseline</button>
       <button type="button" :disabled="busy" @click="generateMigration">Generate migration activity</button>
-      <button type="button" class="danger" :disabled="busy" @click="reset">Reset (purge synthetic)</button>
+      <span class="reset-control">
+        <button type="button" class="danger" :disabled="busy" @click="reset">Reset (purge synthetic)</button>
+        <DemoBadge reason="Demo affordance - purges only rows flagged synthetic (the one guarded exception to the append-only ledger). It can never touch real orders, payments or ledger entries, and is not a production control." />
+      </span>
     </div>
 
     <p class="actor-note">Acting as <code>{{ currentUserId }}</code>.</p>
@@ -122,21 +129,30 @@ const reset = () =>
 .demo-data {
   max-width: 820px;
 }
+.head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.head h2 {
+  margin-bottom: 0;
+}
 .demo-notice {
-  color: #555;
-  border: 1px dashed #888;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-  margin-bottom: 1rem;
+  color: var(--demo);
+  background: var(--demo-tint);
+  border: 1px solid var(--demo-border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.85rem;
+  margin: 1rem 0;
   font-size: 0.9em;
 }
 .hint {
-  color: #555;
+  color: var(--muted);
   font-size: 0.9em;
 }
 .csv {
   width: 100%;
-  font-family: monospace;
+  font-family: var(--font-mono);
   margin-bottom: 0.5rem;
 }
 .row {
@@ -149,31 +165,32 @@ const reset = () =>
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9em;
+  gap: 0.25rem;
+  font-size: 0.85em;
+  color: var(--muted);
 }
 .field input {
   width: 8rem;
 }
+.reset-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
 .danger {
-  color: #c0392b;
-  border-color: #c0392b;
+  color: var(--danger);
+  border-color: var(--danger);
 }
 .notice-ok {
-  color: #1e7e34;
-  border: 1px solid #1e7e34;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
+  color: var(--success);
+  background: var(--success-tint);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
 }
 .actor-note {
   margin-top: 1.5rem;
-  color: #888;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 </style>

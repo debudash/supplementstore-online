@@ -9,6 +9,7 @@ import { apiRequest, ApiError } from '../../api/client'
 import { currentUserId } from '../../api/session'
 import type { AdminMetricsResponse } from '@cerbo/contracts'
 import { formatCents } from '../../components/order/format'
+import DemoBadge from '../../components/DemoBadge.vue'
 
 function currentMonthToken(): string {
   const now = new Date()
@@ -79,6 +80,7 @@ onMounted(load)
       <label class="field checkbox">
         <input v-model="includeSynthetic" type="checkbox" :disabled="loading" />
         Include synthetic demo data
+        <DemoBadge reason="Demo affordance - synthetic rows are demonstration data, excluded from metrics by default. This toggle mixes them in to show the demo narrative; real reporting runs with it off." />
       </label>
       <button type="button" :disabled="loading" @click="load">Refresh</button>
     </div>
@@ -202,8 +204,9 @@ onMounted(load)
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9em;
+  gap: 0.25rem;
+  font-size: 0.85em;
+  color: var(--muted);
 }
 .field.checkbox {
   flex-direction: row;
@@ -211,47 +214,52 @@ onMounted(load)
   gap: 0.4rem;
 }
 .period {
-  color: #555;
+  color: var(--muted);
 }
 .report-table {
   border-collapse: collapse;
   width: 100%;
   margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 .report-table th,
 .report-table td {
-  border: 1px solid #ddd;
-  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
   text-align: left;
+}
+.report-table tbody tr:last-child td {
+  border-bottom: none;
 }
 .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 .recon {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
   margin-bottom: 1rem;
+  border: 1px solid transparent;
 }
 .recon-pass {
-  color: #1e7e34;
+  color: var(--success);
+  background: var(--success-tint);
+  border-color: var(--success);
 }
 .recon-fail {
-  color: #c0392b;
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-color: var(--danger);
   font-weight: 700;
 }
 .notice {
-  color: #555;
-}
-.page-error {
-  color: #c0392b;
-  border: 1px solid #c0392b;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  color: var(--muted);
 }
 .actor-note {
   margin-top: 1.5rem;
-  color: #888;
+  color: var(--subtle);
   font-size: 0.85em;
 }
 </style>
