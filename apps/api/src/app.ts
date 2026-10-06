@@ -14,6 +14,7 @@ import { ordersRouter } from './orders/router'
 import { patientsRouter } from './patients/router'
 import { productsRouter } from './inventory/router'
 import { payRouter } from './payments/router'
+import { patientOrdersRouter } from './patient-orders/router'
 import { schedulesRouter } from './recurring/router'
 import { reportsRouter } from './reports/router'
 import { adminInventoryRouter } from './admin/inventory/router'
@@ -66,6 +67,12 @@ export function createApp(deps: AppDeps): Express {
 
   // Patient surface: token-based, NO X-Demo-User (AGENTS.md section 7).
   app.use('/api/pay', payRouter)
+
+  // Patient "My Orders" listing: a SEPARATE role-guarded, ownership-scoped surface so a
+  // patient can find the pay link for their own orders. This does NOT weaken the token
+  // model above - payment still happens at /api/pay/:token; this only lists the caller's
+  // own orders (service filters to actor.patientId).
+  app.use('/api/patient', auth, requireRole('patient'), patientOrdersRouter)
 
   // Cerbo Admin surface. All admin sub-routers mount at /api/admin.
   const admin = express.Router()
