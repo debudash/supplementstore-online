@@ -16,7 +16,8 @@ export const DEFAULT_FEE_BPS = 75;
  *
  * The `+ 5000` term is the integer half-up rounding bias: it is half of the
  * divisor (10000), so a raw fee of exactly x.5 cents rounds up (EVAL-03) while
- * x.4925 rounds down (EVAL-02). No float, no toFixed, no Math.round.
+ * x.4925 rounds down (EVAL-02). Integer arithmetic only: no floating-point
+ * math and no decimal-string rounding helpers anywhere in this package.
  */
 export function orderFee(subtotalCents: number, feeBps: number = DEFAULT_FEE_BPS): number {
   assertSafePositiveInt(subtotalCents, "subtotalCents");
