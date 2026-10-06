@@ -7,12 +7,11 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import request from 'supertest'
-import type { AdminMetricsResponse, BaselineImportResult, DemoResetResult } from '@cerbo/contracts'
+import type { AdminMetricsResponse, BaselineImportResult } from '@cerbo/contracts'
 import { db } from '../../src/db/knex'
 import { createApp } from '../../src/app'
 import { createKnexActorLoader } from '../../src/auth/loadActor'
 import { seedCore } from '../../src/db/seeds/01_core'
-import { generateMigration } from '../../src/admin/demo/migration'
 import { resetDemoData } from '../../src/admin/demo/reset'
 
 const apiRoot = path.resolve(__dirname, '../..')
