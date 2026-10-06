@@ -4,7 +4,7 @@
 
 You are coordinating the build of a vertical slice for Cerbo: providers sell supplements to patients inside the EHR, patients pay Cerbo directly, and the system records an auditable money split (COGS to Cerbo, margin to the provider, 75 bps platform fee to Cerbo), plus refunds, recurring orders, inventory, reports, and a Cerbo Admin migration report. It deploys to Railway.
 
-**Deadline:** 10 pm CST. Human review time is limited (about 2 hours total). Spend it only on gates G1 to G5.
+**Deadline:** 10 pm 10/6/2026 CST. Human review time is limited (about 2 hours total). Spend it only on gates G1 to G5.
 
 ## Read first, in order
 
