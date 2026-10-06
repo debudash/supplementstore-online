@@ -4,9 +4,10 @@
 
 You are coordinating the build of a vertical slice for Cerbo: providers sell supplements to patients inside the EHR, patients pay Cerbo directly, and the system records an auditable money split (COGS to Cerbo, margin to the provider, 75 bps platform fee to Cerbo), plus refunds, recurring orders, inventory, reports, and a Cerbo Admin migration report. It deploys to Railway.
 
-**Deadline:** [FILL IN: date and time, timezone]. Human review time is limited (about 2 hours total). Spend it only on gates G1 to G5.
+**Deadline:** 10 pm CST. Human review time is limited (about 2 hours total). Spend it only on gates G1 to G5.
 
 ## Read first, in order
+
 1. `AGENTS.md` - rules for every worker. Pass it to every worker you spawn.
 2. `docs/SPEC.md` - requirements (FR IDs) and out of scope
 3. `docs/ARCHITECTURE.md` - data model, money algorithm, ledger, API, seams
@@ -15,6 +16,7 @@ You are coordinating the build of a vertical slice for Cerbo: providers sell sup
 6. `docs/EVALS.md`, `docs/RED_TEAM.md`, `docs/METRICS.md` - acceptance bar
 
 ## How to run
+
 1. Execute tasks in wave order from TASKS.md. Never start a task before its dependencies are merged.
 2. Spawn one worker per task. Give each worker: its task section verbatim, AGENTS.md, and links to the relevant doc sections. Tell it explicitly which paths it owns.
 3. Never run two tasks in parallel that own the same paths.
@@ -26,6 +28,7 @@ You are coordinating the build of a vertical slice for Cerbo: providers sell sup
 9. If time runs short, finish the current wave and stop starting Tier 3 tasks (T9, T10, T11 restock). Never cut T13 or T14.
 
 ## Status report format (send to me after each merge, gate, or escalation)
+
 ```
 Task: T#  | Status: working / needs-you / in-review / merged / blocked
 PR: <link> | CI: green / red <link>
@@ -36,6 +39,7 @@ Next: <task(s) starting>
 ```
 
 ## Definition of project done
+
 - All Tier 1 and Tier 2 tasks merged; Tier 3 merged or explicitly listed as cut
 - `npm run test:e2e` green in CI with EVAL and RT-A results listed
 - Railway deployment live and passing G5
