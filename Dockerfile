@@ -26,8 +26,14 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/dist ./apps/api/dist
-COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
-COPY --from=build /app/packages/contracts/package.json ./packages/contracts/package.json
+# Copy ALL workspace packages generically, not a hand-listed subset. node_modules
+# holds an `@cerbo/<pkg>` symlink per workspace pointing at /app/packages/<pkg>, so
+# every package the API requires at runtime (today @cerbo/contracts and @cerbo/money,
+# plus any added later) must be present here or Node throws MODULE_NOT_FOUND on boot.
+# Copying only contracts previously crashed the live deploy when @cerbo/money became a
+# runtime dependency. node_modules were already pruned (--omit=dev), so this is just
+# each package's src/dist/package.json - small and self-contained.
+COPY --from=build /app/packages ./packages
 # Built SPA served by the API in production.
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 
