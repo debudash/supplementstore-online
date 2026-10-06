@@ -9,6 +9,7 @@ default:
 stages:
   - guardrails
   - test
+  - deploy
 
 # Run on merge requests and on branch pushes (so a pipeline is visible immediately
 # after pushing, before an MR exists).
@@ -112,3 +113,35 @@ build-test:
     - npm run typecheck
     - npm run build
     - npm test
+
+# Deploy to Railway on merge to main (docs/DEPLOY.md, Path A). Railway's native Git
+# integration is GitHub-only and cannot source from this self-hosted GitLab remote, so
+# we deploy from CI: the Railway CLI uploads the repo and Railway builds the Dockerfile.
+#
+# GUARD (read before editing): this job is created ONLY when the branch is `main` AND a
+# `RAILWAY_TOKEN` CI/CD variable exists. Until the owner adds that masked, protected
+# variable the job does not run at all, so main stays green; deploy then begins
+# automatically on the first main pipeline after the variable is added. The job lives in
+# its own `deploy` stage AFTER `test` and deliberately has NO `needs`, so it waits for
+# the guardrails and test stages - a red guardrail or a red build-test blocks the deploy.
+# It never runs on merge requests or non-main branches. Uses the project-scoped
+# RAILWAY_TOKEN only (no account token, so no `railway init` / `railway add`); the owner
+# must create the project and Postgres first. The token is read from the environment by
+# the CLI and is never printed.
+deploy-railway:
+  stage: deploy
+  resource_group: production   # serialize deploys so two never run at once
+  environment:
+    name: production
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "main" && $RAILWAY_TOKEN'
+      when: on_success
+    - when: never
+  script:
+    # RAILWAY_TOKEN (project-scoped) is read automatically from the environment.
+    # RAILWAY_SERVICE is optional: set it as a CI variable only if the project has
+    # more than one deployable service and `railway up` needs disambiguating.
+    - npm i -g @railway/cli
+    - railway up ${RAILWAY_SERVICE:+--service "$RAILWAY_SERVICE"}
