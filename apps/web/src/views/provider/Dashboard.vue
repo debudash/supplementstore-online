@@ -2,20 +2,35 @@
 // Provider sales dashboard (FR-10). Reads GET /api/reports/sales; every money figure
 // comes from the ledger (the API aggregates ledger_entries / refunds - the UI only
 // DISPLAYS, it never computes money; AGENTS.md money rule 2). Default window is the
-// current UTC month; a custom from/to range is supported. Basic table layout only.
-import { onMounted, ref } from 'vue'
+// current UTC month; a custom From/To range is supported.
+import { onMounted, ref, computed } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
-import { currentUserId } from '../../api/session'
 import type { SalesReport } from '@cerbo/contracts'
-import { formatCents } from '../../components/order/format'
+import PageHeader from '../../components/ui/PageHeader.vue'
+import KpiCard from '../../components/ui/KpiCard.vue'
+import StatusChip from '../../components/ui/StatusChip.vue'
+import UiAlert from '../../components/ui/UiAlert.vue'
+import UiButton from '../../components/ui/UiButton.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import { formatMoney, isNegative } from '../../utils/money'
 
 const report = ref<SalesReport | null>(null)
 const from = ref('')
 const to = ref('')
-const loading = ref(false)
+const loading = ref(true)
 const error = ref<string | null>(null)
+const rangeError = ref<string | null>(null)
+
+function validateRange(): string | null {
+  if (Boolean(from.value) !== Boolean(to.value)) return 'Choose both a From and a To date, or clear both to see this month.'
+  if (from.value && to.value && from.value > to.value) return 'The From date must be on or before the To date.'
+  return null
+}
 
 async function load(): Promise<void> {
+  rangeError.value = validateRange()
+  if (rangeError.value) return
   loading.value = true
   error.value = null
   try {
@@ -36,158 +51,170 @@ async function load(): Promise<void> {
   }
 }
 
+function thisMonth(): void {
+  from.value = ''
+  to.value = ''
+  void load()
+}
+
 onMounted(load)
+
+/** Refunds reduce GMV: shown with negative styling. A server value that is already
+ * negative is styled by <Money>; a positive one keeps its sign and gets the style here. */
+const refundedPositive = computed(() => {
+  const v = report.value?.refundedGmvCents
+  return typeof v === 'number' && !isNegative(v) && v !== 0
+})
+const showKpis = computed(() => loading.value || report.value !== null)
 </script>
 
 <template>
   <section class="dashboard">
-    <h2>Dashboard</h2>
+    <PageHeader title="Dashboard" subtitle="Your sales, refunds and earnings for a period (UTC).">
+      <template v-if="report" #subtitle>
+        Your sales for <strong>{{ report.period.from }}</strong> to <strong>{{ report.period.to }}</strong> (UTC).
+      </template>
+    </PageHeader>
 
-    <div class="toolbar">
-      <label class="field">From <input v-model="from" type="date" :disabled="loading" /></label>
-      <label class="field">To <input v-model="to" type="date" :disabled="loading" /></label>
-      <button type="button" :disabled="loading" @click="load">Apply</button>
+    <form class="range" aria-label="Report period" novalidate @submit.prevent="load">
+      <div class="filter">
+        <label for="dash-from">From</label>
+        <input id="dash-from" v-model="from" type="date" :aria-invalid="rangeError ? 'true' : undefined" aria-describedby="dash-range-msg" data-testid="dash-from" />
+      </div>
+      <div class="filter">
+        <label for="dash-to">To</label>
+        <input id="dash-to" v-model="to" type="date" :aria-invalid="rangeError ? 'true' : undefined" aria-describedby="dash-range-msg" data-testid="dash-to" />
+      </div>
+      <UiButton type="submit" variant="primary" :busy="loading" busy-label="Loading..." data-testid="dash-apply">Apply</UiButton>
+      <button type="button" class="btn-link" :disabled="loading" data-testid="dash-this-month" @click="thisMonth">This month</button>
+    </form>
+    <p id="dash-range-msg" class="range-msg" aria-live="polite">{{ rangeError ?? '' }}</p>
+
+    <UiAlert v-if="error" tone="danger" title="Could not load the dashboard">
+      {{ error }}
+      <template #actions><button type="button" class="btn-sm" data-testid="dash-retry" @click="load">Try again</button></template>
+    </UiAlert>
+
+    <div v-if="showKpis" class="kpis" aria-live="polite" :aria-busy="loading ? 'true' : undefined">
+      <KpiCard
+        label="GMV"
+        primary
+        :cents="report?.gmvCents"
+        :loading="loading"
+        hint="Gross sales: everything patients paid in the period."
+      />
+      <KpiCard
+        v-if="refundedPositive && !loading"
+        class="kpi-refunded"
+        label="Refunded"
+        :value="formatMoney(report?.refundedGmvCents)"
+        hint="Money returned to patients. Reduces GMV."
+        data-testid="kpi-refunded"
+      />
+      <KpiCard
+        v-else
+        label="Refunded"
+        :cents="report?.refundedGmvCents"
+        :loading="loading"
+        hint="Money returned to patients. Reduces GMV."
+        data-testid="kpi-refunded"
+      />
+      <KpiCard label="Settled" :cents="report?.settledGmvCents" :loading="loading" hint="GMV after refunds - the sales that stuck." />
+      <KpiCard label="Platform fees" :cents="report?.platformFeeCents" :loading="loading" hint="Cerbo's fee on your sales, including fees kept on refunds." />
+      <KpiCard label="Net margin" :cents="report?.providerNetMarginCents" :loading="loading" hint="What you earn on settled sales, after cost and fees." />
     </div>
 
-    <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-    <p v-if="loading" class="notice">Loading...</p>
+    <Skeleton v-if="loading && !report" :lines="4" height="2rem" label="Loading report tables" />
 
-    <template v-if="report && !loading">
-      <p class="period">
-        Period <strong>{{ report.period.from }}</strong> to <strong>{{ report.period.to }}</strong> (UTC).
-      </p>
+    <div v-else-if="report" class="grid-2 tables">
+      <section aria-labelledby="units-title">
+        <h2 id="units-title" class="section-title">Units sold by product</h2>
+        <EmptyState v-if="report.unitsBySku.length === 0" title="No units sold in this period" />
+        <div v-else class="table-wrap">
+          <table class="table table-stack">
+            <thead>
+              <tr>
+                <th scope="col">Product</th>
+                <th scope="col">SKU</th>
+                <th scope="col" class="num">Units</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in report.unitsBySku" :key="row.sku">
+                <td data-label="Product">{{ row.name }}</td>
+                <td data-label="SKU" class="subtle">{{ row.sku }}</td>
+                <td data-label="Units" class="num">{{ row.units }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-      <div class="cards">
-        <div class="card">
-          <span class="label">GMV</span><span class="value">{{ formatCents(report.gmvCents) }}</span>
+      <section aria-labelledby="status-title">
+        <h2 id="status-title" class="section-title">Orders by status</h2>
+        <EmptyState v-if="report.ordersByStatus.length === 0" title="No orders in this period" />
+        <div v-else class="table-wrap">
+          <table class="table table-stack">
+            <thead>
+              <tr>
+                <th scope="col">Status</th>
+                <th scope="col" class="num">Orders</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in report.ordersByStatus" :key="row.status">
+                <td data-label="Status"><StatusChip :status="row.status" /></td>
+                <td data-label="Orders" class="num">{{ row.count }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div class="card">
-          <span class="label">Refunded GMV</span><span class="value">{{ formatCents(report.refundedGmvCents) }}</span>
-        </div>
-        <div class="card">
-          <span class="label">Settled GMV</span><span class="value">{{ formatCents(report.settledGmvCents) }}</span>
-        </div>
-        <div class="card">
-          <span class="label">Platform fees</span><span class="value">{{ formatCents(report.platformFeeCents) }}</span>
-        </div>
-        <div class="card">
-          <span class="label">Net margin (settled)</span>
-          <span class="value">{{ formatCents(report.providerNetMarginCents) }}</span>
-        </div>
-      </div>
-
-      <h3>Orders by status</h3>
-      <table class="report-table">
-        <thead>
-          <tr><th>Status</th><th class="num">Count</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in report.ordersByStatus" :key="row.status">
-            <td>{{ row.status }}</td>
-            <td class="num">{{ row.count }}</td>
-          </tr>
-          <tr v-if="report.ordersByStatus.length === 0">
-            <td colspan="2" class="notice">No orders in this period.</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <h3>Units sold by SKU</h3>
-      <table class="report-table">
-        <thead>
-          <tr><th>SKU</th><th>Name</th><th class="num">Units</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in report.unitsBySku" :key="row.sku">
-            <td>{{ row.sku }}</td>
-            <td>{{ row.name }}</td>
-            <td class="num">{{ row.units }}</td>
-          </tr>
-          <tr v-if="report.unitsBySku.length === 0">
-            <td colspan="3" class="notice">No units sold in this period.</td>
-          </tr>
-        </tbody>
-      </table>
-    </template>
-
-    <p class="actor-note">Acting as <code>{{ currentUserId }}</code>.</p>
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped>
-.dashboard {
-  max-width: 920px;
-}
-.toolbar {
-  display: flex;
-  gap: 1rem;
-  align-items: flex-end;
-  margin-bottom: 0.75rem;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9em;
-}
-.period {
-  color: var(--muted);
-}
-.cards {
+.range {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin: 1rem 0 1.5rem;
+  gap: var(--space-3) var(--space-4);
+  align-items: flex-end;
 }
-.card {
+.filter {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 0.75rem 1rem;
-  min-width: 9.5rem;
-  box-shadow: var(--shadow-sm);
+  gap: var(--space-1);
 }
-.card .label {
-  font-size: 0.78em;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+.filter label {
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
-.card .value {
-  font-size: 1.3em;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
+.range-msg {
+  min-height: 1.25rem;
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--danger);
 }
-.report-table {
-  border-collapse: collapse;
-  width: 100%;
-  margin-bottom: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: var(--space-4);
+  margin: var(--space-4) 0 var(--space-8);
 }
-.report-table th,
-.report-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 0.5rem 0.7rem;
-  text-align: left;
+.kpi-refunded :deep(.kpi-value) {
+  color: var(--money-negative);
 }
-.report-table tbody tr:last-child td {
-  border-bottom: none;
+.section-title {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-3);
 }
-.num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.notice {
-  color: var(--muted);
-}
-.actor-note {
-  margin-top: 1.5rem;
-  color: var(--subtle);
-  font-size: 0.85em;
+@media (max-width: 640px) {
+  .filter {
+    flex: 1 1 100%;
+  }
+  .filter input {
+    width: 100%;
+  }
 }
 </style>

@@ -1,68 +1,110 @@
 <script setup lang="ts">
-// Provider recurring schedules (FR-12, ADR-017). Create a schedule for a patient with
-// SKUs, a locked price per line, and an interval; share the patient authorize link;
-// then run a cycle on demand ("Run cycle now") and watch each cycle land as a child
-// order - PAID, or ON HOLD with a reason when stock is short, margin would go negative,
-// or the patient has not authorized yet. The decision (ADR-017) is the teaching point:
-// a cost increase is surfaced as on_hold, never silently absorbed.
+// Provider recurring schedules (FR-12, ADR-017, ADR-024). Create a schedule for a patient
+// (products, quantities, interval), share the patient authorize link, then run a cycle on
+// demand and watch each cycle land as a child order - Paid, or On hold with a reason the
+// provider can act on. A schedule stores product + quantity only; each cycle prices from
+// the current catalog, so the catalog price shown here is indicative.
 //
 // The UI only DISPLAYS money; every figure comes from the server (AGENTS.md money rule 2).
-import { onMounted, ref, reactive } from 'vue'
+import { onMounted, ref, reactive, computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
-import { currentUserId } from '../../api/session'
-import type { ProductView, PatientView, ScheduleView, RunCycleResult } from '@cerbo/contracts'
-import { formatCents as formatCentsRaw } from '../../components/order/format'
+import type { ProductView, PatientView, ScheduleView, ScheduleCycleView, RunCycleResult, HoldReason } from '@cerbo/contracts'
 import DemoBadge from '../../components/DemoBadge.vue'
+import PageHeader from '../../components/ui/PageHeader.vue'
+import Card from '../../components/ui/Card.vue'
+import Money from '../../components/ui/Money.vue'
+import StatusChip from '../../components/ui/StatusChip.vue'
+import UiAlert from '../../components/ui/UiAlert.vue'
+import UiField from '../../components/ui/UiField.vue'
+import UiButton from '../../components/ui/UiButton.vue'
+import QuantityStepper from '../../components/ui/QuantityStepper.vue'
+import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import { toast } from '../../components/ui/toast'
+import { formatMoney } from '../../utils/money'
 
-// Same demo-affordance copy the New Order screen uses (MR !45), kept identical so the two
-// provider screens read the same way.
 const COGS_REASON =
   "COGS is Cerbo's wholesale cost, shown in this list only to make the economics demonstrable. A prescribing doctor would not normally see it."
+
+/** Each hold reason in plain words, with what the provider can do about it. */
+const HOLD_REASONS: Record<HoldReason, { label: string; fix: string }> = {
+  INSUFFICIENT_STOCK: {
+    label: 'Not enough stock',
+    fix: 'One or more items ran short. Run the cycle again once stock is back.'
+  },
+  MARGIN_NEGATIVE: {
+    label: 'Margin would be negative',
+    fix: "Cerbo's cost rose above the catalog price, so the cycle was held instead of charging at a loss. Check the products with Cerbo, then run the cycle again."
+  },
+  NOT_AUTHORIZED: {
+    label: 'Patient has not authorized',
+    fix: 'Send the patient the authorize link below. Once they authorize, run the cycle again.'
+  },
+  PAYMENT_DECLINED: {
+    label: 'Payment was declined',
+    fix: 'Ask the patient to update their payment method, then run the cycle again.'
+  }
+}
+function holdLabel(reason: HoldReason | null): string {
+  if (!reason) return '-'
+  return HOLD_REASONS[reason]?.label ?? reason.replace(/_/g, ' ').toLowerCase()
+}
+function holdFix(reason: HoldReason | null): string {
+  if (!reason) return 'Check the schedule, then run the cycle again.'
+  return HOLD_REASONS[reason]?.fix ?? 'Check the schedule, then run the cycle again.'
+}
 
 const schedules = ref<ScheduleView[]>([])
 const products = ref<ProductView[]>([])
 const patients = ref<PatientView[]>([])
 const patientsUnavailable = ref(false)
+const loading = ref(true)
 const loadError = ref<string | null>(null)
-const pageError = ref<string | null>(null)
+const formError = ref<string | null>(null)
+const actionError = ref<string | null>(null)
 const busy = ref(false)
 const rowBusyId = ref<string | null>(null)
+const cancelTarget = ref<ScheduleView | null>(null)
+const copiedId = ref<string | null>(null)
 const origin = typeof location !== 'undefined' ? location.origin : ''
 
-// A draft schedule line. Per ADR-024 a schedule carries PRODUCT + QUANTITY only - no price
-// and no margin. Both price and COGS are DERIVED at each cycle from the current catalog, so
-// the catalog figures shown here are INDICATIVE, not what the schedule stores.
 interface DraftLine {
   sku: string
-  qty: number
+  qty: number | string
 }
 
-const form = reactive<{ patientId: string; intervalDays: number; lines: DraftLine[] }>({
+const form = reactive<{ patientId: string; intervalDays: number | string; lines: DraftLine[] }>({
   patientId: '',
   intervalDays: 30,
   lines: [{ sku: '', qty: 1 }]
 })
 
-function formatCents(cents: number | null | undefined): string {
-  if (cents === null || cents === undefined) return '-'
-  return formatCentsRaw(cents)
-}
+const intervalError = computed(() => {
+  const n = Number(form.intervalDays)
+  return Number.isInteger(n) && n >= 7 && n <= 90 ? null : 'Enter a whole number of days from 7 to 90.'
+})
 
 function productOf(sku: string): ProductView | null {
   return products.value.find((p) => p.sku === sku) ?? null
 }
 
-/**
- * The seeded catalog list price in integer cents for a SKU, or null when the field is not
- * present yet (the window before the backend list_price_cents migration merges). Isolated
- * accessor so the form degrades to a "catalog price pending" state (margin required) rather
- * than guessing a number - identical to the New Order screen's approach.
- */
+/** The catalog list price in cents for a SKU, or null when the field is not present. */
 function catalogPriceCents(sku: string): number | null {
   const p = productOf(sku)
   if (!p) return null
   const v = (p as unknown as Record<string, unknown>).listPriceCents
   return typeof v === 'number' && Number.isSafeInteger(v) ? v : null
+}
+
+function patientName(id: string): string {
+  return patients.value.find((p) => p.id === id)?.name ?? 'Patient'
+}
+
+function shortDate(value: string | null): string {
+  if (!value) return '-'
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 function messageFor(err: unknown): string {
@@ -88,13 +130,19 @@ async function loadAll(): Promise<void> {
   }
 }
 
-onMounted(async () => {
+async function initialLoad(): Promise<void> {
+  loading.value = true
+  loadError.value = null
   try {
     await loadAll()
   } catch (err) {
     loadError.value = messageFor(err)
+  } finally {
+    loading.value = false
   }
-})
+}
+
+onMounted(initialLoad)
 
 function addDraftLine(): void {
   form.lines.push({ sku: '', qty: 1 })
@@ -102,233 +150,426 @@ function addDraftLine(): void {
 function removeDraftLine(i: number): void {
   form.lines.splice(i, 1)
 }
+function lineName(line: DraftLine, i: number): string {
+  const p = line.sku ? productOf(line.sku) : null
+  return p ? `line ${i + 1}, ${p.name}` : `line ${i + 1}`
+}
 
 async function createSchedule(): Promise<void> {
-  pageError.value = null
+  formError.value = null
   const draftLines = form.lines.filter((l) => l.sku)
   if (!form.patientId || draftLines.length === 0) {
-    pageError.value = 'Choose a patient and at least one product.'
+    formError.value = 'Choose a patient and at least one product.'
+    return
+  }
+  if (intervalError.value) {
+    formError.value = intervalError.value
     return
   }
   for (const l of draftLines) {
     const qty = Math.trunc(Number(l.qty))
     if (!Number.isInteger(qty) || qty < 1 || qty > 100) {
-      pageError.value = 'Quantity must be a whole number from 1 to 100.'
+      formError.value = 'Quantity must be a whole number from 1 to 100.'
       return
     }
   }
-  // A schedule carries product + quantity only (ADR-024). Price and COGS are derived at
-  // each cycle from the catalog, so no price or margin is sent.
+  // A schedule carries product + quantity only (ADR-024): no price or margin is sent.
   const lines = draftLines.map((l) => ({ sku: l.sku, qty: Math.trunc(Number(l.qty)) }))
   busy.value = true
   try {
     await apiRequest<ScheduleView>('/schedules', {
       method: 'POST',
-      body: { patientId: form.patientId, intervalDays: form.intervalDays, lines }
+      body: { patientId: form.patientId, intervalDays: Number(form.intervalDays), lines }
     })
+    const name = patientName(form.patientId)
     form.patientId = ''
     form.intervalDays = 30
     form.lines = [{ sku: '', qty: 1 }]
     await loadAll()
+    toast(`Schedule created for ${name}.`)
   } catch (err) {
-    pageError.value = messageFor(err)
+    formError.value = messageFor(err)
   } finally {
     busy.value = false
   }
 }
 
-async function act(id: string, action: 'pause' | 'resume' | 'cancel' | 'run'): Promise<void> {
-  rowBusyId.value = id
-  pageError.value = null
+function runResultMessage(res: RunCycleResult): { text: string; tone: 'success' | 'warning' | 'info' } {
+  const c = res.cycle
+  if (!c) return { text: res.note || 'Nothing was due, so no cycle ran.', tone: 'info' }
+  if (c.status === 'paid') return { text: `Cycle ${c.cycleNumber} paid (${formatMoney(c.subtotalCents)}).`, tone: 'success' }
+  if (c.status === 'on_hold') return { text: `Cycle ${c.cycleNumber} is on hold: ${holdLabel(c.holdReason)}.`, tone: 'warning' }
+  return { text: `Cycle ${c.cycleNumber}: ${c.status}.`, tone: 'info' }
+}
+
+async function act(s: ScheduleView, action: 'pause' | 'resume' | 'cancel' | 'run'): Promise<void> {
+  rowBusyId.value = s.id
+  actionError.value = null
   try {
     if (action === 'run') {
-      const res = await apiRequest<RunCycleResult>(`/schedules/${id}/run`, { method: 'POST' })
-      // The result is reflected in the reloaded schedule's cycles; note surfaced inline.
-      void res
+      const res = await apiRequest<RunCycleResult>(`/schedules/${s.id}/run`, { method: 'POST' })
+      const msg = runResultMessage(res)
+      toast(msg.text, msg.tone)
     } else {
-      await apiRequest<ScheduleView>(`/schedules/${id}/${action}`, { method: 'POST' })
+      await apiRequest<ScheduleView>(`/schedules/${s.id}/${action}`, { method: 'POST' })
+      toast(action === 'pause' ? 'Schedule paused.' : action === 'resume' ? 'Schedule resumed.' : 'Schedule cancelled.')
     }
     await loadAll()
   } catch (err) {
-    pageError.value = messageFor(err)
+    actionError.value = messageFor(err)
   } finally {
     rowBusyId.value = null
   }
 }
 
-async function copy(url: string): Promise<void> {
+async function confirmCancel(): Promise<void> {
+  const s = cancelTarget.value
+  if (!s) return
+  await act(s, 'cancel')
+  cancelTarget.value = null
+}
+
+async function copy(s: ScheduleView): Promise<void> {
   try {
-    await navigator.clipboard.writeText(`${location.origin}${url}`)
+    await navigator.clipboard.writeText(`${origin}${s.payUrl}`)
+    copiedId.value = s.id
   } catch {
-    /* clipboard may be unavailable; the link text is still shown */
+    copiedId.value = null
+    toast('Copy is unavailable - select the link and copy it manually.', 'warning')
   }
 }
+
+const heldCycles = (s: ScheduleView): ScheduleCycleView[] => s.cycles.filter((c) => c.status === 'on_hold')
 </script>
 
 <template>
   <section class="recurring">
-    <h2>Recurring</h2>
-    <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
+    <PageHeader title="Recurring" subtitle="Repeat orders that run on a schedule once the patient authorizes them." />
 
-    <!-- Create a schedule -->
-    <section class="create">
-      <h3>New schedule</h3>
-      <p v-if="patientsUnavailable" class="notice" role="status">
-        The patient list is not available yet.
-      </p>
-      <template v-else>
-        <label class="field">
-          Patient
-          <select v-model="form.patientId" :disabled="busy">
-            <option value="" disabled>Select a patient</option>
-            <option v-for="p in patients" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
-        </label>
-        <label class="field">
-          Interval (days, 7-90)
-          <input v-model.number="form.intervalDays" type="number" min="7" max="90" :disabled="busy" />
-        </label>
+    <UiAlert v-if="loadError" tone="danger" title="Could not load schedules">
+      {{ loadError }}
+      <template #actions><button type="button" class="btn-sm" data-testid="recurring-retry" @click="initialLoad">Try again</button></template>
+    </UiAlert>
 
-        <div class="lines">
-          <div v-for="(line, i) in form.lines" :key="i" class="draft-line">
-            <label class="field">
-              <span class="label-row">
-                Product
-                <DemoBadge label="Demo: COGS" :reason="COGS_REASON" />
-              </span>
-              <select v-model="line.sku" :disabled="busy">
-                <option value="" disabled>Select a SKU</option>
-                <option v-for="pr in products" :key="pr.sku" :value="pr.sku">
-                  {{ pr.name }} ({{ pr.sku }}) - COGS {{ formatCents(pr.unitCogsCents) }} -
-                  {{ pr.available > 0 ? `available ${pr.available}` : 'unavailable' }}
-                </option>
+    <Skeleton v-if="loading" :lines="4" height="2.5rem" label="Loading schedules" />
+
+    <div v-else class="stack">
+      <!-- Create a schedule -->
+      <Card title="New schedule" subtitle="Each cycle prices from the current catalog and is held if the margin would go negative.">
+        <UiAlert v-if="patientsUnavailable" tone="info">The patient list is not available yet.</UiAlert>
+        <form v-else class="create" novalidate @submit.prevent="createSchedule">
+          <div class="grid-2">
+            <UiField v-slot="f" label="Patient">
+              <select :id="f.id" v-model="form.patientId" :disabled="busy" data-testid="schedule-patient">
+                <option value="" disabled>Select a patient</option>
+                <option v-for="p in patients" :key="p.id" :value="p.id">{{ p.name }}</option>
               </select>
-            </label>
-
-            <label class="field qty">
-              Qty
-              <input v-model.number="line.qty" type="number" min="1" max="100" step="1" :disabled="busy" />
-            </label>
-
-            <div class="field">
-              <span class="label-row">Catalog price <span class="readonly-tag">indicative</span></span>
-              <output class="price" :data-test="`unit-price-${i}`">
-                {{ line.sku && catalogPriceCents(line.sku) !== null ? formatCents(catalogPriceCents(line.sku)) : 'catalog price pending' }}
-              </output>
-            </div>
-
-            <button type="button" class="link remove" :disabled="busy || form.lines.length === 1" @click="removeDraftLine(i)">
-              remove
-            </button>
+            </UiField>
+            <UiField v-slot="f" label="Every (days)" hint="Between 7 and 90 days." :error="intervalError">
+              <input
+                :id="f.id"
+                v-model="form.intervalDays"
+                type="number"
+                inputmode="numeric"
+                min="7"
+                max="90"
+                step="1"
+                class="interval"
+                :aria-describedby="f.describedby"
+                :aria-invalid="f.invalid ? 'true' : undefined"
+                :disabled="busy"
+                data-testid="schedule-interval"
+              />
+            </UiField>
           </div>
-          <button type="button" class="link" :disabled="busy" @click="addDraftLine">+ add product</button>
-        </div>
 
-        <p class="hint">
-          A schedule stores product, quantity and interval only - no price or margin is set
-          here. The catalog price above is INDICATIVE: each cycle derives the price and COGS
-          from the catalog at run time and holds the order if margin would go negative
-          (ADR-024). The provider never types a price.
-        </p>
+          <fieldset class="lines">
+            <legend>Products</legend>
+            <p class="subtle cogs-note">Product options show Cerbo's cost. <DemoBadge label="Demo: COGS" :reason="COGS_REASON" /></p>
+            <div v-for="(line, i) in form.lines" :key="i" class="draft-line" data-testid="draft-line">
+              <div class="line-field product">
+                <label :for="`line-sku-${i}`" class="field-label">Product {{ form.lines.length > 1 ? i + 1 : '' }}</label>
+                <select :id="`line-sku-${i}`" v-model="line.sku" :disabled="busy" :data-testid="`line-sku-${i}`">
+                  <option value="" disabled>Select a product</option>
+                  <option v-for="pr in products" :key="pr.sku" :value="pr.sku">
+                    {{ pr.name }} ({{ pr.sku }}) - COGS {{ formatMoney(pr.unitCogsCents) }} -
+                    {{ pr.available > 0 ? `${pr.available} available` : 'unavailable' }}
+                  </option>
+                </select>
+              </div>
+              <div class="line-field">
+                <span class="field-label" aria-hidden="true">Quantity</span>
+                <QuantityStepper v-model="line.qty" :label="`Quantity for line ${i + 1}`" :disabled="busy" :input-test-id="`line-qty-${i}`" />
+              </div>
+              <div class="line-field">
+                <span class="field-label">Catalog price <span class="subtle">(indicative)</span></span>
+                <output class="price money" :data-test="`unit-price-${i}`">
+                  {{ line.sku && catalogPriceCents(line.sku) !== null ? formatMoney(catalogPriceCents(line.sku)) : line.sku ? 'Price pending' : '-' }}
+                </output>
+              </div>
+              <button
+                type="button"
+                class="btn-link remove"
+                :disabled="busy || form.lines.length === 1"
+                :aria-label="`Remove ${lineName(line, i)}`"
+                :data-testid="`remove-line-${i}`"
+                @click="removeDraftLine(i)"
+              >Remove</button>
+            </div>
+            <button type="button" class="btn-link" :disabled="busy" data-testid="add-line" @click="addDraftLine">+ Add another product</button>
+          </fieldset>
 
-        <button type="button" class="btn-primary" :disabled="busy" @click="createSchedule">Create schedule</button>
-      </template>
-      <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
-    </section>
+          <UiAlert v-if="formError" tone="danger">{{ formError }}</UiAlert>
+          <div>
+            <UiButton type="submit" variant="primary" :busy="busy" busy-label="Creating..." data-testid="create-schedule">Create schedule</UiButton>
+          </div>
+        </form>
+      </Card>
 
-    <!-- Existing schedules -->
-    <section class="list">
-      <h3>Schedules</h3>
-      <p v-if="schedules.length === 0" class="notice">No schedules yet.</p>
-      <article v-for="s in schedules" :key="s.id" class="schedule">
-        <header class="schedule-head">
-          <span class="status" :class="s.status">{{ s.status }}</span>
-          <span>every {{ s.intervalDays }} days</span>
-          <span>per cycle (indicative): {{ formatCents(s.perCycleSubtotalCents) }}</span>
-          <span :class="s.authorized ? 'auth-yes' : 'auth-no'">
-            {{ s.authorized ? 'authorized' : 'awaiting patient authorization' }}
-          </span>
-        </header>
+      <!-- Existing schedules -->
+      <section class="stack" aria-labelledby="schedules-title">
+        <h2 id="schedules-title" class="section-title">Schedules</h2>
+        <UiAlert v-if="actionError" tone="danger">{{ actionError }}</UiAlert>
+        <EmptyState v-if="schedules.length === 0" title="No schedules yet" message="Create one above to start a repeat order." />
 
-        <ul class="items">
-          <li v-for="l in s.lines" :key="l.id">
-            {{ l.qty }} x {{ l.name }}
-            <template v-if="catalogPriceCents(l.sku) !== null">
-              @ {{ formatCents(catalogPriceCents(l.sku)) }} <span class="locked-tag">indicative</span>
-            </template>
-          </li>
-        </ul>
-        <p class="locked-note">
-          Prices are INDICATIVE (current catalog). Each cycle derives both the price and COGS
-          from the catalog at run time (ADR-024), so a later catalog change flows into future
-          cycles; a cycle parks on_hold if margin would go negative. The figures below under
-          "Cycles" are the ACTUAL amounts charged each run.
-        </p>
+        <Card v-for="s in schedules" :key="s.id" :title="patientName(s.patientId)" data-testid="schedule">
+          <template #actions><StatusChip :status="s.status" /></template>
 
-        <p v-if="!s.authorized && s.payUrl" class="paylink">
-          Authorize link: <code>{{ origin }}{{ s.payUrl }}</code>
-          <button type="button" class="link" @click="copy(s.payUrl)">copy</button>
-        </p>
+          <dl class="facts">
+            <div><dt>Interval</dt><dd>Every {{ s.intervalDays }} days</dd></div>
+            <div><dt>Next run</dt><dd>{{ s.status === 'active' ? shortDate(s.nextRunAt) : '-' }}</dd></div>
+            <div><dt>Per cycle (indicative)</dt><dd><Money :cents="s.perCycleSubtotalCents" /></dd></div>
+            <div>
+              <dt>Authorization</dt>
+              <dd>
+                <span class="badge" :class="s.authorized ? 'badge-success' : 'badge-warning'">
+                  {{ s.authorized ? 'Authorized' : 'Waiting for patient' }}
+                </span>
+              </dd>
+            </div>
+          </dl>
 
-        <div class="actions">
-          <button type="button" :disabled="rowBusyId === s.id || s.status !== 'active'" @click="act(s.id, 'run')">Run cycle now</button>
-          <button type="button" class="link" :disabled="rowBusyId === s.id || s.status !== 'active'" @click="act(s.id, 'pause')">pause</button>
-          <button type="button" class="link" :disabled="rowBusyId === s.id || s.status !== 'paused'" @click="act(s.id, 'resume')">resume</button>
-          <button type="button" class="link" :disabled="rowBusyId === s.id || s.status === 'cancelled'" @click="act(s.id, 'cancel')">cancel</button>
-        </div>
+          <ul class="items">
+            <li v-for="l in s.lines" :key="l.id">{{ l.qty }} × {{ l.name }}</li>
+          </ul>
 
-        <div v-if="s.cycles.length" class="cycles">
-          <h4>Cycles</h4>
-          <table>
-            <thead><tr><th>#</th><th>status</th><th>reason</th><th>subtotal</th></tr></thead>
-            <tbody>
-              <tr v-for="c in s.cycles" :key="c.orderId" :class="{ held: c.status === 'on_hold' }">
-                <td>{{ c.cycleNumber }}</td>
-                <td>{{ c.status }}</td>
-                <td>{{ c.holdReason ?? '-' }}</td>
-                <td>{{ formatCents(c.subtotalCents) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </article>
-    </section>
+          <!-- On-hold cycles: what happened and how to fix it -->
+          <div v-if="heldCycles(s).length" class="holds">
+            <UiAlert
+              v-for="c in heldCycles(s)"
+              :key="c.orderId"
+              tone="warning"
+              :title="`Cycle ${c.cycleNumber} is on hold: ${holdLabel(c.holdReason)}`"
+              data-testid="hold-alert"
+            >
+              {{ holdFix(c.holdReason) }}
+            </UiAlert>
+          </div>
 
-    <p class="actor-note">Acting as <code>{{ currentUserId }}</code>.</p>
+          <div v-if="!s.authorized && s.payUrl" class="auth-link">
+            <label :for="`auth-${s.id}`" class="field-label">Patient authorize link</label>
+            <div class="auth-row">
+              <input :id="`auth-${s.id}`" :value="`${origin}${s.payUrl}`" readonly class="auth-input" @focus="($event.target as HTMLInputElement).select()" />
+              <button type="button" class="btn-sm" :data-testid="`copy-auth-${s.id}`" @click="copy(s)">{{ copiedId === s.id ? 'Copied' : 'Copy link' }}</button>
+            </div>
+            <p class="sr-only" role="status">{{ copiedId === s.id ? 'Link copied.' : '' }}</p>
+          </div>
+
+          <div class="actions">
+            <UiButton
+              v-if="s.status === 'active'"
+              variant="primary"
+              size="sm"
+              :busy="rowBusyId === s.id"
+              busy-label="Running..."
+              :data-testid="`run-${s.id}`"
+              @click="act(s, 'run')"
+            >Run cycle now</UiButton>
+            <UiButton v-if="s.status === 'active'" size="sm" :disabled="rowBusyId === s.id" :data-testid="`pause-${s.id}`" @click="act(s, 'pause')">Pause</UiButton>
+            <UiButton v-if="s.status === 'paused'" size="sm" :disabled="rowBusyId === s.id" :data-testid="`resume-${s.id}`" @click="act(s, 'resume')">Resume</UiButton>
+            <UiButton
+              v-if="s.status !== 'cancelled'"
+              variant="danger-quiet"
+              size="sm"
+              :disabled="rowBusyId === s.id"
+              :data-testid="`cancel-${s.id}`"
+              @click="cancelTarget = s"
+            >Cancel schedule</UiButton>
+          </div>
+
+          <div v-if="s.cycles.length" class="cycles">
+            <h3 class="cycles-title">Cycles</h3>
+            <div class="table-wrap">
+              <table class="table table-stack">
+                <thead>
+                  <tr>
+                    <th scope="col">Cycle</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Reason</th>
+                    <th scope="col" class="num">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="c in s.cycles" :key="c.orderId">
+                    <td data-label="Cycle"><RouterLink :to="{ name: 'order-audit', params: { id: c.orderId } }">Cycle {{ c.cycleNumber }}</RouterLink></td>
+                    <td data-label="Date">{{ shortDate(c.createdAt) }}</td>
+                    <td data-label="Status"><StatusChip :status="c.status" /></td>
+                    <td data-label="Reason">{{ holdLabel(c.holdReason) }}</td>
+                    <td data-label="Subtotal" class="num"><Money :cents="c.subtotalCents" /></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Card>
+      </section>
+    </div>
+
+    <ConfirmDialog
+      :open="cancelTarget !== null"
+      title="Cancel this schedule?"
+      confirm-label="Cancel schedule"
+      cancel-label="Keep schedule"
+      tone="danger"
+      :busy="rowBusyId !== null"
+      @confirm="confirmCancel"
+      @cancel="cancelTarget = null"
+    >
+      <p>
+        No more cycles will run for <strong>{{ cancelTarget ? patientName(cancelTarget.patientId) : '' }}</strong>.
+        Past cycles stay on record. This cannot be undone.
+      </p>
+    </ConfirmDialog>
   </section>
 </template>
 
 <style scoped>
-.recurring { max-width: 920px; }
-.field { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85em; color: #555; max-width: 22rem; margin-bottom: 0.6rem; }
-.create, .list { margin-bottom: 1.5rem; }
-.draft-line { display: flex; gap: 0.85rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.5rem; }
-.draft-line select { min-width: 20rem; }
-.draft-line .qty input { width: 6rem; }
-.label-row { display: inline-flex; align-items: center; gap: 0.4rem; }
-.readonly-tag { color: #888; font-size: 0.9em; font-style: italic; }
-.price { font-variant-numeric: tabular-nums; padding: 0.3rem 0; color: #222; }
-.hint { color: #555; font-size: 0.82em; margin: 0.6rem 0 0.8rem; }
-.remove { align-self: center; }
-.btn-primary { margin-top: 0.3rem; }
-.locked-tag { font-size: 0.75em; color: #888; font-style: italic; }
-.locked-note { color: #666; font-size: 0.8em; margin: 0.2rem 0 0.5rem; }
-.schedule { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; }
-.schedule-head { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.4rem; }
-.status { text-transform: uppercase; font-size: 0.8em; font-weight: 700; }
-.status.active { color: #1e7e34; }
-.status.paused { color: #b8860b; }
-.status.cancelled { color: #777; }
-.auth-yes { color: #1e7e34; }
-.auth-no { color: #b8860b; }
-.items { margin: 0.3rem 0; padding-left: 1.2rem; }
-.paylink code { font-size: 0.85em; }
-.actions { display: flex; gap: 0.8rem; align-items: center; margin: 0.5rem 0; }
-.cycles table { border-collapse: collapse; width: 100%; font-size: 0.9em; }
-.cycles th, .cycles td { border: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left; }
-.cycles tr.held { background: #fff4e5; }
-.link { background: none; border: none; color: #2a5db0; cursor: pointer; text-decoration: underline; padding: 0; }
-.notice { color: #555; }
-.page-error { color: #c0392b; border: 1px solid #c0392b; border-radius: 6px; padding: 0.5rem 0.75rem; }
-.actor-note { margin-top: 1.5rem; color: #888; font-size: 0.85em; }
+.section-title {
+  font-size: var(--text-xl);
+  margin: var(--space-2) 0 0;
+}
+.create {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.interval {
+  max-width: 8rem;
+}
+.lines {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  margin: 0;
+  min-width: 0;
+}
+.lines legend {
+  font-weight: 650;
+  padding: 0 var(--space-1);
+}
+.draft-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  align-items: flex-end;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.line-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.line-field.product {
+  flex: 1 1 18rem;
+}
+.field-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.cogs-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin: 0;
+}
+.price {
+  display: inline-block;
+  padding: 0.45rem 0;
+  min-height: 2.5rem;
+}
+.remove {
+  min-height: 2.5rem;
+}
+.lines > .btn-link {
+  margin-top: var(--space-3);
+}
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-8);
+  margin: 0 0 var(--space-3);
+}
+.facts div {
+  display: flex;
+  flex-direction: column;
+}
+.facts dt {
+  font-size: var(--text-xs);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.facts dd {
+  margin: 0;
+}
+.items {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+}
+.auth-link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+.auth-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.auth-input {
+  flex: 1 1 16rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: var(--surface-2);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.cycles {
+  margin-top: var(--space-4);
+}
+.cycles-title {
+  font-size: var(--text-md);
+  margin: 0 0 var(--space-2);
+}
+.holds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+@media (max-width: 640px) {
+  .line-field.product {
+    flex-basis: 100%;
+  }
+}
 </style>

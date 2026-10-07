@@ -1,28 +1,27 @@
 <script setup lang="ts">
-// Add a SKU to the draft (FR-1, FR-2, FR-3). Picks a product, quantity, and optionally a
-// margin %. Out-of-stock SKUs stay visible but are marked unavailable (FR-3 AC3).
+// Add a product to the draft (FR-1, FR-2, FR-3).
 //
-// PRICE IS READ-ONLY (owner requirement): the doctor SEES the seeded catalog list price
-// but never types one. The starting price is the catalog price; if the provider sets a
-// margin %, the server RE-DERIVES the price (priceFromMarginBps, ADR-005) and the derived
-// figure shows in the line + quote. Either way no price is typed. The API still accepts
-// unitPriceCents; here we send the catalog price as-is, or marginBps when it is set.
+// PRICE IS NOT EDITABLE IN AN ORDER (owner requirement). The provider sees the catalog
+// list price (read-only) and can only change it through Margin %. With margin blank we
+// send the list price as-is; with a margin we send marginBps and the SERVER derives the
+// price from Cerbo's cost (priceFromMarginBps, ADR-005). The UI never computes a price.
+// List prices themselves are maintained by Cerbo Admin.
 //
-// CATALOG PRICE SOURCE: ProductView.listPriceCents (integer cents, same convention as
-// unitCogsCents) - a required field on the catalog response, seeded per SKU.
+// Availability: out-of-stock products stay listed but disabled (FR-3 AC3); the chosen
+// product shows an In stock / Low stock / Out of stock chip from the API's `available`.
 import { ref, computed, watch } from 'vue'
 import type { ProductView } from '@cerbo/contracts'
 import { formatCents, marginPercentToBps } from './format'
 import DemoBadge from '../DemoBadge.vue'
+import QuantityStepper from '../ui/QuantityStepper.vue'
 
 const props = defineProps<{
   products: ProductView[]
   busy: boolean
   /** Error from the last add attempt (INSUFFICIENT_STOCK / MARGIN_NEGATIVE / other). */
   error: string | null
-  /** Quantity already on this draft per SKU (from the quote). A SKU already on the order
-   *  is REMOVED from the dropdown (owner UX) so it cannot be added twice at a different
-   *  margin; removing the item puts it back. Quantity changes happen on the item row. */
+  /** Quantity already on this draft per SKU. A SKU already on the order is hidden here
+   *  (change its quantity on the item row instead); removing the item brings it back. */
   onOrder?: Record<string, number>
 }>()
 
@@ -30,21 +29,30 @@ const emit = defineEmits<{
   (e: 'add', payload: { sku: string; qty: number; unitPriceCents?: number; marginBps?: number }): void
 }>()
 
-const sku = ref<string>('')
-const qty = ref<number>(1)
-const marginInput = ref<string>('')
-const inputError = ref<string | null>(null)
+const LOW_STOCK = 5
 
-// Products not yet on the order - the only ones that can be added. A SKU already on the
-// order is hidden here and only its quantity can change (on the item row); removing it
-// brings it back. Reactive, so add/remove updates the list immediately.
+const sku = ref<string>('')
+const qty = ref<number | string>(1)
+const marginInput = ref<string>('')
+const productError = ref<string | null>(null)
+const qtyError = ref<string | null>(null)
+const marginError = ref<string | null>(null)
+
 const addableProducts = computed(() => props.products.filter((p) => (props.onOrder?.[p.sku] ?? 0) === 0))
 const selectedProduct = computed(() => addableProducts.value.find((p) => p.sku === sku.value) ?? null)
-// The catalog list price for the chosen SKU (null only when no SKU is selected yet).
 const selectedListPrice = computed(() => selectedProduct.value?.listPriceCents ?? null)
 
-// If the selected SKU just became unselectable (it was added to the order), clear the
-// selection so the form does not hold a dangling value that is no longer in the list.
+function stockLabel(available: number): string {
+  if (available <= 0) return 'Out of stock'
+  if (available <= LOW_STOCK) return `Low stock - ${available} left`
+  return `In stock - ${available}`
+}
+function stockTone(available: number): string {
+  if (available <= 0) return 'badge-danger'
+  if (available <= LOW_STOCK) return 'badge-warning'
+  return 'badge-success'
+}
+
 watch(addableProducts, (list) => {
   if (sku.value && !list.some((p) => p.sku === sku.value)) {
     sku.value = ''
@@ -53,32 +61,29 @@ watch(addableProducts, (list) => {
 })
 
 function submit(): void {
-  inputError.value = null
+  productError.value = null
+  qtyError.value = null
+  marginError.value = null
   if (!sku.value) {
-    inputError.value = 'Choose a product.'
+    productError.value = 'Choose a product.'
     return
   }
   const qtyNum = Math.trunc(Number(qty.value))
   if (!Number.isInteger(qtyNum) || qtyNum < 1 || qtyNum > 100) {
-    inputError.value = 'Quantity must be a whole number from 1 to 100.'
+    qtyError.value = 'Quantity must be a whole number from 1 to 100.'
     return
   }
-
-  // A margin %, when set, overrides the catalog price: the server re-derives the price.
   if (marginInput.value.trim() !== '') {
     const bps = marginPercentToBps(marginInput.value)
     if (bps === null || bps > 9500) {
-      inputError.value = 'Enter a margin percent from 0 to 95.'
+      marginError.value = 'Enter a margin percent from 0 to 95.'
       return
     }
     emit('add', { sku: sku.value, qty: qtyNum, marginBps: bps })
     return
   }
-
-  // No margin: use the catalog price as-is (not typed by the doctor). A product is always
-  // selected here (guarded above), so its catalog price is present.
   if (selectedListPrice.value === null) {
-    inputError.value = 'Choose a product.'
+    productError.value = 'Choose a product.'
     return
   }
   emit('add', { sku: sku.value, qty: qtyNum, unitPriceCents: selectedListPrice.value })
@@ -86,118 +91,205 @@ function submit(): void {
 </script>
 
 <template>
-  <form class="add-line" @submit.prevent="submit">
-    <h3>Add item</h3>
-    <div class="controls">
-      <label class="field">
-        <span class="label-row">
-          Product
-          <DemoBadge
-            label="Demo: COGS"
-            reason="COGS is Cerbo's wholesale cost, shown in this list only to make the economics demonstrable. A prescribing doctor would not normally see it."
-          />
-        </span>
-        <select v-model="sku" :disabled="busy">
-          <option value="" disabled>Select a SKU</option>
-          <option
-            v-for="p in addableProducts"
-            :key="p.sku"
-            :value="p.sku"
-            :disabled="p.available <= 0"
-          >
-            {{ p.name }} ({{ p.sku }}) - COGS {{ formatCents(p.unitCogsCents) }} -
-            {{ p.available > 0 ? `available ${p.available}` : 'unavailable' }}
+  <form class="add-line" aria-labelledby="add-item-title" novalidate @submit.prevent="submit">
+    <h2 id="add-item-title" class="title">Add item</h2>
+
+    <div class="grid">
+      <div class="field product">
+        <label for="add-sku" class="label">Product</label>
+        <select
+          id="add-sku"
+          v-model="sku"
+          :disabled="busy"
+          :aria-invalid="productError ? 'true' : undefined"
+          aria-describedby="add-sku-detail"
+          data-testid="add-product"
+        >
+          <option value="" disabled>Select a product</option>
+          <option v-for="p in addableProducts" :key="p.sku" :value="p.sku" :disabled="p.available <= 0">
+            {{ p.name }} - {{ p.available > 0 ? stockLabel(p.available) : 'Out of stock' }}
           </option>
         </select>
-      </label>
-
-      <div class="field">
-        <span class="label-row">Unit price <span class="readonly-tag">read-only</span></span>
-        <output class="price" data-test="unit-price">
-          {{ selectedListPrice !== null ? formatCents(selectedListPrice) : '-' }}
-        </output>
+        <span v-if="productError" class="err">{{ productError }}</span>
+        <div id="add-sku-detail" class="detail">
+          <template v-if="selectedProduct">
+            <span class="badge" :class="stockTone(selectedProduct.available)" data-testid="stock-chip">{{ stockLabel(selectedProduct.available) }}</span>
+            <span class="sku">{{ selectedProduct.sku }}</span>
+          </template>
+          <span class="cogs">
+            Cerbo cost
+            <strong class="money" data-testid="add-cogs">{{ selectedProduct ? formatCents(selectedProduct.unitCogsCents) : '-' }}</strong>
+            <DemoBadge
+              label="Demo: COGS"
+              reason="COGS is Cerbo's wholesale cost, shown here only to make the economics demonstrable. A prescribing doctor would not normally see it."
+            />
+          </span>
+        </div>
       </div>
 
-      <label class="field">
-        Qty
-        <input v-model.number="qty" type="number" min="1" max="100" step="1" :disabled="busy" />
-      </label>
+      <div class="field">
+        <span id="add-price-label" class="label">List price <span class="tag">read-only</span></span>
+        <output class="price" aria-labelledby="add-price-label" data-test="unit-price">{{ selectedListPrice !== null ? formatCents(selectedListPrice) : '-' }}</output>
+      </div>
 
-      <label class="field">
+      <div class="field">
+        <span class="label" aria-hidden="true">Quantity</span>
+        <QuantityStepper v-model="qty" label="Quantity" :disabled="busy" :invalid="!!qtyError" data-testid="add-qty" />
+        <span v-if="qtyError" class="err">{{ qtyError }}</span>
+      </div>
+
+      <div class="field margin">
         <span class="label-row">
-          Margin %
-          <DemoBadge
-            reason="In production a Provider Admin sets margin in a separate login; it is editable on the doctor screen only to make the slice demonstrable."
-          />
+          <label for="add-margin" class="label">Margin %</label>
+          <span class="tag">optional</span>
+          <DemoBadge reason="In production a Provider Admin sets margin in a separate login; it is editable on the doctor screen only to make the slice demonstrable." />
         </span>
-        <input v-model="marginInput" type="text" inputmode="decimal" placeholder="optional" :disabled="busy" data-test="margin-input" />
-      </label>
+        <span class="pct">
+          <input
+            id="add-margin"
+            v-model="marginInput"
+            type="text"
+            inputmode="decimal"
+            placeholder="e.g. 40"
+            :disabled="busy"
+            :aria-invalid="marginError ? 'true' : undefined"
+            aria-describedby="add-margin-hint"
+            data-test="margin-input"
+          />
+          <span aria-hidden="true">%</span>
+        </span>
+        <span v-if="marginError" class="err">{{ marginError }}</span>
+      </div>
 
-      <button type="submit" class="btn-primary" :disabled="busy">Add to order</button>
+      <div class="submit">
+        <button type="submit" class="btn-primary" :disabled="busy" data-testid="add-submit">Add to order</button>
+      </div>
     </div>
 
-    <p class="hint">
-      The price starts from the catalog value. Set a margin % to have the server re-derive
-      the price - the new figure appears on the line and in the quote. You never type a price.
-      Leave margin blank to use the catalog price.
+    <p id="add-margin-hint" class="hint">
+      Blank margin uses the list price. A margin sets the price from Cerbo's cost so that
+      your share of the price is that percent, before the platform fee - it can raise or
+      lower the price. The resulting price shows on the item line.
     </p>
-
-    <p v-if="inputError" class="inline-error" role="alert">{{ inputError }}</p>
-    <p v-if="error" class="inline-error" role="alert" data-test="add-error">{{ error }}</p>
+    <p v-if="error" class="field-alert" role="alert" data-test="add-error">{{ error }}</p>
   </form>
 </template>
 
 <style scoped>
 .add-line {
-  border: 1px solid var(--border);
   background: var(--surface);
-  border-radius: var(--radius);
-  padding: 0.85rem 1rem;
-  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
+  padding: var(--space-5);
 }
-.add-line h3 {
-  margin: 0 0 0.6rem;
+.title {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-4);
 }
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.85rem;
-  align-items: flex-end;
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
 }
 .field {
   display: flex;
   flex-direction: column;
-  font-size: 0.82em;
-  color: var(--muted);
-  gap: 0.25rem;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.label,
+.label-row {
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 .label-row {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-2);
 }
-.readonly-tag {
-  color: var(--subtle);
-  font-size: 0.9em;
-  font-style: italic;
+.tag {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--muted);
 }
-.price {
-  font-variant-numeric: tabular-nums;
-  padding: 0.3rem 0;
+.detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--muted);
+  margin-top: var(--space-1);
+}
+.sku {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.cogs {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.cogs strong {
   color: var(--text);
 }
-.hint {
-  color: var(--muted);
-  font-size: 0.82em;
-  margin: 0.6rem 0 0;
+.price {
+  display: flex;
+  align-items: center;
+  min-height: 2.5rem;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
-.inline-error {
+.pct {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.pct input {
+  width: 100%;
+  min-width: 5rem;
+}
+.product {
+  grid-column: span 2;
+}
+.field > :deep(.stepper) {
+  align-self: flex-start;
+}
+.submit {
+  align-self: end;
+}
+.submit button {
+  width: 100%;
+}
+.err {
   color: var(--danger);
-  background: var(--danger-tint);
-  border: 1px solid var(--danger);
+  font-size: var(--text-sm);
+  font-weight: 550;
+}
+.hint {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.field-alert {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger-border);
+  border-left: 4px solid var(--danger);
   border-radius: var(--radius-sm);
-  padding: 0.4rem 0.6rem;
-  margin: 0.6rem 0 0;
+  background: var(--danger-tint);
+  color: var(--danger-strong);
+  font-weight: 550;
+}
+@media (max-width: 560px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .product {
+    grid-column: auto;
+  }
 }
 </style>

@@ -1,28 +1,31 @@
 <script setup lang="ts">
-// Provider order builder (FR-1..FR-4). Create a draft for one of the practice's
-// patients, add SKUs with a price or margin %, watch the live server quote (price,
-// COGS, fee, net margin), then send and surface the copyable patient pay link.
+// Provider order builder (FR-1..FR-4): pick a patient, add products (price from the
+// catalog, adjustable only via margin %), watch the live server quote, review and send,
+// then share the patient pay link.
 //
 // The UI only DISPLAYS money; every figure comes from GET /api/orders/:id/quote
-// (AGENTS.md money rule 2). Price vs margin % is just an input mode - the server
-// derives and stores the canonical price (ADR-005).
+// (AGENTS.md money rule 2). The server derives the canonical price (ADR-005).
+//
+// Uses only useRoute().query and useRouter().replace from vue-router (its tests mock
+// exactly those), so links out of this view are plain anchors.
 import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
-import { currentUserId } from '../../api/session'
-import type {
-  ProductView,
-  OrderView,
-  OrderStatus,
-  QuoteResponse,
-  SendResponse,
-  PatientView
-} from '@cerbo/contracts'
-import { insufficientStockMessage } from '../../components/order/format'
+import type { ProductView, OrderView, OrderStatus, QuoteResponse, SendResponse, PatientView } from '@cerbo/contracts'
+import { insufficientStockMessage, formatCents } from '../../components/order/format'
 import AddLineForm from '../../components/order/AddLineForm.vue'
 import LineRow from '../../components/order/LineRow.vue'
 import QuoteSummary from '../../components/order/QuoteSummary.vue'
 import CopyLink from '../../components/order/CopyLink.vue'
+import PageHeader from '../../components/ui/PageHeader.vue'
+import Card from '../../components/ui/Card.vue'
+import UiAlert from '../../components/ui/UiAlert.vue'
+import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import UiButton from '../../components/ui/UiButton.vue'
+import { toast } from '../../components/ui/toast'
+import { formatMoney } from '../../utils/money'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,17 +33,14 @@ const router = useRouter()
 const products = ref<ProductView[]>([])
 const patients = ref<PatientView[]>([])
 const patientsUnavailable = ref(false)
+const loading = ref(true)
 const loadError = ref<string | null>(null)
 
 const selectedPatientId = ref<string>('')
-// The active order is tracked by id + current status (sourced from POST /orders on a new
-// draft, or GET /orders/:id/quote when resuming an existing draft). We never need the
-// full OrderView in the builder, so this works for both entry paths.
+const orderPatientId = ref<string | null>(null)
 const orderId = ref<string | null>(null)
 const orderStatus = ref<OrderStatus | null>(null)
 const quote = ref<QuoteResponse | null>(null)
-// Set when a resume attempt fails (unknown id, not the provider's order, or not a draft);
-// the start panel shows it instead of silently opening a blank draft.
 const resumeError = ref<string | null>(null)
 
 const busy = ref(false)
@@ -50,37 +50,49 @@ const lineErrors = ref<Record<string, string>>({})
 const pageError = ref<string | null>(null)
 const sendResult = ref<SendResponse | null>(null)
 
+const confirmSendOpen = ref(false)
+const removeTarget = ref<{ id: string; name: string } | null>(null)
+
 const hasOrder = computed(() => orderId.value !== null)
 const lines = computed(() => quote.value?.lines ?? [])
 const isDraft = computed(() => orderStatus.value === 'draft')
 const canSend = computed(() => isDraft.value && lines.value.length > 0)
-// Quantity already on this draft per SKU, for the Add form's "already on this order: N"
-// note. Straight from the quote lines - a display value, never stock arithmetic.
 const onOrderBySku = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
   for (const l of lines.value) map[l.sku] = l.qty
   return map
+})
+const patientName = computed(() => {
+  const id = orderPatientId.value ?? selectedPatientId.value
+  return patients.value.find((p) => p.id === id)?.name ?? null
+})
+
+const step = computed(() => (!hasOrder.value ? 1 : sendResult.value || !isDraft.value ? 3 : 2))
+const STEPS = ['Patient', 'Items', 'Review & send']
+
+const title = computed(() => {
+  if (!hasOrder.value) return 'New order'
+  if (sendResult.value || orderStatus.value === 'sent') return patientName.value ? `Sent to ${patientName.value}` : 'Order sent'
+  return patientName.value ? `Draft order for ${patientName.value}` : 'Draft order'
 })
 
 /** Turn an API error into a provider-facing message (exact copy for known codes). */
 function messageFor(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.code === 'INSUFFICIENT_STOCK') {
-      // Prefer the server-computed remaining headroom (details.remaining); fall back to
-      // raw available if an older server omits it. Never subtract in the browser.
+      // Prefer the server-computed remaining headroom; never subtract in the browser.
       const details = err.details as { available?: unknown; remaining?: unknown }
       const n = Number(details.remaining ?? details.available ?? 0)
       return insufficientStockMessage(n)
     }
     if (err.code === 'MARGIN_NEGATIVE') {
-      return "This line's margin after the platform fee would be negative. Raise the price or margin %."
+      return "This line's margin after the platform fee would be negative. Raise the margin %."
     }
     return err.message
   }
   return 'Something went wrong. Please try again.'
 }
 
-/** Map a MARGIN_NEGATIVE error to the line id at the reported position, if any. */
 function lineIdAtErrorPosition(err: unknown): string | null {
   if (err instanceof ApiError && typeof (err.details as { position?: unknown }).position === 'number') {
     const position = (err.details as { position: number }).position
@@ -100,9 +112,6 @@ async function loadPatients(): Promise<void> {
     patients.value = res.patients
     patientsUnavailable.value = false
   } catch (err) {
-    // GET /api/patients is still a 501 stub (unassigned at scaffold time; now owned by
-    // T3). Degrade to a clear state instead of crashing; create-draft resumes once it
-    // lands. Any other error is surfaced normally.
     if (err instanceof ApiError && (err.status === 501 || err.code === 'NOT_IMPLEMENTED')) {
       patientsUnavailable.value = true
       patients.value = []
@@ -112,7 +121,16 @@ async function loadPatients(): Promise<void> {
   }
 }
 
-/** Normalise a route query value (string | string[] | undefined) to a single string. */
+/** Best-effort lookup of a resumed draft's patient (for the title). Never fatal. */
+async function loadOrderPatient(id: string): Promise<void> {
+  try {
+    const res = await apiRequest<{ orders?: Array<{ id: string; patientId: string }> }>('/orders?status=draft')
+    orderPatientId.value = res?.orders?.find((o) => o.id === id)?.patientId ?? null
+  } catch {
+    orderPatientId.value = null
+  }
+}
+
 function queryString(value: unknown): string | null {
   if (typeof value === 'string' && value !== '') return value
   if (Array.isArray(value) && typeof value[0] === 'string' && value[0] !== '') return value[0]
@@ -125,16 +143,14 @@ onMounted(async () => {
   } catch (err) {
     loadError.value = messageFor(err)
   }
-  // Resume an existing draft when arrived at as /orders/new?orderId=<id> (e.g. from the
-  // Orders list). Done after the catalog/patients load so the builder is ready to use.
   const resumeId = queryString(route.query.orderId)
   if (resumeId) await resumeOrder(resumeId)
+  loading.value = false
 })
 
 async function refreshQuote(): Promise<void> {
   if (!orderId.value) return
   quote.value = await apiRequest<QuoteResponse>(`/orders/${orderId.value}/quote`)
-  // Keep the tracked status in sync with the server (e.g. draft -> sent after send).
   orderStatus.value = quote.value.status
 }
 
@@ -144,12 +160,10 @@ async function startOrder(): Promise<void> {
   resumeError.value = null
   busy.value = true
   try {
-    const created = await apiRequest<OrderView>('/orders', {
-      method: 'POST',
-      body: { patientId: selectedPatientId.value }
-    })
+    const created = await apiRequest<OrderView>('/orders', { method: 'POST', body: { patientId: selectedPatientId.value } })
     orderId.value = created.id
     orderStatus.value = created.status
+    orderPatientId.value = selectedPatientId.value
     sendResult.value = null
     lineErrors.value = {}
     await refreshQuote()
@@ -161,11 +175,9 @@ async function startOrder(): Promise<void> {
 }
 
 /**
- * Resume an existing draft by id, hydrating the builder from GET /orders/:id/quote (no
- * new endpoint needed - the quote carries id, status, totals and lines). Degrades
- * cleanly: a 404 is the ownership check (AGENTS section 7 returns 404, not 403, so
- * existence is not leaked) and a non-draft order is read-only, both surfaced as a
- * message rather than a crash or a silent blank draft.
+ * Resume an existing draft by id from GET /orders/:id/quote. A 404 is the ownership
+ * check (existence is not leaked) and a non-draft order is read-only; both are shown
+ * as a message rather than a crash or a silent blank draft.
  */
 async function resumeOrder(id: string): Promise<void> {
   pageError.value = null
@@ -182,6 +194,7 @@ async function resumeOrder(id: string): Promise<void> {
     quote.value = q
     sendResult.value = null
     lineErrors.value = {}
+    void loadOrderPatient(q.orderId)
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       resumeError.value = 'That order was not found. It may not be one of your orders, or it no longer exists.'
@@ -200,6 +213,8 @@ async function addLine(payload: { sku: string; qty: number; unitPriceCents?: num
   try {
     await apiRequest<OrderView>(`/orders/${orderId.value}/lines`, { method: 'POST', body: payload })
     await refreshQuote()
+    const name = products.value.find((p) => p.sku === payload.sku)?.name ?? payload.sku
+    toast(`Added ${name}.`)
   } catch (err) {
     addError.value = messageFor(err)
   } finally {
@@ -207,15 +222,16 @@ async function addLine(payload: { sku: string; qty: number; unitPriceCents?: num
   }
 }
 
-async function commitLine(lineId: string, payload: { qty: number; unitPriceCents?: number; marginBps?: number }): Promise<void> {
+async function patchLine(lineId: string, body: { qty?: number; marginBps?: number }): Promise<void> {
   if (!orderId.value) return
   const next = { ...lineErrors.value }
   delete next[lineId]
   lineErrors.value = next
   lineBusyId.value = lineId
   try {
-    await apiRequest<OrderView>(`/orders/${orderId.value}/lines/${lineId}`, { method: 'PATCH', body: payload })
+    await apiRequest<OrderView>(`/orders/${orderId.value}/lines/${lineId}`, { method: 'PATCH', body })
     await refreshQuote()
+    toast(body.marginBps !== undefined ? 'Margin applied - price updated.' : 'Quantity updated.')
   } catch (err) {
     const targetId = lineIdAtErrorPosition(err) ?? lineId
     lineErrors.value = { ...lineErrors.value, [targetId]: messageFor(err) }
@@ -224,19 +240,22 @@ async function commitLine(lineId: string, payload: { qty: number; unitPriceCents
   }
 }
 
-async function removeLine(lineId: string): Promise<void> {
-  if (!orderId.value) return
-  lineBusyId.value = lineId
+async function confirmRemove(): Promise<void> {
+  const target = removeTarget.value
+  if (!orderId.value || !target) return
+  lineBusyId.value = target.id
   try {
-    await apiRequest<OrderView>(`/orders/${orderId.value}/lines/${lineId}`, { method: 'DELETE' })
+    await apiRequest<OrderView>(`/orders/${orderId.value}/lines/${target.id}`, { method: 'DELETE' })
     const next = { ...lineErrors.value }
-    delete next[lineId]
+    delete next[target.id]
     lineErrors.value = next
     await refreshQuote()
+    toast(`Removed ${target.name}.`)
   } catch (err) {
-    lineErrors.value = { ...lineErrors.value, [lineId]: messageFor(err) }
+    lineErrors.value = { ...lineErrors.value, [target.id]: messageFor(err) }
   } finally {
     lineBusyId.value = null
+    removeTarget.value = null
   }
 }
 
@@ -255,12 +274,14 @@ async function send(): Promise<void> {
     else pageError.value = messageFor(err)
   } finally {
     busy.value = false
+    confirmSendOpen.value = false
   }
 }
 
 function newOrder(): void {
   orderId.value = null
   orderStatus.value = null
+  orderPatientId.value = null
   quote.value = null
   sendResult.value = null
   lineErrors.value = {}
@@ -268,156 +289,360 @@ function newOrder(): void {
   pageError.value = null
   resumeError.value = null
   selectedPatientId.value = ''
-  // Drop a lingering ?orderId= so a refresh does not re-resume the finished order.
   if (route.query.orderId) void router.replace({ name: 'order-new' })
+}
+
+function goOrders(e: Event): void {
+  const r = router as unknown as { push?: (to: string) => unknown }
+  if (r.push) {
+    e.preventDefault()
+    void r.push('/orders')
+  }
 }
 </script>
 
 <template>
   <section class="order-builder">
-    <h2>New Order</h2>
+    <PageHeader :title="title">
+      <template #back><a href="/orders" @click="goOrders">← All orders</a></template>
+      <template v-if="hasOrder" #actions>
+        <UiButton variant="secondary" size="sm" :disabled="busy" data-testid="new-order" @click="newOrder">Start another order</UiButton>
+      </template>
+    </PageHeader>
 
-    <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
+    <ol class="steps" aria-label="Progress">
+      <li v-for="(s, i) in STEPS" :key="s" :class="{ done: step > i + 1, current: step === i + 1 }" :aria-current="step === i + 1 ? 'step' : undefined">
+        <span class="step-num" aria-hidden="true">{{ step > i + 1 ? '✓' : i + 1 }}</span>
+        <span class="step-label">{{ s }}</span>
+      </li>
+    </ol>
 
-    <!-- Patient selection + draft creation (FR-1 AC1) -->
-    <section v-if="!hasOrder" class="start">
+    <UiAlert v-if="loadError" tone="danger" title="Could not load the catalog">{{ loadError }}</UiAlert>
+
+    <Skeleton v-if="loading" :lines="4" height="2.5rem" label="Loading order builder" />
+
+    <!-- Step 1: patient -->
+    <Card v-else-if="!hasOrder" title="Patient" subtitle="Who is this order for?" class="start">
       <p v-if="resumeError" class="page-error" role="alert" data-test="resume-error">{{ resumeError }}</p>
-      <h3>Patient</h3>
-      <p v-if="patientsUnavailable" class="notice" role="status">
-        The patient list is not yet available (the patients endpoint is still being
-        implemented). You can create an order here once it is live.
-      </p>
+      <UiAlert v-if="patientsUnavailable" tone="info">
+        The patient list is not available yet. You can create an order here once it is live.
+      </UiAlert>
       <template v-else>
-        <label class="field">
-          Choose a patient
-          <select v-model="selectedPatientId" :disabled="busy || patients.length === 0">
-            <option value="" disabled>Select a patient</option>
-            <option v-for="p in patients" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
-        </label>
-        <p v-if="patients.length === 0" class="notice">No patients found for your practice.</p>
-        <button type="button" class="btn-primary" :disabled="busy || !selectedPatientId" @click="startOrder">Start draft order</button>
+        <EmptyState v-if="patients.length === 0" title="No patients found" message="Your practice has no patients yet." />
+        <form v-else class="start-form" @submit.prevent="startOrder">
+          <div class="field">
+            <label for="patient-select">Choose a patient</label>
+            <select id="patient-select" v-model="selectedPatientId" :disabled="busy" data-testid="patient-select">
+              <option value="" disabled>Select a patient</option>
+              <option v-for="p in patients" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
+          </div>
+          <UiButton type="submit" variant="primary" :busy="busy" busy-label="Starting..." :disabled="!selectedPatientId" data-testid="start-order">
+            Start order
+          </UiButton>
+        </form>
       </template>
       <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
-    </section>
+    </Card>
 
-    <!-- Draft builder -->
-    <section v-else class="builder">
-      <div class="order-meta">
-        <span>Order <code>{{ orderId }}</code></span>
-        <span class="status">status: {{ orderStatus }}</span>
-        <button type="button" class="btn-link" :disabled="busy" @click="newOrder">Start another order</button>
+    <!-- Steps 2-3: builder -->
+    <div v-else class="layout">
+      <div class="main-col">
+        <details class="order-details">
+          <summary>Order details</summary>
+          <p>Order ID <code>{{ orderId }}</code> - status: {{ orderStatus }}</p>
+        </details>
+
+        <UiAlert v-if="pageError" tone="danger">{{ pageError }}</UiAlert>
+
+        <!-- Sent: success state -->
+        <Card v-if="sendResult" tone="success" class="sent">
+          <template #header>
+            <h2 class="sent-title">✓ Sent to {{ patientName ?? 'the patient' }}</h2>
+          </template>
+          <p>
+            Stock is reserved for 7 days. The patient pays from the link below; you will see the
+            order move to <strong>Paid</strong> in Orders.
+          </p>
+          <CopyLink :payUrl="sendResult.payUrl" />
+          <div class="sent-actions">
+            <UiButton variant="primary" data-testid="sent-new-order" @click="newOrder">Start another order</UiButton>
+            <a href="/orders" class="btn" @click="goOrders">View all orders</a>
+          </div>
+        </Card>
+
+        <AddLineForm v-if="isDraft" :products="products" :busy="busy" :error="addError" :on-order="onOrderBySku" @add="addLine" />
+
+        <section class="items" aria-labelledby="items-title">
+          <h2 id="items-title" class="section-title">Items <span v-if="lines.length" class="count">({{ lines.length }})</span></h2>
+          <EmptyState v-if="lines.length === 0" title="No items yet" message="Add a product above to start the order." />
+          <div v-else class="table-wrap">
+            <table class="table table-stack items-table">
+              <thead>
+                <tr>
+                  <th scope="col">Item</th>
+                  <th scope="col">Qty</th>
+                  <th scope="col" class="num">Unit price</th>
+                  <th scope="col" class="num">Line total</th>
+                  <th scope="col" class="num">COGS</th>
+                  <th scope="col" class="num">Fee</th>
+                  <th scope="col" class="num">Net margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                <LineRow
+                  v-for="line in lines"
+                  :key="line.id"
+                  :line="line"
+                  :busy="busy || lineBusyId === line.id || !isDraft"
+                  :error="lineErrors[line.id] ?? null"
+                  @commit="(payload) => patchLine(line.id, payload)"
+                  @margin="(payload) => patchLine(line.id, payload)"
+                  @remove="() => (removeTarget = { id: line.id, name: line.name })"
+                />
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
-      <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
+      <aside class="side-col">
+        <div class="sticky">
+          <QuoteSummary :totals="quote?.totals ?? null" :item-count="lines.length">
+            <div v-if="isDraft" class="send">
+              <UiButton variant="primary" block :disabled="!canSend || busy" data-testid="review-send" @click="confirmSendOpen = true">
+                Review & send
+              </UiButton>
+              <p v-if="!canSend" class="subtle">Add at least one item to send.</p>
+            </div>
+          </QuoteSummary>
+        </div>
+      </aside>
+    </div>
 
-      <AddLineForm
-        v-if="isDraft"
-        :products="products"
-        :busy="busy"
-        :error="addError"
-        :on-order="onOrderBySku"
-        @add="addLine"
-      />
+    <!-- Mobile: total + send stays in reach -->
+    <div v-if="hasOrder && isDraft && lines.length" class="mobile-bar">
+      <span class="mobile-total">
+        <span class="subtle">Patient pays</span>
+        <strong class="money">{{ formatMoney(quote?.totals?.subtotalCents) }}</strong>
+      </span>
+      <UiButton variant="primary" :disabled="!canSend || busy" @click="confirmSendOpen = true">Review & send</UiButton>
+    </div>
 
-      <div class="lines">
-        <h3>Items</h3>
-        <p v-if="lines.length === 0" class="notice">No items yet. Add one above.</p>
-        <table v-else class="items-table">
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th class="num">Qty</th>
-              <th class="num">Unit price</th>
-              <th class="num">Line total</th>
-              <th class="num">COGS</th>
-              <th class="num">Fee</th>
-              <th class="num">Net margin</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <LineRow
-              v-for="line in lines"
-              :key="line.id"
-              :line="line"
-              :busy="busy || lineBusyId === line.id"
-              :error="lineErrors[line.id] ?? null"
-              @commit="(payload) => commitLine(line.id, payload)"
-              @remove="() => removeLine(line.id)"
-            />
-          </tbody>
-        </table>
-      </div>
+    <ConfirmDialog
+      :open="confirmSendOpen"
+      title="Send this order?"
+      confirm-label="Send to patient"
+      :busy="busy"
+      @confirm="send"
+      @cancel="confirmSendOpen = false"
+    >
+      <p>
+        <strong>{{ patientName ?? 'The patient' }}</strong> will get a pay link. Stock is reserved
+        for 7 days, and the order can no longer be edited.
+      </p>
+      <ul class="review-list">
+        <li v-for="l in lines" :key="l.id">
+          <span>{{ l.qty }} × {{ l.name }}</span>
+          <span class="money">{{ formatCents(l.lineTotalCents) }}</span>
+        </li>
+      </ul>
+      <p class="review-total">
+        <span>Patient pays</span>
+        <strong class="money">{{ quote?.totals ? formatCents(quote.totals.subtotalCents) : '-' }}</strong>
+      </p>
+    </ConfirmDialog>
 
-      <QuoteSummary :totals="quote?.totals ?? null" />
-
-      <div class="actions" v-if="isDraft">
-        <button type="button" class="btn-primary" :disabled="!canSend || busy" @click="send">Send to patient</button>
-      </div>
-
-      <CopyLink v-if="sendResult" :payUrl="sendResult.payUrl" />
-    </section>
-
-    <p class="actor-note">Acting as <code>{{ currentUserId }}</code>.</p>
+    <ConfirmDialog
+      :open="removeTarget !== null"
+      title="Remove this item?"
+      confirm-label="Remove item"
+      tone="danger"
+      :busy="lineBusyId !== null"
+      @confirm="confirmRemove"
+      @cancel="removeTarget = null"
+    >
+      <p>{{ removeTarget?.name }} will be taken off this draft. You can add it again later.</p>
+    </ConfirmDialog>
   </section>
 </template>
 
 <style scoped>
-.order-builder {
-  max-width: 920px;
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-6);
+}
+.steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 550;
+}
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.steps li.current {
+  color: var(--brand-strong);
+}
+.steps li.current .step-num {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #fff;
+}
+.steps li.done .step-num {
+  border-color: var(--success);
+  background: var(--success-tint);
+  color: var(--success);
+}
+.start {
+  max-width: 34rem;
+}
+.start-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
 }
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.9em;
-  max-width: 20rem;
-  margin-bottom: 0.6rem;
+  gap: var(--space-1);
+  flex: 1 1 16rem;
 }
-.order-meta {
+.field label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17.5rem;
+  gap: var(--space-6);
+  align-items: start;
+}
+.main-col {
   display: flex;
-  gap: 1rem;
-  align-items: center;
-  margin-bottom: 1rem;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.sticky {
+  position: sticky;
+  top: calc(var(--topbar-h) + var(--space-4));
+}
+.order-details {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.order-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.order-details p {
+  margin: var(--space-2) 0 0;
+}
+.section-title {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-3);
+}
+.count {
+  color: var(--muted);
+  font-weight: 500;
+}
+.items-table :deep(td),
+.items-table th {
+  vertical-align: middle;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+.send {
+  margin-top: var(--space-4);
+}
+.send .subtle {
+  margin: var(--space-2) 0 0;
+  text-align: center;
+}
+.sent-title {
+  font-size: var(--text-xl);
+  color: var(--success);
+  margin: 0;
+}
+.sent-actions {
+  display: flex;
   flex-wrap: wrap;
-  padding: 0.6rem 0.85rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
-.status {
-  color: var(--muted);
+.review-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0;
+  border-top: 1px solid var(--border);
 }
-.notice {
-  color: var(--muted);
-}
-/* Mirrors the Orders list table so the two screens read as one product. */
-.items-table {
-  border-collapse: collapse;
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  margin-bottom: 1rem;
-}
-.items-table th,
-.items-table :deep(td) {
+.review-list li,
+.review-total {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
   border-bottom: 1px solid var(--border);
-  padding: 0.5rem 0.7rem;
-  text-align: left;
+  font-size: var(--text-sm);
 }
-.items-table th.num,
-.items-table :deep(td.num) {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.review-total {
+  border-bottom: none;
+  font-size: var(--text-lg);
 }
-.actions {
-  margin-top: 1rem;
+.mobile-bar {
+  display: none;
 }
-.actor-note {
-  margin-top: 1.5rem;
-  color: var(--subtle);
-  font-size: 0.85em;
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .sticky {
+    position: static;
+  }
+}
+@media (max-width: 640px) {
+  .mobile-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface);
+    border-top: 1px solid var(--border-strong);
+    box-shadow: 0 -4px 16px rgba(16, 24, 40, 0.08);
+  }
+  .mobile-total {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+  }
+  .mobile-total strong {
+    font-size: var(--text-lg);
+  }
+  .order-builder {
+    padding-bottom: var(--space-16);
+  }
 }
 </style>

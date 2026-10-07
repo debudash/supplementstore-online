@@ -9,17 +9,9 @@
 // components/order/ (T6); the two are kept independent rather than cross-importing
 // across task ownership boundaries.
 
-/**
- * Format integer cents as a dollar string, e.g. 8497 -> "$84.97", 100 -> "$1.00".
- * Pure integer decomposition (trunc + modulo on cents). Non-finite input renders as a
- * dash so a bad value never throws in a template.
- */
+import { formatMoney } from '../../utils/money'
+
+/** Format integer cents for display. Delegates to the shared formatter (utils/money.ts). */
 export function formatCents(cents: number): string {
-  if (!Number.isFinite(cents)) return '-'
-  const negative = cents < 0
-  const abs = Math.abs(Math.trunc(cents))
-  const dollars = Math.trunc(abs / 100)
-  const remainder = abs % 100
-  const centsPart = String(remainder).padStart(2, '0')
-  return `${negative ? '-' : ''}$${dollars.toLocaleString('en-US')}.${centsPart}`
+  return formatMoney(cents)
 }

@@ -14,9 +14,16 @@ import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { apiRequest } from '../../api/client'
 import { currentUser } from '../../api/session'
-import type { PatientOrdersResponse, PatientOrderListItem, OrderStatus } from '@cerbo/contracts'
-import { formatCents } from './format'
+import type { PatientOrdersResponse, PatientOrderListItem } from '@cerbo/contracts'
 import DemoBadge from '../../components/DemoBadge.vue'
+import PageHeader from '../../components/ui/PageHeader.vue'
+import Card from '../../components/ui/Card.vue'
+import Money from '../../components/ui/Money.vue'
+import StatusChip from '../../components/ui/StatusChip.vue'
+import UiAlert from '../../components/ui/UiAlert.vue'
+import UiButton from '../../components/ui/UiButton.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
 
 type Phase = 'loading' | 'ready' | 'empty' | 'error'
 
@@ -24,24 +31,8 @@ const phase = ref<Phase>('loading')
 const orders = ref<PatientOrderListItem[]>([])
 const patientName = currentUser()?.displayName ?? ''
 
-function statusClass(status: OrderStatus): string {
-  switch (status) {
-    case 'paid':
-      return 'badge-success'
-    case 'sent':
-      return 'badge-info'
-    case 'refunded':
-      return 'badge-warning'
-    case 'expired':
-    case 'cancelled':
-      return 'badge-neutral'
-    default:
-      return 'badge-neutral'
-  }
-}
-
 function when(value: string | null): string {
-  return value ? new Date(value).toLocaleDateString() : '-'
+  return value ? new Date(value).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '-'
 }
 
 async function load(): Promise<void> {
@@ -60,52 +51,67 @@ onMounted(load)
 
 <template>
   <section class="my-orders">
-    <div class="head">
-      <h2>My Orders</h2>
-      <DemoBadge reason="Demo affordance - in production a patient reaches their order from an emailed or texted pay link, not by browsing a list." />
-    </div>
-    <p class="lead" v-if="patientName">Signed in as {{ patientName }}.</p>
+    <PageHeader title="My orders" :subtitle="patientName ? `Signed in as ${patientName}` : undefined">
+      <template #actions>
+        <DemoBadge reason="Demo affordance - in production a patient reaches their order from an emailed or texted pay link, not by browsing a list." />
+      </template>
+    </PageHeader>
 
-    <p v-if="phase === 'loading'" class="notice">Loading your orders...</p>
+    <Card v-if="phase === 'loading'">
+      <Skeleton :lines="4" label="Loading your orders" />
+    </Card>
 
-    <p v-else-if="phase === 'error'" class="page-error" role="alert">
-      We could not load your orders. Please try again in a moment.
-    </p>
+    <UiAlert v-else-if="phase === 'error'" tone="danger" title="We could not load your orders" data-testid="orders-error">
+      Please try again in a moment.
+      <template #actions>
+        <UiButton size="sm" data-testid="retry" @click="load">Retry</UiButton>
+      </template>
+    </UiAlert>
 
-    <p v-else-if="phase === 'empty'" class="notice" role="status">
-      You have no orders yet. When your provider sends you one, it will appear here.
-    </p>
+    <EmptyState
+      v-else-if="phase === 'empty'"
+      title="No orders yet"
+      message="When your provider sends you an order, it will appear here."
+    />
 
-    <ul v-else class="order-list">
-      <li v-for="o in orders" :key="o.orderId" class="order-card">
-        <div class="order-top">
-          <span class="badge" :class="statusClass(o.status)">{{ o.status }}</span>
-          <span class="amount">{{ formatCents(o.amountCents) }}</span>
-          <span class="dates">
-            Sent {{ when(o.sentAt) }}<template v-if="o.paidAt"> · Paid {{ when(o.paidAt) }}</template>
-          </span>
-          <span class="spacer" />
-          <RouterLink v-if="o.isPayable && o.payPath" class="pay-cta" :to="o.payPath">Review and pay</RouterLink>
-        </div>
+    <ul v-else class="order-list" aria-label="Your orders">
+      <li v-for="o in orders" :key="o.orderId">
+        <Card class="order-card" :data-order-id="o.orderId">
+          <template #header>
+            <div class="order-head">
+              <StatusChip :status="o.status" />
+              <h2 class="order-title">Order sent {{ when(o.sentAt) }}</h2>
+            </div>
+          </template>
+          <template v-if="o.isPayable && o.payPath" #actions>
+            <RouterLink class="btn btn-primary" :to="o.payPath" data-testid="pay-order">Review and pay</RouterLink>
+          </template>
 
-        <table class="items">
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th class="num">Qty</th>
-              <th class="num">Unit price</th>
-              <th class="num">Line total</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(item, i) in o.items" :key="i">
-              <td>{{ item.name }}</td>
-              <td class="num">{{ item.qty }}</td>
-              <td class="num">{{ formatCents(item.unitPriceCents) }}</td>
-              <td class="num">{{ formatCents(item.lineTotalCents) }}</td>
-            </tr>
-          </tbody>
-        </table>
+          <dl class="order-facts">
+            <div>
+              <dt>Total</dt>
+              <dd><Money class="order-total" :cents="o.amountCents" /></dd>
+            </div>
+            <div>
+              <dt>Sent</dt>
+              <dd>{{ when(o.sentAt) }}</dd>
+            </div>
+            <div v-if="o.paidAt">
+              <dt>Paid</dt>
+              <dd>{{ when(o.paidAt) }}</dd>
+            </div>
+          </dl>
+
+          <ul class="item-list" aria-label="Items in this order">
+            <li v-for="(item, i) in o.items" :key="i" class="item">
+              <span class="item-main">
+                <span class="item-name">{{ item.name }}</span>
+                <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> each</span>
+              </span>
+              <Money :cents="item.lineTotalCents" class="item-total" />
+            </li>
+          </ul>
+        </Card>
       </li>
     </ul>
   </section>
@@ -113,84 +119,75 @@ onMounted(load)
 
 <style scoped>
 .my-orders {
-  max-width: 760px;
+  max-width: 48rem;
   margin: 0 auto;
-}
-.head {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-.head h2 {
-  margin-bottom: 0;
-}
-.lead {
-  color: var(--muted);
-  margin-top: 0.4rem;
 }
 .order-list {
   list-style: none;
   padding: 0;
-  margin: 1rem 0 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-4);
 }
-.order-card {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 0.85rem 1rem;
-  box-shadow: var(--shadow-sm);
-}
-.order-top {
+.order-head {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
   flex-wrap: wrap;
-  margin-bottom: 0.6rem;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
 }
-.amount {
-  font-weight: 650;
+.order-title {
+  font-size: var(--text-lg);
+  margin: 0;
+}
+.order-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-8);
+  margin: 0 0 var(--space-4);
+}
+.order-facts dt {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.order-facts dd {
+  margin: 0;
   font-variant-numeric: tabular-nums;
 }
-.dates {
-  color: var(--muted);
-  font-size: 0.88rem;
+.order-total {
+  font-size: var(--text-xl);
+  font-weight: 700;
 }
-.spacer {
-  flex: 1;
+.item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
 }
-.pay-cta {
-  display: inline-block;
-  padding: 0.4rem 0.9rem;
-  border-radius: var(--radius-sm);
-  background: var(--brand);
-  color: #fff;
+.item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.item-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.item-name {
   font-weight: 600;
 }
-.pay-cta:hover {
-  background: var(--brand-strong);
-  text-decoration: none;
-}
-.items {
-  border-collapse: collapse;
-  width: 100%;
-}
-.items th,
-.items td {
-  border-bottom: 1px solid var(--border);
-  padding: 0.4rem 0.6rem;
-  text-align: left;
-}
-.items tbody tr:last-child td {
-  border-bottom: none;
-}
-.num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.notice {
+.item-meta {
   color: var(--muted);
+  font-size: var(--text-sm);
+}
+.item-total {
+  font-weight: 650;
 }
 </style>

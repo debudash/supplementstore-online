@@ -10,11 +10,17 @@
 // fabricate schedule data and does NOT implement the backend. When T9 lands it returns
 // the real schedule summary and the page will render it.
 //
-// PRIVACY: as with the pay page, nothing here surfaces provider economics.
-import { onMounted, ref, computed } from 'vue'
+// PRIVACY: as with the pay page, nothing here surfaces provider economics. Money is
+// display only: the per-cycle total and unit prices are shown as the API returns them;
+// no line totals are computed here.
+import { onMounted, ref, computed, watch, watchEffect, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
 import { formatCents } from './format'
+import Card from '../../components/ui/Card.vue'
+import Money from '../../components/ui/Money.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import UiButton from '../../components/ui/UiButton.vue'
 
 // Minimal forward-looking view of the schedule as a patient would authorize it. No
 // canonical contract exists yet (T9 cut), so this is a local, deliberately narrow shape
@@ -41,6 +47,8 @@ const token = String(route.params.token)
 const phase = ref<Phase>('loading')
 const schedule = ref<ScheduleAuthorizeView | null>(null)
 const submitting = ref(false)
+const consent = ref(false)
+const heading = ref<HTMLHeadingElement | null>(null)
 
 const title = computed(() => {
   switch (phase.value) {
@@ -59,6 +67,37 @@ const title = computed(() => {
   }
 })
 
+const message = computed(() => {
+  switch (phase.value) {
+    case 'authorized':
+      return 'Your recurring order is authorized. Your provider will process each cycle on schedule.'
+    case 'unavailable':
+      return 'Recurring order authorization is not available yet. Please check back later or contact your provider.'
+    case 'notFound':
+      return 'We could not find a recurring plan for this link. Please check the link or contact your provider.'
+    case 'error':
+      return 'We could not load this page. Please try again in a moment.'
+    default:
+      return ''
+  }
+})
+
+const tone = computed<'default' | 'success' | 'danger'>(() =>
+  phase.value === 'authorized' ? 'success' : phase.value === 'error' ? 'danger' : 'default'
+)
+const icon = computed(() => (tone.value === 'success' ? '✓' : tone.value === 'danger' ? '!' : phase.value === 'notFound' ? '?' : 'i'))
+const isTerminal = computed(() => phase.value !== 'loading' && phase.value !== 'review')
+
+watchEffect(() => {
+  if (typeof document !== 'undefined') document.title = `${title.value} - Cerbo`
+})
+
+// Move focus to the heading on every phase change so the new state is announced.
+watch(phase, async () => {
+  await nextTick()
+  heading.value?.focus()
+})
+
 async function load(): Promise<void> {
   phase.value = 'loading'
   try {
@@ -72,7 +111,7 @@ async function load(): Promise<void> {
 }
 
 async function authorize(): Promise<void> {
-  if (submitting.value) return
+  if (submitting.value || !consent.value) return
   submitting.value = true
   try {
     await apiRequest(`/pay/schedule/${token}/authorize`, { method: 'POST', auth: false })
@@ -89,115 +128,162 @@ onMounted(load)
 </script>
 
 <template>
-  <main class="authorize">
-    <h1>{{ title }}</h1>
+  <div class="authorize-page">
+    <p class="sr-only" role="status" aria-live="polite">{{ submitting ? 'Authorizing your recurring order' : '' }}</p>
 
-    <p v-if="phase === 'loading'" class="notice">Loading...</p>
+    <Card :tone="tone" class="authorize-card" :data-phase="phase">
+      <span v-if="isTerminal" class="state-icon" :class="`state-icon-${tone}`" aria-hidden="true">{{ icon }}</span>
 
-    <template v-else-if="phase === 'review' && schedule">
-      <p v-if="schedule.patientFirstName" class="greeting">Hi {{ schedule.patientFirstName }},</p>
-      <p class="lead">
-        You are authorizing a recurring order every {{ schedule.intervalDays }} days. You
-        authorize once; you can cancel any time by contacting your provider.
-      </p>
+      <p v-if="phase === 'review' && schedule?.patientFirstName" class="greeting">Hi {{ schedule.patientFirstName }},</p>
+      <h1 ref="heading" tabindex="-1" class="authorize-title" :class="{ centered: isTerminal }">{{ title }}</h1>
 
-      <table class="items">
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th class="num">Qty</th>
-            <th class="num">Unit price</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(item, i) in schedule.items" :key="i">
-            <td>{{ item.name }}</td>
-            <td class="num">{{ item.qty }}</td>
-            <td class="num">{{ formatCents(item.unitPriceCents) }}</td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr>
-            <th colspan="2" class="num">Per cycle</th>
-            <td class="num total">{{ formatCents(schedule.perCycleTotalCents) }}</td>
-          </tr>
-        </tfoot>
-      </table>
+      <Skeleton v-if="phase === 'loading'" :lines="4" height="1.25rem" label="Loading your plan" />
 
-      <button type="button" class="authorize-button btn-primary" :disabled="submitting" @click="authorize">
-        {{ submitting ? 'Authorizing...' : 'Authorize recurring order' }}
-      </button>
-    </template>
+      <template v-else-if="phase === 'review' && schedule">
+        <p class="summary" data-testid="schedule-summary">
+          We will charge <Money :cents="schedule.perCycleTotalCents" strong /> every {{ schedule.intervalDays }} days for:
+        </p>
 
-    <p v-else-if="phase === 'authorized'" class="success" role="status">
-      Your recurring order is authorized. Your provider will process each cycle on schedule.
-    </p>
+        <table class="table items">
+          <caption class="sr-only">Items in each recurring order</caption>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col" class="num">Qty</th>
+              <th scope="col" class="num">Unit price</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(item, i) in schedule.items" :key="i">
+              <td>{{ item.name }}</td>
+              <td class="num">{{ item.qty }}</td>
+              <td class="num"><Money :cents="item.unitPriceCents" /></td>
+            </tr>
+          </tbody>
+        </table>
 
-    <p v-else-if="phase === 'unavailable'" class="notice" role="status">
-      Recurring order authorization is not available yet. Please check back later or contact
-      your provider.
-    </p>
+        <p class="cancel-note">How to cancel: contact your provider. You authorize once; there is nothing to do each cycle.</p>
 
-    <p v-else-if="phase === 'notFound'" class="notice" role="status">
-      We could not find a recurring plan for this link. Please check the link or contact your
-      provider.
-    </p>
+        <label class="consent">
+          <input v-model="consent" type="checkbox" data-testid="consent" />
+          <span>
+            I authorize recurring charges of {{ formatCents(schedule.perCycleTotalCents) }} every
+            {{ schedule.intervalDays }} days for the items above until I cancel.
+          </span>
+        </label>
 
-    <p v-else class="notice" role="status">
-      We could not load this page. Please try again in a moment.
-    </p>
-  </main>
+        <UiButton
+          variant="primary"
+          block
+          class="authorize-button"
+          data-testid="authorize-button"
+          :disabled="!consent"
+          :busy="submitting"
+          busy-label="Authorizing..."
+          @click="authorize"
+        >
+          Authorize recurring order
+        </UiButton>
+      </template>
+
+      <template v-else>
+        <p class="message centered" data-testid="authorize-message">{{ message }}</p>
+        <div v-if="phase === 'error'" class="retry">
+          <UiButton variant="primary" data-testid="retry" @click="load">Retry</UiButton>
+        </div>
+      </template>
+    </Card>
+  </div>
 </template>
 
 <style scoped>
-.authorize {
-  max-width: 560px;
-  margin: 2.5rem auto;
-  padding: 1.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+.authorize-page {
+  max-width: 30rem;
+  margin: 0 auto;
 }
-.authorize h1 {
-  font-size: 1.4rem;
+.authorize-card {
+  padding: var(--space-6);
 }
 .greeting {
   font-weight: 600;
+  margin-bottom: var(--space-1);
 }
-.lead {
-  color: var(--muted);
+.authorize-title {
+  margin-bottom: var(--space-3);
+}
+/* Focus is moved here programmatically for screen readers; a heading is not
+   interactive, so no visible ring. */
+.authorize-title:focus,
+.authorize-title:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.centered {
+  text-align: center;
+}
+.state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto var(--space-3);
+  border-radius: 50%;
+  font-size: var(--text-xl);
+  font-weight: 800;
+  color: var(--brand-strong);
+  background: var(--info-tint);
+  border: 2px solid var(--info-border);
+}
+.state-icon-success {
+  color: var(--success);
+  background: var(--success-tint);
+  border-color: var(--success-border);
+}
+.state-icon-danger {
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-color: var(--danger-border);
+}
+.summary {
+  font-size: var(--text-lg);
 }
 .items {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1.25rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--space-4);
 }
-.items th,
-.items td {
-  border-bottom: 1px solid var(--border);
-  padding: 0.5rem 0.6rem;
-  text-align: left;
+.cancel-note {
+  color: var(--muted);
+  font-size: var(--text-sm);
 }
-.num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
 }
-.items tfoot .total {
-  font-weight: 700;
-  border-top: 2px solid var(--border-strong);
+.consent input {
+  flex: none;
+  margin-top: 0.2rem;
 }
 .authorize-button {
-  width: 100%;
-  font-size: 1.05rem;
-  padding: 0.7rem 1.2rem;
-  margin-top: 0.5rem;
+  min-height: 3rem;
+  font-size: var(--text-lg);
 }
-.notice {
-  color: var(--muted);
+.retry {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-2);
 }
-.success {
-  color: var(--success);
-  font-weight: 600;
+@media (max-width: 640px) {
+  .authorize-card {
+    padding: var(--space-5) var(--space-4);
+  }
 }
 </style>

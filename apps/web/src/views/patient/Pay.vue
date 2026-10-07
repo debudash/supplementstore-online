@@ -9,8 +9,12 @@
 // and fee never appear here, in the happy path or any error state.
 //
 // Money is DISPLAY ONLY: integer cents from the server, formatted at the last moment by
-// formatCents. Nothing here computes an amount.
-import { onMounted, ref, computed } from 'vue'
+// <Money> / formatCents. Nothing here computes an amount.
+//
+// LAYOUT: mobile-first single centered column. One card whose tone follows the phase,
+// one h1 (focused on every phase change so screen readers hear the new state), one
+// large total and one full-width pay button.
+import { onMounted, ref, computed, watch, watchEffect, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
 import type { PatientPayView, PayResult, PayRequest } from '@cerbo/contracts'
@@ -23,6 +27,11 @@ import {
   DECLINE_NOTICE,
   type PayPhase
 } from './payState'
+import Card from '../../components/ui/Card.vue'
+import Money from '../../components/ui/Money.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import UiAlert from '../../components/ui/UiAlert.vue'
+import UiButton from '../../components/ui/UiButton.vue'
 
 const route = useRoute()
 const token = String(route.params.token)
@@ -30,8 +39,10 @@ const token = String(route.params.token)
 const phase = ref<PayPhase>('loading')
 const view = ref<PatientPayView | null>(null)
 const receipt = ref<PayResult | null>(null)
+const paidOn = ref('')
 const submitting = ref(false)
 const declined = ref(false)
+const heading = ref<HTMLHeadingElement | null>(null)
 
 // IDEMPOTENCY KEY: generated ONCE per page load and reused for every retry of this
 // payment (AGENTS / FR-5 AC2). A fresh key per click is exactly what would let a
@@ -40,6 +51,46 @@ const idempotencyKey = crypto.randomUUID()
 
 const title = computed(() => titleForPhase(phase.value))
 const message = computed(() => messageForPhase(phase.value))
+
+/** Card tone per phase: success for paid, warning for expired/refunded, danger for error. */
+const tone = computed<'default' | 'success' | 'warning' | 'danger'>(() => {
+  switch (phase.value) {
+    case 'paid':
+    case 'alreadyPaid':
+      return 'success'
+    case 'expired':
+    case 'refunded':
+      return 'warning'
+    case 'error':
+      return 'danger'
+    default:
+      return 'default'
+  }
+})
+
+/** Decorative glyph shown above the title on terminal states (hidden from AT). */
+const icon = computed(() => {
+  switch (tone.value) {
+    case 'success':
+      return '✓'
+    case 'warning':
+    case 'danger':
+      return '!'
+    default:
+      return phase.value === 'notFound' ? '?' : 'i'
+  }
+})
+const isTerminal = computed(() => phase.value !== 'loading' && phase.value !== 'payable')
+
+watchEffect(() => {
+  if (typeof document !== 'undefined') document.title = `${title.value} - Cerbo`
+})
+
+// Move focus to the heading on every phase change so the new state is announced.
+watch(phase, async () => {
+  await nextTick()
+  heading.value?.focus()
+})
 
 async function load(): Promise<void> {
   phase.value = 'loading'
@@ -58,6 +109,7 @@ async function pay(): Promise<void> {
   try {
     const body: PayRequest = { idempotencyKey }
     receipt.value = await apiRequest<PayResult>(`/pay/${token}`, { method: 'POST', body, auth: false })
+    paidOn.value = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
     phase.value = 'paid'
   } catch (err) {
     if (err instanceof ApiError && err.code === 'PAYMENT_DECLINED') {
@@ -77,117 +129,245 @@ onMounted(load)
 </script>
 
 <template>
-  <main class="pay">
-    <h1>{{ title }}</h1>
+  <div class="pay-page">
+    <!-- Polite live region for the in-flight payment (the button itself is aria-busy). -->
+    <p class="sr-only" role="status" aria-live="polite" data-testid="pay-live">
+      {{ submitting ? 'Processing your payment' : '' }}
+    </p>
 
-    <p v-if="phase === 'loading'" class="notice">Loading...</p>
+    <Card :tone="tone" class="pay-card" :data-phase="phase">
+      <span v-if="isTerminal" class="state-icon" :class="`state-icon-${tone}`" aria-hidden="true">{{ icon }}</span>
 
-    <!-- Payable: the order summary and the pay button. -->
-    <template v-else-if="phase === 'payable' && view">
-      <p v-if="view.patientFirstName" class="greeting">Hi {{ view.patientFirstName }},</p>
-      <p class="lead">Please review your order and complete payment.</p>
+      <p v-if="phase === 'payable' && view?.patientFirstName" class="greeting">Hi {{ view.patientFirstName }},</p>
+      <h1 ref="heading" tabindex="-1" class="pay-title" :class="{ centered: isTerminal }">{{ title }}</h1>
 
-      <table class="items">
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th class="num">Qty</th>
-            <th class="num">Unit price</th>
-            <th class="num">Line total</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(item, i) in view.items" :key="i">
-            <td>{{ item.name }}</td>
-            <td class="num">{{ item.qty }}</td>
-            <td class="num">{{ formatCents(item.unitPriceCents) }}</td>
-            <td class="num">{{ formatCents(item.lineTotalCents) }}</td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr>
-            <th colspan="3" class="num">Total</th>
-            <td class="num total">{{ formatCents(view.totalCents) }}</td>
-          </tr>
-        </tfoot>
-      </table>
+      <!-- Loading -->
+      <Skeleton v-if="phase === 'loading'" :lines="4" height="1.25rem" label="Loading your order" />
 
-      <p v-if="declined" class="page-error" role="alert">{{ DECLINE_NOTICE }}</p>
+      <!-- Payable: the order summary and the pay button. -->
+      <template v-else-if="phase === 'payable' && view">
+        <p class="lead">Please review your order and complete payment.</p>
 
-      <button type="button" class="pay-button btn-primary" :disabled="submitting" @click="pay">
-        {{ submitting ? 'Processing...' : declined ? `Try again - pay ${formatCents(view.totalCents)}` : `Pay ${formatCents(view.totalCents)}` }}
-      </button>
-    </template>
+        <ul class="items" aria-label="Items in your order" data-testid="pay-items">
+          <li v-for="(item, i) in view.items" :key="i" class="item">
+            <div class="item-main">
+              <span class="item-name">{{ item.name }}</span>
+              <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> each</span>
+            </div>
+            <Money class="item-total" :cents="item.lineTotalCents" />
+          </li>
+        </ul>
 
-    <!-- Paid this session: a short receipt. -->
-    <template v-else-if="phase === 'paid'">
-      <p class="success" role="status">{{ message }}</p>
-      <p v-if="receipt" class="amount">Amount paid: {{ formatCents(receipt.totalCents) }}</p>
-      <p v-if="receipt" class="ref">Confirmation: {{ receipt.paymentId }}</p>
-    </template>
+        <div class="total-row" data-testid="pay-total">
+          <span class="total-label">Total</span>
+          <Money class="total-amount" :cents="view.totalCents" />
+        </div>
 
-    <!-- Every other terminal state: a single clear message, no order economics. -->
-    <p v-else class="notice" role="status">{{ message }}</p>
-  </main>
+        <UiAlert v-if="declined" tone="danger" class="decline" data-testid="decline-notice">{{ DECLINE_NOTICE }}</UiAlert>
+
+        <UiButton
+          variant="primary"
+          block
+          class="pay-button"
+          data-testid="pay-button"
+          :busy="submitting"
+          busy-label="Processing..."
+          @click="pay"
+        >
+          {{ declined ? `Try again - pay ${formatCents(view.totalCents)}` : `Pay ${formatCents(view.totalCents)}` }}
+        </UiButton>
+      </template>
+
+      <!-- Paid this session: a receipt-style confirmation. -->
+      <template v-else-if="phase === 'paid'">
+        <p class="message centered">{{ message }}</p>
+
+        <dl v-if="receipt" class="receipt" data-testid="receipt">
+          <div class="receipt-row">
+            <dt>Amount paid</dt>
+            <dd><Money :cents="receipt.totalCents" strong /></dd>
+          </div>
+          <div class="receipt-row">
+            <dt>Confirmation number</dt>
+            <dd class="confirmation" data-testid="confirmation">{{ receipt.paymentId }}</dd>
+          </div>
+          <div class="receipt-row">
+            <dt>Date paid</dt>
+            <dd>{{ paidOn }}</dd>
+          </div>
+        </dl>
+
+        <ul v-if="view" class="items" aria-label="Items paid for">
+          <li v-for="(item, i) in view.items" :key="i" class="item">
+            <div class="item-main">
+              <span class="item-name">{{ item.name }}</span>
+              <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> each</span>
+            </div>
+            <Money class="item-total" :cents="item.lineTotalCents" />
+          </li>
+        </ul>
+      </template>
+
+      <!-- Every other terminal state: one clear message, no order economics. -->
+      <template v-else>
+        <p class="message centered" data-testid="pay-message">{{ message }}</p>
+        <div v-if="phase === 'error'" class="retry">
+          <UiButton variant="primary" data-testid="retry" @click="load">Retry</UiButton>
+        </div>
+      </template>
+    </Card>
+  </div>
 </template>
 
 <style scoped>
-.pay {
-  max-width: 560px;
-  margin: 2.5rem auto;
-  padding: 1.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+.pay-page {
+  max-width: 30rem;
+  margin: 0 auto;
 }
-.pay h1 {
-  font-size: 1.4rem;
+.pay-card {
+  padding: var(--space-6);
 }
 .greeting {
   font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+.pay-title {
+  margin-bottom: var(--space-2);
+}
+/* Focus is moved here programmatically for screen readers; a heading is not
+   interactive, so no visible ring. */
+.pay-title:focus,
+.pay-title:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.centered {
+  text-align: center;
 }
 .lead {
   color: var(--muted);
 }
+.state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto var(--space-3);
+  border-radius: 50%;
+  font-size: var(--text-xl);
+  font-weight: 800;
+  color: var(--brand-strong);
+  background: var(--info-tint);
+  border: 2px solid var(--info-border);
+}
+.state-icon-success {
+  color: var(--success);
+  background: var(--success-tint);
+  border-color: var(--success-border);
+}
+.state-icon-warning {
+  color: var(--warning);
+  background: var(--warning-tint);
+  border-color: var(--warning-border);
+}
+.state-icon-danger {
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-color: var(--danger-border);
+}
+.message {
+  color: var(--text);
+}
 .items {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1.25rem 0;
+  list-style: none;
+  padding: 0;
+  margin: var(--space-4) 0 0;
+  border-top: 1px solid var(--border);
 }
-.items th,
-.items td {
+.item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--border);
-  padding: 0.5rem 0.6rem;
-  text-align: left;
 }
-.num {
+.item-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.item-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.item-meta {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.item-total {
+  text-align: right;
+  font-weight: 600;
+}
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+}
+.total-label {
+  font-size: var(--text-lg);
+  font-weight: 650;
+}
+.total-amount {
+  font-size: var(--text-3xl);
+  font-weight: 750;
+}
+.decline {
+  margin-bottom: var(--space-4);
+}
+.pay-button {
+  min-height: 3rem;
+  font-size: var(--text-lg);
+}
+.receipt {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.receipt-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+.receipt dt {
+  color: var(--muted);
+}
+.receipt dd {
+  margin: 0;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.items tfoot .total {
-  font-weight: 700;
-  font-size: 1.05rem;
-  border-top: 2px solid var(--border-strong);
+.confirmation {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
-.pay-button {
-  width: 100%;
-  font-size: 1.05rem;
-  padding: 0.7rem 1.2rem;
-  margin-top: 0.5rem;
+.retry {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--space-2);
 }
-.notice {
-  color: var(--muted);
-}
-.success {
-  color: var(--success);
-  font-weight: 600;
-}
-.amount {
-  font-weight: 600;
-}
-.ref {
-  color: var(--subtle);
-  font-size: 0.9em;
+@media (max-width: 640px) {
+  .pay-card {
+    padding: var(--space-5) var(--space-4);
+  }
 }
 </style>
