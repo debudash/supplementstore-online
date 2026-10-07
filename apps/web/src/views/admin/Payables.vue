@@ -5,11 +5,21 @@
 // creates the statements; a month already closed returns ALREADY_CLOSED. The UI only
 // displays and triggers the close - all money aggregation happens server-side from the
 // ledger (AGENTS.md money rule 2).
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
-import { currentUserId } from '../../api/session'
 import type { AdminPayablesResponse, ClosePayablesResult } from '@cerbo/contracts'
-import { formatCents } from '../../components/order/format'
+import DemoBadge from '../../components/DemoBadge.vue'
+import PageHeader from '../../components/ui/PageHeader.vue'
+import Card from '../../components/ui/Card.vue'
+import Money from '../../components/ui/Money.vue'
+import UiAlert from '../../components/ui/UiAlert.vue'
+import UiField from '../../components/ui/UiField.vue'
+import UiButton from '../../components/ui/UiButton.vue'
+import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
+import Skeleton from '../../components/ui/Skeleton.vue'
+import { formatMoney } from '../../utils/money'
+import { toast } from '../../components/ui/toast'
 
 function currentMonthToken(): string {
   const now = new Date()
@@ -20,38 +30,61 @@ const month = ref(currentMonthToken())
 const data = ref<AdminPayablesResponse | null>(null)
 const loading = ref(false)
 const closing = ref(false)
+const confirmOpen = ref(false)
 const error = ref<string | null>(null)
-const notice = ref<string | null>(null)
+const closeResult = ref<ClosePayablesResult | null>(null)
+
+const validMonth = computed(() => /^\d{4}-\d{2}$/.test(month.value))
+/** "YYYY-MM" strings compare correctly as text. */
+const inProgress = computed(() => month.value >= currentMonthToken())
+const monthLabel = computed(() => {
+  if (!validMonth.value) return month.value
+  const [y, m] = month.value.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+})
+const providerCount = computed(() => data.value?.statements.length ?? 0)
+
+const shortId = (id: string): string => (id.length > 10 ? id.slice(0, 8) : id)
+
+let requestSeq = 0
 
 async function load(): Promise<void> {
+  if (!validMonth.value) return
+  const seq = ++requestSeq
   loading.value = true
   error.value = null
-  notice.value = null
   try {
-    data.value = await apiRequest<AdminPayablesResponse>(
-      `/admin/payables?month=${encodeURIComponent(month.value)}`
-    )
+    const res = await apiRequest<AdminPayablesResponse>(`/admin/payables?month=${encodeURIComponent(month.value)}`)
+    if (seq === requestSeq) data.value = res
   } catch (err) {
+    if (seq !== requestSeq) return
     error.value = err instanceof ApiError ? err.message : 'Failed to load payables.'
     data.value = null
   } finally {
-    loading.value = false
+    if (seq === requestSeq) loading.value = false
   }
 }
+
+watch(month, () => {
+  closeResult.value = null
+  void load()
+})
 
 async function close(): Promise<void> {
   closing.value = true
   error.value = null
-  notice.value = null
   try {
     const result = await apiRequest<ClosePayablesResult>('/admin/payables/close', {
       method: 'POST',
       body: { month: month.value }
     })
-    notice.value = `Closed ${result.month}: ${result.statements.length} statement(s) created.`
+    closeResult.value = result
+    toast(`Closed ${monthLabel.value}: ${result.statements.length} statement(s) created.`, 'success')
+    confirmOpen.value = false
     await load()
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Failed to close the month.'
+    confirmOpen.value = false
   } finally {
     closing.value = false
   }
@@ -62,122 +95,122 @@ onMounted(load)
 
 <template>
   <section class="admin-payables">
-    <h2>Admin Payables</h2>
+    <PageHeader title="Payables" subtitle="What Cerbo owes each provider per UTC month. Closing a month freezes its statements." />
 
-    <div class="toolbar">
-      <label class="field">
-        Month (YYYY-MM)
-        <input v-model="month" type="month" :disabled="loading || closing" />
-      </label>
-      <button type="button" :disabled="loading || closing" @click="load">View</button>
-      <button type="button" :disabled="loading || closing || data?.closed" @click="close">
-        Close month
-      </button>
+    <Card>
+      <div class="toolbar">
+        <UiField v-slot="f" label="Month (UTC)">
+          <input :id="f.id" v-model="month" type="month" :disabled="closing" data-testid="payables-month" />
+        </UiField>
+        <div v-if="data" class="state">
+          <span class="badge" :class="data.closed ? 'badge-success' : 'badge-warning'" data-testid="payables-state">
+            {{ data.closed ? 'Closed' : 'Open - preview' }}
+          </span>
+          <span class="subtle">{{ data.periodStart }} to {{ data.periodEnd }}</span>
+        </div>
+        <span class="spacer" />
+        <UiButton :busy="loading" busy-label="Loading..." :disabled="closing" data-testid="payables-refresh" @click="load">Refresh</UiButton>
+        <UiButton
+          variant="primary"
+          :disabled="loading || closing || !data || data.closed"
+          data-testid="payables-close"
+          @click="confirmOpen = true"
+        >
+          Close month
+        </UiButton>
+      </div>
+      <p v-if="data?.closed" class="subtle closed-note">This month is closed. Its statements are immutable.</p>
+    </Card>
+
+    <div class="section" aria-live="polite">
+      <p v-if="error" class="page-error" role="alert">{{ error }}</p>
+      <UiAlert v-if="closeResult" tone="success" title="Month closed">
+        Created {{ closeResult.statements.length }} immutable statement(s) for {{ closeResult.periodStart }} to {{ closeResult.periodEnd }}.
+      </UiAlert>
     </div>
 
-    <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="notice-ok" role="status">{{ notice }}</p>
-    <p v-if="loading" class="notice">Loading...</p>
+    <Skeleton v-if="loading && !data" :lines="4" height="2.25rem" label="Loading payables" class="section" />
 
-    <template v-if="data && !loading">
-      <p class="period">
-        <strong>{{ data.periodStart }}</strong> to <strong>{{ data.periodEnd }}</strong> (UTC) -
-        <span :class="data.closed ? 'tag-closed' : 'tag-open'">{{ data.closed ? 'Closed' : 'Open (preview)' }}</span>
-      </p>
+    <template v-else-if="data">
+      <EmptyState v-if="data.statements.length === 0" class="section" title="No payable activity" :message="`There are no provider statements for ${monthLabel}.`" />
 
-      <table class="report-table">
-        <thead>
-          <tr>
-            <th>Provider</th>
-            <th class="num">Opening</th>
-            <th class="num">Credits</th>
-            <th class="num">Debits</th>
-            <th class="num">Closing</th>
-            <th>Closed at</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="s in data.statements" :key="s.providerId">
-            <td><code>{{ s.providerId }}</code></td>
-            <td class="num">{{ formatCents(s.openingCents) }}</td>
-            <td class="num">{{ formatCents(s.creditsCents) }}</td>
-            <td class="num">{{ formatCents(s.debitsCents) }}</td>
-            <td class="num">{{ formatCents(s.closingCents) }}</td>
-            <td>{{ s.closedAt ? new Date(s.closedAt).toLocaleString() : '-' }}</td>
-          </tr>
-          <tr v-if="data.statements.length === 0">
-            <td colspan="6" class="notice">No payable activity in this month.</td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-else class="table-wrap section">
+        <table class="table table-stack" :aria-busy="loading ? 'true' : undefined">
+          <caption class="sr-only">Payable statements for {{ monthLabel }}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Provider</th>
+              <th scope="col" class="num">Opening</th>
+              <th scope="col" class="num">Credits</th>
+              <th scope="col" class="num">Debits</th>
+              <th scope="col" class="num">Closing</th>
+              <th scope="col">Closed at</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in data.statements" :key="s.providerId">
+              <td data-label="Provider"><code :title="s.providerId">{{ shortId(s.providerId) }}</code></td>
+              <td data-label="Opening" class="num"><Money :cents="s.openingCents" /></td>
+              <td data-label="Credits" class="num"><Money :cents="s.creditsCents" /></td>
+              <td data-label="Debits" class="num">
+                <span class="money" :class="{ 'money-negative': s.debitsCents !== 0 }">{{ formatMoney(s.debitsCents) }}</span>
+              </td>
+              <td data-label="Closing" class="num"><Money :cents="s.closingCents" strong /></td>
+              <td data-label="Closed at">{{ s.closedAt ? new Date(s.closedAt).toLocaleString() : '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </template>
 
-    <p class="actor-note">Acting as <code>{{ currentUserId }}</code>.</p>
+    <ConfirmDialog
+      :open="confirmOpen"
+      :title="`Close ${monthLabel}?`"
+      confirm-label="Close month"
+      tone="danger"
+      :busy="closing"
+      @confirm="close"
+      @cancel="confirmOpen = false"
+    >
+      <p data-testid="close-consequence">
+        Creates immutable statements for {{ providerCount }} provider{{ providerCount === 1 ? '' : 's' }}. This cannot be undone.
+      </p>
+      <UiAlert v-if="inProgress" tone="warning" title="This month is still in progress" data-testid="close-in-progress">
+        Closing now freezes statements before {{ monthLabel }} has ended.
+        <DemoBadge reason="Demo affordance - the server lets you close a month before it ends so a demo can show statements. In production the close runs after month end." />
+      </UiAlert>
+    </ConfirmDialog>
   </section>
 </template>
 
 <style scoped>
 .admin-payables {
-  max-width: 920px;
+  max-width: 1000px;
 }
 .toolbar {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
   align-items: flex-end;
-  margin-bottom: 0.75rem;
 }
-.field {
+.state {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85em;
-  color: var(--muted);
+  gap: var(--space-1);
+  padding-bottom: 0.3rem;
 }
-.period {
-  color: var(--muted);
+.closed-note {
+  margin: var(--space-3) 0 0;
 }
-.tag-closed {
-  color: var(--success);
-  font-weight: 700;
+.section {
+  margin-top: var(--space-4);
 }
-.tag-open {
-  color: var(--warning);
-  font-weight: 700;
+.section:empty {
+  margin-top: 0;
 }
-.report-table {
-  border-collapse: collapse;
-  width: 100%;
-  margin-bottom: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.report-table th,
-.report-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 0.5rem 0.7rem;
-  text-align: left;
-}
-.report-table tbody tr:last-child td {
-  border-bottom: none;
-}
-.num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.notice {
-  color: var(--muted);
-}
-.notice-ok {
-  color: var(--success);
-  background: var(--success-tint);
-  border: 1px solid var(--success);
-  border-radius: var(--radius-sm);
-  padding: 0.5rem 0.75rem;
-}
-.actor-note {
-  margin-top: 1.5rem;
-  color: var(--subtle);
-  font-size: 0.85em;
+@media (max-width: 480px) {
+  .toolbar > button {
+    flex: 1 1 auto;
+  }
 }
 </style>
