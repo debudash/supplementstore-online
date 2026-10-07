@@ -161,6 +161,22 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/orders/{id}:
+    delete:
+      tags: [Provider - orders]
+      summary: Delete a draft order
+      description: |
+        Permanently removes a draft and its lines. Drafts never reserve stock (that
+        happens at send), so its items are already available to other orders. A sent
+        order returns 409; cancel it instead to release its reservation.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "204": { description: Draft deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/OrderNotEditable" }
+
   /api/orders/{id}/lines:
     post:
       tags: [Provider - orders]

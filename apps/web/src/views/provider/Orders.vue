@@ -76,6 +76,22 @@ function toggleLink(id: string): void {
   expanded.value = next
 }
 
+// Delete a draft (drafts hold no stock, so its items are already available to others).
+const deletingId = ref<string | null>(null)
+async function deleteDraft(o: OrderSummary): Promise<void> {
+  if (!window.confirm(`Delete this draft order for ${patientName(o.patientId)}? This cannot be undone.`)) return
+  deletingId.value = o.id
+  error.value = null
+  try {
+    await apiRequest(`/orders/${o.id}`, { method: 'DELETE' })
+    orders.value = orders.value.filter((x) => x.id !== o.id)
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Failed to delete the draft.'
+  } finally {
+    deletingId.value = null
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadPatients(), loadOrders()])
 })
@@ -134,6 +150,14 @@ onMounted(async () => {
                 data-test="resume-draft"
               >Resume</RouterLink>
               <RouterLink :to="{ name: 'order-audit', params: { id: o.id } }">View audit</RouterLink>
+              <button
+                v-if="o.status === 'draft'"
+                type="button"
+                class="btn-link delete-link"
+                :disabled="deletingId === o.id"
+                data-test="delete-draft"
+                @click="deleteDraft(o)"
+              >{{ deletingId === o.id ? 'Deleting...' : 'Delete' }}</button>
             </td>
           </tr>
           <tr v-if="o.payPath && expanded.has(o.id)" class="link-row">
@@ -193,6 +217,9 @@ onMounted(async () => {
 }
 .resume-link {
   font-weight: 600;
+}
+.delete-link {
+  color: var(--danger);
 }
 .link-row td {
   background: var(--surface-2);

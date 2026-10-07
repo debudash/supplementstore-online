@@ -16,6 +16,7 @@ import {
   getQuote,
   sendOrder,
   cancelOrder,
+  deleteDraft,
   listOrders
 } from './service'
 
@@ -40,6 +41,16 @@ ordersRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { status, from, to } = req.query as Record<string, string | undefined>
     res.status(200).json({ orders: await listOrders(db, actorOf(req), { status, from, to }) })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+// Delete a draft order outright (drafts hold no stock, so nothing to release).
+ordersRouter.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    await deleteDraft(db, actorOf(req), req.params.id)
+    res.status(204).end()
   } catch (err) {
     handleError(res, err)
   }
