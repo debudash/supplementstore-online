@@ -12,13 +12,9 @@ import { mount } from '@vue/test-utils'
 import AddLineForm from './AddLineForm.vue'
 import LineRow from './LineRow.vue'
 
-// With the seeded catalog list price (ProductView.listPriceCents) present.
+// The seeded catalog list price (ProductView.listPriceCents) is a required field.
 const products = [
   { sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', unitCogsCents: 1450, available: 50, active: true, listPriceCents: 2999 }
-]
-// Before the backend list_price_cents field merges, ProductView has no listPriceCents.
-const productsNoPrice = [
-  { sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', unitCogsCents: 1450, available: 50, active: true }
 ]
 
 const line = {
@@ -51,12 +47,6 @@ describe('AddLineForm - price read-only, margin editable, demo-badged', () => {
     const wrapper = mount(AddLineForm, { props: { products, busy: false, error: null } })
     await wrapper.find('select').setValue('MAG-GLY-120')
     expect(wrapper.find('[data-test="unit-price"]').text()).toBe('$29.99') // formatCents(2999)
-  })
-
-  it('degrades to a neutral pending state when the catalog price field is absent', async () => {
-    const wrapper = mount(AddLineForm, { props: { products: productsNoPrice, busy: false, error: null } })
-    await wrapper.find('select').setValue('MAG-GLY-120')
-    expect(wrapper.find('[data-test="unit-price"]').text()).toContain('pending')
   })
 
   it('carries DemoBadge markers (margin control + COGS in the product list)', () => {

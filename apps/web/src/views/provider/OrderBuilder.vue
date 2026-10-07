@@ -7,11 +7,13 @@
 // (AGENTS.md money rule 2). Price vs margin % is just an input mode - the server
 // derives and stores the canonical price (ADR-005).
 import { onMounted, ref, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
 import { currentUserId } from '../../api/session'
 import type {
   ProductView,
   OrderView,
+  OrderStatus,
   QuoteResponse,
   SendResponse,
   PatientView
@@ -22,14 +24,24 @@ import LineRow from '../../components/order/LineRow.vue'
 import QuoteSummary from '../../components/order/QuoteSummary.vue'
 import CopyLink from '../../components/order/CopyLink.vue'
 
+const route = useRoute()
+const router = useRouter()
+
 const products = ref<ProductView[]>([])
 const patients = ref<PatientView[]>([])
 const patientsUnavailable = ref(false)
 const loadError = ref<string | null>(null)
 
 const selectedPatientId = ref<string>('')
-const order = ref<OrderView | null>(null)
+// The active order is tracked by id + current status (sourced from POST /orders on a new
+// draft, or GET /orders/:id/quote when resuming an existing draft). We never need the
+// full OrderView in the builder, so this works for both entry paths.
+const orderId = ref<string | null>(null)
+const orderStatus = ref<OrderStatus | null>(null)
 const quote = ref<QuoteResponse | null>(null)
+// Set when a resume attempt fails (unknown id, not the provider's order, or not a draft);
+// the start panel shows it instead of silently opening a blank draft.
+const resumeError = ref<string | null>(null)
 
 const busy = ref(false)
 const lineBusyId = ref<string | null>(null)
@@ -38,9 +50,10 @@ const lineErrors = ref<Record<string, string>>({})
 const pageError = ref<string | null>(null)
 const sendResult = ref<SendResponse | null>(null)
 
+const hasOrder = computed(() => orderId.value !== null)
 const lines = computed(() => quote.value?.lines ?? [])
-const canSend = computed(() => !!order.value && order.value.status === 'draft' && lines.value.length > 0)
-const isDraft = computed(() => order.value?.status === 'draft')
+const isDraft = computed(() => orderStatus.value === 'draft')
+const canSend = computed(() => isDraft.value && lines.value.length > 0)
 
 /** Turn an API error into a provider-facing message (exact copy for known codes). */
 function messageFor(err: unknown): string {
@@ -89,28 +102,44 @@ async function loadPatients(): Promise<void> {
   }
 }
 
+/** Normalise a route query value (string | string[] | undefined) to a single string. */
+function queryString(value: unknown): string | null {
+  if (typeof value === 'string' && value !== '') return value
+  if (Array.isArray(value) && typeof value[0] === 'string' && value[0] !== '') return value[0]
+  return null
+}
+
 onMounted(async () => {
   try {
     await Promise.all([loadCatalog(), loadPatients()])
   } catch (err) {
     loadError.value = messageFor(err)
   }
+  // Resume an existing draft when arrived at as /orders/new?orderId=<id> (e.g. from the
+  // Orders list). Done after the catalog/patients load so the builder is ready to use.
+  const resumeId = queryString(route.query.orderId)
+  if (resumeId) await resumeOrder(resumeId)
 })
 
 async function refreshQuote(): Promise<void> {
-  if (!order.value) return
-  quote.value = await apiRequest<QuoteResponse>(`/orders/${order.value.id}/quote`)
+  if (!orderId.value) return
+  quote.value = await apiRequest<QuoteResponse>(`/orders/${orderId.value}/quote`)
+  // Keep the tracked status in sync with the server (e.g. draft -> sent after send).
+  orderStatus.value = quote.value.status
 }
 
 async function startOrder(): Promise<void> {
   if (!selectedPatientId.value) return
   pageError.value = null
+  resumeError.value = null
   busy.value = true
   try {
-    order.value = await apiRequest<OrderView>('/orders', {
+    const created = await apiRequest<OrderView>('/orders', {
       method: 'POST',
       body: { patientId: selectedPatientId.value }
     })
+    orderId.value = created.id
+    orderStatus.value = created.status
     sendResult.value = null
     lineErrors.value = {}
     await refreshQuote()
@@ -121,12 +150,45 @@ async function startOrder(): Promise<void> {
   }
 }
 
+/**
+ * Resume an existing draft by id, hydrating the builder from GET /orders/:id/quote (no
+ * new endpoint needed - the quote carries id, status, totals and lines). Degrades
+ * cleanly: a 404 is the ownership check (AGENTS section 7 returns 404, not 403, so
+ * existence is not leaked) and a non-draft order is read-only, both surfaced as a
+ * message rather than a crash or a silent blank draft.
+ */
+async function resumeOrder(id: string): Promise<void> {
+  pageError.value = null
+  resumeError.value = null
+  busy.value = true
+  try {
+    const q = await apiRequest<QuoteResponse>(`/orders/${id}/quote`)
+    if (q.status !== 'draft') {
+      resumeError.value = `That order is ${q.status} and can no longer be edited. Start a new order instead.`
+      return
+    }
+    orderId.value = q.orderId
+    orderStatus.value = q.status
+    quote.value = q
+    sendResult.value = null
+    lineErrors.value = {}
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      resumeError.value = 'That order was not found. It may not be one of your orders, or it no longer exists.'
+    } else {
+      resumeError.value = messageFor(err)
+    }
+  } finally {
+    busy.value = false
+  }
+}
+
 async function addLine(payload: { sku: string; qty: number; unitPriceCents?: number; marginBps?: number }): Promise<void> {
-  if (!order.value) return
+  if (!orderId.value) return
   addError.value = null
   busy.value = true
   try {
-    await apiRequest<OrderView>(`/orders/${order.value.id}/lines`, { method: 'POST', body: payload })
+    await apiRequest<OrderView>(`/orders/${orderId.value}/lines`, { method: 'POST', body: payload })
     await refreshQuote()
   } catch (err) {
     addError.value = messageFor(err)
@@ -136,13 +198,13 @@ async function addLine(payload: { sku: string; qty: number; unitPriceCents?: num
 }
 
 async function commitLine(lineId: string, payload: { qty: number; unitPriceCents?: number; marginBps?: number }): Promise<void> {
-  if (!order.value) return
+  if (!orderId.value) return
   const next = { ...lineErrors.value }
   delete next[lineId]
   lineErrors.value = next
   lineBusyId.value = lineId
   try {
-    await apiRequest<OrderView>(`/orders/${order.value.id}/lines/${lineId}`, { method: 'PATCH', body: payload })
+    await apiRequest<OrderView>(`/orders/${orderId.value}/lines/${lineId}`, { method: 'PATCH', body: payload })
     await refreshQuote()
   } catch (err) {
     const targetId = lineIdAtErrorPosition(err) ?? lineId
@@ -153,10 +215,10 @@ async function commitLine(lineId: string, payload: { qty: number; unitPriceCents
 }
 
 async function removeLine(lineId: string): Promise<void> {
-  if (!order.value) return
+  if (!orderId.value) return
   lineBusyId.value = lineId
   try {
-    await apiRequest<OrderView>(`/orders/${order.value.id}/lines/${lineId}`, { method: 'DELETE' })
+    await apiRequest<OrderView>(`/orders/${orderId.value}/lines/${lineId}`, { method: 'DELETE' })
     const next = { ...lineErrors.value }
     delete next[lineId]
     lineErrors.value = next
@@ -169,13 +231,13 @@ async function removeLine(lineId: string): Promise<void> {
 }
 
 async function send(): Promise<void> {
-  if (!order.value) return
+  if (!orderId.value) return
   pageError.value = null
   busy.value = true
   try {
-    const result = await apiRequest<SendResponse>(`/orders/${order.value.id}/send`, { method: 'POST' })
+    const result = await apiRequest<SendResponse>(`/orders/${orderId.value}/send`, { method: 'POST' })
     sendResult.value = result
-    order.value = result.order
+    orderStatus.value = result.order.status
     await refreshQuote()
   } catch (err) {
     const targetId = lineIdAtErrorPosition(err)
@@ -187,13 +249,17 @@ async function send(): Promise<void> {
 }
 
 function newOrder(): void {
-  order.value = null
+  orderId.value = null
+  orderStatus.value = null
   quote.value = null
   sendResult.value = null
   lineErrors.value = {}
   addError.value = null
   pageError.value = null
+  resumeError.value = null
   selectedPatientId.value = ''
+  // Drop a lingering ?orderId= so a refresh does not re-resume the finished order.
+  if (route.query.orderId) void router.replace({ name: 'order-new' })
 }
 </script>
 
@@ -204,7 +270,8 @@ function newOrder(): void {
     <p v-if="loadError" class="page-error" role="alert">{{ loadError }}</p>
 
     <!-- Patient selection + draft creation (FR-1 AC1) -->
-    <section v-if="!order" class="start">
+    <section v-if="!hasOrder" class="start">
+      <p v-if="resumeError" class="page-error" role="alert" data-test="resume-error">{{ resumeError }}</p>
       <h3>Patient</h3>
       <p v-if="patientsUnavailable" class="notice" role="status">
         The patient list is not yet available (the patients endpoint is still being
@@ -227,8 +294,8 @@ function newOrder(): void {
     <!-- Draft builder -->
     <section v-else class="builder">
       <div class="order-meta">
-        <span>Order <code>{{ order.id }}</code></span>
-        <span class="status">status: {{ order.status }}</span>
+        <span>Order <code>{{ orderId }}</code></span>
+        <span class="status">status: {{ orderStatus }}</span>
         <button type="button" class="btn-link" :disabled="busy" @click="newOrder">Start another order</button>
       </div>
 
