@@ -113,48 +113,79 @@ async function computeBlock(
   return { block, reconciliation: reconcile(settled, providerNetMarginCents) }
 }
 
-/** Build the migration-off-marketplaces report (docs/METRICS.md "Leading indicator"). */
-async function computeMigration(db: Knex, period: ResolvedPeriod, includeSynthetic: boolean): Promise<MigrationReport> {
-  const scope: MetricsScope = { period, includeSynthetic }
-  const [baselineRows, inHouseByProvider] = await Promise.all([
+/**
+ * Build the migration-off-marketplaces report (docs/METRICS.md "Leading indicator").
+ * Migration is a MONTHLY figure (in-house GMV for a month / baseline monthly GMV), so a
+ * multi-month window reports the average month (divide by the months in the window) and
+ * a per-month trend - the trend is the leading indicator the report exists to show.
+ */
+async function computeMigration(
+  db: Knex,
+  period: ResolvedPeriod,
+  includeSynthetic: boolean,
+  providerId?: string
+): Promise<MigrationReport> {
+  const months = monthSubPeriods(period)
+  const [baselineRows, ...inHouseByMonth] = await Promise.all([
     queryBaselineByProvider(db, includeSynthetic),
-    queryInHouseGmvByProvider(db, scope)
+    ...months.map((m) => queryInHouseGmvByProvider(db, { period: m.period, includeSynthetic }))
   ])
+  return buildMigrationReport(
+    baselineRows.map((b) => ({ providerId: b.providerId, baselineMonthlyGmvCents: intDiv(b.totalGmvCents, b.monthsCovered) })),
+    months.map((m, i) => ({ month: m.key, inHouse: inHouseByMonth[i] })),
+    providerId
+  )
+}
 
-  const baselineProviders = new Set(baselineRows.map((b) => b.providerId))
-  const providers: MigrationProviderRow[] = []
-  let overallInHouseGmvCents = 0
-  let overallBaselineMonthlyGmvCents = 0
-  let adoptedCount = 0
+/** Assemble the report from each baseline provider's monthly baseline and in-house GMV per month. */
+function buildMigrationReport(
+  baselines: Array<{ providerId: string; baselineMonthlyGmvCents: number }>,
+  months: Array<{ month: string; inHouse: Map<string, number> }>,
+  onlyProviderId?: string
+): MigrationReport {
+  const monthCount = months.length
+  const scoped = onlyProviderId ? baselines.filter((b) => b.providerId === onlyProviderId) : baselines
+  const baselineProviders = new Set(baselines.map((b) => b.providerId))
+  const migration = (inHouse: number, baselineMonthly: number, n: number): number | null =>
+    baselineMonthly > 0 ? bps(inHouse, baselineMonthly * n) : null
 
-  for (const b of baselineRows) {
-    const baselineMonthlyGmvCents = intDiv(b.totalGmvCents, b.monthsCovered)
-    const inHouseGmvCents = inHouseByProvider.get(b.providerId) ?? 0
-    const adopted = inHouseGmvCents > 0
-    if (adopted) adoptedCount += 1
-    overallInHouseGmvCents += inHouseGmvCents
-    overallBaselineMonthlyGmvCents += baselineMonthlyGmvCents
-    providers.push({
-      providerId: b.providerId,
-      baselineMonthlyGmvCents,
-      inHouseGmvCents,
-      migrationBps: baselineMonthlyGmvCents > 0 ? bps(inHouseGmvCents, baselineMonthlyGmvCents) : null,
-      adopted
+  const providers: MigrationProviderRow[] = scoped.map((b) => {
+    const byMonth = months.map((m) => {
+      const inHouseGmvCents = m.inHouse.get(b.providerId) ?? 0
+      return { month: m.month, inHouseGmvCents, migrationBps: migration(inHouseGmvCents, b.baselineMonthlyGmvCents, 1) }
     })
-  }
+    const inHouseGmvCents = byMonth.reduce((a, m) => a + m.inHouseGmvCents, 0)
+    return {
+      providerId: b.providerId,
+      baselineMonthlyGmvCents: b.baselineMonthlyGmvCents,
+      inHouseGmvCents,
+      migrationBps: migration(inHouseGmvCents, b.baselineMonthlyGmvCents, monthCount),
+      adopted: inHouseGmvCents > 0,
+      byMonth
+    }
+  })
   providers.sort((a, b) => (a.providerId < b.providerId ? -1 : a.providerId > b.providerId ? 1 : 0))
 
-  const noBaselineProviderIds = [...inHouseByProvider.keys()]
-    .filter((pid) => !baselineProviders.has(pid))
+  const overallBaselineMonthlyGmvCents = providers.reduce((a, p) => a + p.baselineMonthlyGmvCents, 0)
+  const overallInHouseGmvCents = providers.reduce((a, p) => a + p.inHouseGmvCents, 0)
+  const byMonth = months.map((m, i) => {
+    const inHouseGmvCents = providers.reduce((a, p) => a + p.byMonth[i].inHouseGmvCents, 0)
+    return { month: m.month, inHouseGmvCents, migrationBps: migration(inHouseGmvCents, overallBaselineMonthlyGmvCents, 1) }
+  })
+
+  const withActivity = new Set(months.flatMap((m) => [...m.inHouse.entries()].filter(([, v]) => v > 0).map(([k]) => k)))
+  const noBaselineProviderIds = [...withActivity]
+    .filter((pid) => !baselineProviders.has(pid) && (!onlyProviderId || pid === onlyProviderId))
     .sort()
 
   return {
     providers,
     overallInHouseGmvCents,
     overallBaselineMonthlyGmvCents,
-    overallMigrationBps:
-      overallBaselineMonthlyGmvCents > 0 ? bps(overallInHouseGmvCents, overallBaselineMonthlyGmvCents) : null,
-    adoptionBps: baselineProviders.size > 0 ? bps(adoptedCount, baselineProviders.size) : null,
+    months: monthCount,
+    overallMigrationBps: migration(overallInHouseGmvCents, overallBaselineMonthlyGmvCents, monthCount),
+    byMonth,
+    adoptionBps: providers.length > 0 ? bps(providers.filter((p) => p.adopted).length, providers.length) : null,
     noBaselineProviderIds
   }
 }
@@ -230,21 +261,6 @@ async function resolveProviderFilter(db: Knex, providerId: string | undefined): 
   return providerId
 }
 
-/** Narrow the migration report to one provider; overall figures recomputed for that row only. */
-function migrationFor(m: MigrationReport, providerId: string): MigrationReport {
-  const providers = m.providers.filter((p) => p.providerId === providerId)
-  const inHouse = providers.reduce((a, p) => a + p.inHouseGmvCents, 0)
-  const baseline = providers.reduce((a, p) => a + p.baselineMonthlyGmvCents, 0)
-  return {
-    providers,
-    overallInHouseGmvCents: inHouse,
-    overallBaselineMonthlyGmvCents: baseline,
-    overallMigrationBps: baseline > 0 ? bps(inHouse, baseline) : null,
-    adoptionBps: providers.length > 0 ? bps(providers.filter((p) => p.adopted).length, providers.length) : null,
-    noBaselineProviderIds: m.noBaselineProviderIds.filter((id) => id === providerId)
-  }
-}
-
 /** Parse and validate the groupBy query value. */
 function parseGroupBy(value: string | undefined): MetricsGroupBy {
   if (value === undefined || value === '' || value === 'none') return 'none'
@@ -260,11 +276,10 @@ export async function getAdminMetrics(db: Knex, opts: AdminMetricsOpts): Promise
   const providerId = await resolveProviderFilter(db, opts.providerId)
   const scope: MetricsScope = providerId ? { period, includeSynthetic, providerId } : { period, includeSynthetic }
 
-  const [{ block: headline, reconciliation }, fullMigration] = await Promise.all([
+  const [{ block: headline, reconciliation }, migration] = await Promise.all([
     computeBlock(db, scope),
-    computeMigration(db, period, includeSynthetic)
+    computeMigration(db, period, includeSynthetic, providerId ?? undefined)
   ])
-  const migration = providerId ? migrationFor(fullMigration, providerId) : fullMigration
 
   const groups: MetricsGroup[] = []
   if (groupBy === 'month') {

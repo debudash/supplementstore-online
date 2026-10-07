@@ -178,3 +178,37 @@ describe('FR-13 admin metrics: input validation and money-rule-10 exactness', ()
     expect(res.body.error.code).toBe('INVALID_INPUT')
   })
 })
+
+describe('leading indicator: migration is a monthly figure with a per-month trend', () => {
+  it('a two-month window reports the average month and each month on its own', async () => {
+    const world = await makeProviderWorld()
+    // Baseline: 20000 over 2 distinct months -> 10000 a month.
+    const [batch] = await db('baseline_imports').insert({ source: 'csv', row_count: 2 }).returning('id')
+    await db('baseline_orders').insert([
+      { import_batch_id: batch.id, provider_id: world.providerId, practice_id: world.practiceId, order_date: '2026-01-10', gmv_cents: 10000 },
+      { import_batch_id: batch.id, provider_id: world.providerId, practice_id: world.practiceId, order_date: '2026-02-10', gmv_cents: 10000 }
+    ])
+
+    // One 4999 order in each of two consecutive months (the earlier one backdated).
+    const now = new Date()
+    const thisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15, 12))
+    const older = await payNewOrder(world, EVAL02)
+    await db('orders').where({ id: older }).update({ paid_at: lastMonth })
+    await payNewOrder(world, EVAL02)
+
+    const ymd = (d: Date) => d.toISOString().slice(0, 10)
+    const lastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0))
+    const from = ymd(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)))
+    const res = await asUser('admin-cerbo').get(`/api/admin/metrics?from=${from}&to=${ymd(lastDay)}&providerId=${world.providerId}`)
+    expect(res.status).toBe(200)
+    const m = (res.body as AdminMetricsResponse).migration
+    expect(m.months).toBe(2)
+    // 9998 in-house over 2 months against 10000 a month = 49.99% average (not 99.98%).
+    expect(m.overallInHouseGmvCents).toBe(9998)
+    expect(m.overallMigrationBps).toBe(4999)
+    expect(m.byMonth.map((x) => x.migrationBps)).toEqual([4999, 4999])
+    expect(m.providers[0].byMonth.map((x) => x.inHouseGmvCents)).toEqual([4999, 4999])
+    expect(m.byMonth[1].month).toBe(`${thisMonth.getUTCFullYear()}-${String(thisMonth.getUTCMonth() + 1).padStart(2, '0')}`)
+  })
+})

@@ -38,7 +38,7 @@ function metricsFor(path: string) {
     period: { from: '2026-10-01', to: '2026-10-31' }, includeSynthetic: false, groupBy: 'provider',
     providerId: providerId ?? null,
     headline: block(providerId === BEN ? 52485 : 8812), reconciliation: recon,
-    migration: { providers: [], overallInHouseGmvCents: 0, overallBaselineMonthlyGmvCents: 0, overallMigrationBps: null, adoptionBps: null, noBaselineProviderIds: [] },
+    migration: { providers: [], overallInHouseGmvCents: 0, overallBaselineMonthlyGmvCents: 0, months: 1, overallMigrationBps: null, byMonth: [], adoptionBps: null, noBaselineProviderIds: [] },
     groups: ids.map((id) => ({ key: id, block: block(id === BEN ? 52485 : 8812), reconciliation: recon })),
     providerNames: names
   }
