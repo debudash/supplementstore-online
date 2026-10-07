@@ -1,13 +1,14 @@
 <script setup lang="ts">
-// One cart line (FR-1..FR-3). The line DISPLAYS the server quote figures (price, COGS,
-// fee, net margin) and never computes money.
+// One row in the Items table (FR-1..FR-3). DISPLAYS the server quote figures (price,
+// COGS, fee, net margin) and never computes money.
 //
-// UPDATE LINE IS QUANTITY ONLY (owner requirement): no price or margin field on an
-// existing line - just quantity plus Remove. The canonical price was set from the
-// margin % at add time and is derived on the server (ADR-005); editing it mid-order is
-// not a doctor-facing action. The API still accepts a price/margin on PATCH; the UI
-// simply sends quantity. A per-line error (MARGIN_NEGATIVE or INSUFFICIENT_STOCK)
-// renders inline against this line, not as a page banner.
+// UPDATE IS QUANTITY ONLY (owner requirement): the only editable field on an existing
+// item is its quantity - no price or margin field. Since a SKU already on the order is
+// hidden from the Add dropdown, this row is the ONLY way to change its quantity. The
+// canonical price was set from the margin % / catalog price at add time and is derived on
+// the server (ADR-005); the API still accepts a price/margin on PATCH, the UI sends only
+// quantity. A per-line error (MARGIN_NEGATIVE / INSUFFICIENT_STOCK) renders inline in a
+// row beneath this one.
 import { ref, watch } from 'vue'
 import type { OrderLineView } from '@cerbo/contracts'
 import { formatCents } from './format'
@@ -49,55 +50,47 @@ function commit(): void {
 </script>
 
 <template>
-  <div class="line-row" :class="{ 'has-error': !!error }">
-    <div class="line-head">
+  <tr class="item-row" :class="{ 'has-error': !!error }">
+    <td>
       <strong class="name">{{ line.name }}</strong>
       <span class="sku">{{ line.sku }}</span>
-    </div>
-
-    <div class="controls">
-      <label class="field">
-        Qty
-        <input v-model.number="qty" type="number" min="1" max="100" step="1" :disabled="busy" data-test="qty-input" />
-      </label>
-
-      <button type="button" :disabled="busy" @click="commit">Update line</button>
+    </td>
+    <td class="qty-cell">
+      <input
+        v-model.number="qty"
+        type="number"
+        min="1"
+        max="100"
+        step="1"
+        :disabled="busy"
+        aria-label="Quantity"
+        data-test="qty-input"
+      />
+    </td>
+    <td class="num">{{ formatCents(line.unitPriceCents) }}</td>
+    <td class="num" data-test="line-total">{{ formatCents(line.lineTotalCents) }}</td>
+    <td class="num">
+      <span class="cogs-head"><DemoBadge reason="COGS is Cerbo's wholesale cost. A prescribing doctor would not normally see it; shown here to make the per-line economics demonstrable." /></span>
+      <span data-test="line-cogs">{{ formatCents(line.lineCogsCents) }}</span>
+    </td>
+    <td class="num">{{ formatCents(line.lineFeeCents) }}</td>
+    <td class="num" data-test="line-margin">{{ formatCents(line.lineMarginCents) }}</td>
+    <td class="actions-cell">
+      <button type="button" :disabled="busy" @click="commit">Update Item</button>
       <button type="button" class="remove" :disabled="busy" @click="emit('remove')">Remove</button>
-    </div>
-
-    <p v-if="inputError" class="inline-error" role="alert">{{ inputError }}</p>
-    <p v-if="error" class="inline-error" role="alert" data-test="line-error">{{ error }}</p>
-
-    <dl class="figures">
-      <div><dt>Unit price</dt><dd>{{ formatCents(line.unitPriceCents) }}</dd></div>
-      <div><dt>Line total</dt><dd data-test="line-total">{{ formatCents(line.lineTotalCents) }}</dd></div>
-      <div>
-        <dt class="label-row">COGS <DemoBadge reason="COGS is Cerbo's wholesale cost. A prescribing doctor would not normally see it; shown here to make the per-line economics demonstrable." /></dt>
-        <dd data-test="line-cogs">{{ formatCents(line.lineCogsCents) }}</dd>
-      </div>
-      <div><dt>Fee</dt><dd>{{ formatCents(line.lineFeeCents) }}</dd></div>
-      <div><dt>Net margin</dt><dd data-test="line-margin">{{ formatCents(line.lineMarginCents) }}</dd></div>
-    </dl>
-  </div>
+    </td>
+  </tr>
+  <tr v-if="inputError || error" class="error-row">
+    <td colspan="8">
+      <span v-if="inputError" class="inline-error" role="alert">{{ inputError }}</span>
+      <span v-if="error" class="inline-error" role="alert" data-test="line-error">{{ error }}</span>
+    </td>
+  </tr>
 </template>
 
 <style scoped>
-.line-row {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 0.85rem;
-  margin-bottom: 0.75rem;
-  box-shadow: var(--shadow-sm);
-}
-.line-row.has-error {
-  border-color: var(--danger);
-}
-.line-head {
-  display: flex;
-  gap: 0.5rem;
-  align-items: baseline;
-  margin-bottom: 0.5rem;
+.item-row.has-error > td {
+  background: var(--danger-tint);
 }
 .name {
   font-weight: 600;
@@ -105,58 +98,33 @@ function commit(): void {
 .sku {
   color: var(--subtle);
   font-size: 0.85em;
+  margin-left: 0.4rem;
 }
-.controls {
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cogs-head {
+  margin-right: 0.35rem;
+}
+.qty-cell input {
+  width: 4.5rem;
+}
+.actions-cell {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.85rem;
-  align-items: flex-end;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.82em;
-  color: var(--muted);
-  gap: 0.25rem;
-}
-.field input {
-  width: 7rem;
+  gap: 0.5rem;
+  white-space: nowrap;
 }
 .remove {
   color: var(--danger);
   border-color: var(--border-strong);
 }
+.error-row td {
+  padding-top: 0;
+}
 .inline-error {
+  display: inline-block;
   color: var(--danger);
-  background: var(--danger-tint);
-  border: 1px solid var(--danger);
-  border-radius: var(--radius-sm);
-  padding: 0.4rem 0.6rem;
-  margin: 0.5rem 0 0;
-}
-.figures {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.4rem;
-  margin: 0.75rem 0 0;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--border);
-}
-.figures div {
-  display: flex;
-  flex-direction: column;
-}
-.figures dt {
-  color: var(--muted);
-  font-size: 0.78em;
-}
-.label-row {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-.figures dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
+  margin-right: 1rem;
 }
 </style>

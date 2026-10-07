@@ -323,15 +323,31 @@ function newOrder(): void {
       <div class="lines">
         <h3>Items</h3>
         <p v-if="lines.length === 0" class="notice">No items yet. Add one above.</p>
-        <LineRow
-          v-for="line in lines"
-          :key="line.id"
-          :line="line"
-          :busy="busy || lineBusyId === line.id"
-          :error="lineErrors[line.id] ?? null"
-          @commit="(payload) => commitLine(line.id, payload)"
-          @remove="() => removeLine(line.id)"
-        />
+        <table v-else class="items-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th class="num">Qty</th>
+              <th class="num">Unit price</th>
+              <th class="num">Line total</th>
+              <th class="num">COGS</th>
+              <th class="num">Fee</th>
+              <th class="num">Net margin</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <LineRow
+              v-for="line in lines"
+              :key="line.id"
+              :line="line"
+              :busy="busy || lineBusyId === line.id"
+              :error="lineErrors[line.id] ?? null"
+              @commit="(payload) => commitLine(line.id, payload)"
+              @remove="() => removeLine(line.id)"
+            />
+          </tbody>
+        </table>
       </div>
 
       <QuoteSummary :totals="quote?.totals ?? null" />
@@ -375,6 +391,26 @@ function newOrder(): void {
 }
 .notice {
   color: var(--muted);
+}
+/* Mirrors the Orders list table so the two screens read as one product. */
+.items-table {
+  border-collapse: collapse;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+.items-table th,
+.items-table :deep(td) {
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+}
+.items-table th.num,
+.items-table :deep(td.num) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .actions {
   margin-top: 1rem;
