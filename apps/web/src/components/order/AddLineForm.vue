@@ -10,7 +10,7 @@
 //
 // CATALOG PRICE SOURCE: ProductView.listPriceCents (integer cents, same convention as
 // unitCogsCents) - a required field on the catalog response, seeded per SKU.
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { ProductView } from '@cerbo/contracts'
 import { formatCents, marginPercentToBps } from './format'
 import DemoBadge from '../DemoBadge.vue'
@@ -20,9 +20,9 @@ const props = defineProps<{
   busy: boolean
   /** Error from the last add attempt (INSUFFICIENT_STOCK / MARGIN_NEGATIVE / other). */
   error: string | null
-  /** Quantity already on this draft per SKU (from the quote). Adding a SKU SUMS with
-   *  this (FR-1 AC2), so showing it explains why availability can be "short" even when
-   *  the catalog shows stock: the units already on the order count against it. */
+  /** Quantity already on this draft per SKU (from the quote). A SKU already on the order
+   *  is REMOVED from the dropdown (owner UX) so it cannot be added twice at a different
+   *  margin; removing the item puts it back. Quantity changes happen on the item row. */
   onOrder?: Record<string, number>
 }>()
 
@@ -35,12 +35,22 @@ const qty = ref<number>(1)
 const marginInput = ref<string>('')
 const inputError = ref<string | null>(null)
 
-const selectedProduct = computed(() => props.products.find((p) => p.sku === sku.value) ?? null)
+// Products not yet on the order - the only ones that can be added. A SKU already on the
+// order is hidden here and only its quantity can change (on the item row); removing it
+// brings it back. Reactive, so add/remove updates the list immediately.
+const addableProducts = computed(() => props.products.filter((p) => (props.onOrder?.[p.sku] ?? 0) === 0))
+const selectedProduct = computed(() => addableProducts.value.find((p) => p.sku === sku.value) ?? null)
 // The catalog list price for the chosen SKU (null only when no SKU is selected yet).
 const selectedListPrice = computed(() => selectedProduct.value?.listPriceCents ?? null)
-// How many of the selected SKU are ALREADY on this draft (display only - the quote's
-// line qty, not a stock figure). Adding more sums with this.
-const alreadyOnOrder = computed(() => (sku.value ? (props.onOrder?.[sku.value] ?? 0) : 0))
+
+// If the selected SKU just became unselectable (it was added to the order), clear the
+// selection so the form does not hold a dangling value that is no longer in the list.
+watch(addableProducts, (list) => {
+  if (sku.value && !list.some((p) => p.sku === sku.value)) {
+    sku.value = ''
+    marginInput.value = ''
+  }
+})
 
 function submit(): void {
   inputError.value = null
@@ -90,7 +100,7 @@ function submit(): void {
         <select v-model="sku" :disabled="busy">
           <option value="" disabled>Select a SKU</option>
           <option
-            v-for="p in products"
+            v-for="p in addableProducts"
             :key="p.sku"
             :value="p.sku"
             :disabled="p.available <= 0"
@@ -125,11 +135,6 @@ function submit(): void {
 
       <button type="submit" class="btn-primary" :disabled="busy">Add to order</button>
     </div>
-
-    <p v-if="alreadyOnOrder > 0" class="on-order" role="status" data-test="already-on-order">
-      Already on this order: {{ alreadyOnOrder }}. Adding more increases that line's quantity
-      (and both count against stock).
-    </p>
 
     <p class="hint">
       The price starts from the catalog value. Set a margin % to have the server re-derive
@@ -186,12 +191,6 @@ function submit(): void {
   color: var(--muted);
   font-size: 0.82em;
   margin: 0.6rem 0 0;
-}
-.on-order {
-  color: var(--muted);
-  font-size: 0.82em;
-  margin: 0.6rem 0 0;
-  font-weight: 600;
 }
 .inline-error {
   color: var(--danger);

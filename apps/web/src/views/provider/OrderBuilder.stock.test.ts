@@ -31,13 +31,13 @@ vi.mock('../../api/client', () => {
 
 import { ApiError } from '../../api/client'
 
+// Empty draft so PROBIO is addable (a SKU already on the order would be hidden from the
+// dropdown and the INSUFFICIENT_STOCK path would be unreachable for it).
 const draftQuote = {
   orderId: 'o1',
   status: 'draft',
-  totals: { feeBps: 75, subtotalCents: 8997, cogsCents: 4350, feeCents: 68, marginCents: 4579 },
-  lines: [
-    { id: 'l1', position: 1, sku: 'PROBIO-50B', name: 'Probiotic 50B CFU', qty: 3, unitPriceCents: 2999, unitCogsCents: 2675, lineTotalCents: 8997, lineCogsCents: 8025, lineFeeCents: 68, lineMarginCents: 904 }
-  ]
+  totals: { feeBps: 75, subtotalCents: 0, cogsCents: 0, feeCents: 0, marginCents: 0 },
+  lines: [] as unknown[]
 }
 const products = [
   { sku: 'PROBIO-50B', name: 'Probiotic 50B CFU', unitCogsCents: 2675, available: 2, active: true, listPriceCents: 4299 }
@@ -65,7 +65,7 @@ describe('OrderBuilder - INSUFFICIENT_STOCK shows server remaining as N', () => 
     const wrapper = mount(OrderBuilder)
     await flushPromises() // resume hydrates the draft from the quote
 
-    // Add more PROBIO -> server rejects with remaining 2.
+    // Add PROBIO over availability -> server rejects, carrying its remaining headroom.
     await wrapper.find('select').setValue('PROBIO-50B')
     await wrapper.find('form.add-line').trigger('submit')
     await flushPromises()
