@@ -34,5 +34,5 @@ Format: decision, options considered, trade-off, status. Approved = confirmed by
 
 ## Open business risks (for the final write-up)
 - Card processing typically costs well above 0.75%. If Cerbo absorbs processing fees, each order loses money. Pricing model must account for it.
-- Post-fulfillment refunds cost Cerbo full COGS while the provider loses only the fee.
+- Post-fulfillment refunds cost Cerbo full COGS while the provider loses only the fee. ADR-027 narrows patient requests to unopened products within 30 days of payment; shipped returns are still written off.
 - Migration measurement depends on a trustworthy baseline source.

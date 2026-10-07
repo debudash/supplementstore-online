@@ -54,6 +54,8 @@ Whole-order refunds only.
 - AC3: The REFUND journal posts per line: CASH_CLEARING credit total, COGS_RECOVERY debit cogs, PROVIDER_PAYABLE debit margin (memo `margin_reversal`), PROVIDER_PAYABLE debit fee (memo `fee_retention`). PLATFORM_FEE_REVENUE is untouched. Journal sums to zero (EVAL-07)
 - AC4: If not yet fulfilled, units are restocked (`on_hand += qty`). If fulfilled, no restock and `writeoff_cogs_cents` records Cerbo's COGS loss (EVAL-08)
 - AC5: Second refund returns `ALREADY_REFUNDED`. Refund of a non-paid order returns `NOT_REFUNDABLE`
+- AC6 (ADR-026, ADR-027): A patient can request a refund on their own paid order only for UNOPENED products (a required confirmation; 400 without it) and only within 30 days of payment (`REFUND_WINDOW_CLOSED` after). One pending request per order
+- AC7 (ADR-027): Each request has a review link (`/refund-review/:token`) usable only by the provider who owns the order (404 otherwise). Accept runs the AC1-AC5 refund immediately; Decline requires a note the patient sees. The patient view never contains the token. Return shipping is out of scope
 
 ### FR-9 Fulfillment stub (Tier 2)
 - AC1: Cerbo Admin can mark a `paid` order fulfilled via `FulfillmentService` (stub). Sets `fulfilled_at`
@@ -116,7 +118,7 @@ Whole-order refunds only.
 - OOS-4 Multi-currency, international
 - OOS-5 Warehouses, multi-location stock
 - OOS-6 Partial (line-level) refunds - ledger supports them later
-- OOS-7 Refund policy enforcement (only reason codes are recorded)
+- OOS-7 Refund policy enforcement beyond FR-8 AC6 (unopened + 30-day window); return shipping logistics (who pays, labels, receiving, inspection)
 - OOS-8 Real job scheduler - demo endpoints instead
 
 ## Assumptions
