@@ -6,7 +6,9 @@
 // row with a reason from the schema enum (seed|restock|reserve|release|sale|
 // refund_restock|adjustment).
 import type { Knex } from 'knex'
+import { marginBpsFromPrice, priceFromMarginBps } from '@cerbo/money'
 import { insufficientStock, notFound } from '../orders/errors'
+import { requireInt, MARGIN_BPS_MIN, MARGIN_BPS_MAX } from '../orders/validation'
 
 /** A quantity of one SKU to reserve or release. */
 export interface SkuQty {
@@ -26,8 +28,22 @@ export interface ProductView {
   /** Seeded catalog list price in integer cents (the price shown on the New Order
    *  screen; the provider does not type it). Always set for catalog rows. */
   listPriceCents: number
+  /** Gross margin the list price represents over COGS, in basis points (floor). */
+  listMarginBps: number
   available: number
   active: boolean
+}
+
+/** GET /api/products/:sku/price-preview response (ADR-025). */
+export interface PricePreview {
+  sku: string
+  marginBps: number
+  /** The unit price the order would get for this margin (priceFromMarginBps). */
+  unitPriceCents: number
+  listPriceCents: number
+  listMarginBps: number
+  /** unitPriceCents - listPriceCents (negative = cheaper than list). Server-computed. */
+  differenceFromListCents: number
 }
 
 interface ProductRow {
@@ -48,9 +64,34 @@ export async function listProducts(db: Knex): Promise<ProductView[]> {
     name: r.name,
     unitCogsCents: r.unit_cogs_cents,
     listPriceCents: r.list_price_cents,
+    listMarginBps: marginBpsFromPrice(r.unit_cogs_cents, r.list_price_cents),
     available: r.on_hand_qty - r.reserved_qty,
     active: r.active
   }))
+}
+
+/**
+ * Preview the price a margin % would produce for a SKU, using the same function the
+ * add-line path uses (priceFromMarginBps), so the preview is exactly what the server
+ * will store. Read-only; the browser never computes a price (AGENTS.md money rule 2).
+ */
+export async function previewPrice(db: Knex, sku: string, marginBpsRaw: unknown): Promise<PricePreview> {
+  const marginBps = requireInt(
+    typeof marginBpsRaw === 'string' && /^\d+$/.test(marginBpsRaw) ? Number(marginBpsRaw) : marginBpsRaw,
+    'marginBps',
+    MARGIN_BPS_MIN,
+    MARGIN_BPS_MAX
+  )
+  const row = await getProduct(db, sku)
+  const unitPriceCents = priceFromMarginBps(row.unit_cogs_cents, marginBps)
+  return {
+    sku,
+    marginBps,
+    unitPriceCents,
+    listPriceCents: row.list_price_cents,
+    listMarginBps: marginBpsFromPrice(row.unit_cogs_cents, row.list_price_cents),
+    differenceFromListCents: unitPriceCents - row.list_price_cents
+  }
 }
 
 /** Fetch one product (no lock) for an add-to-cart availability check. 404 if absent. */

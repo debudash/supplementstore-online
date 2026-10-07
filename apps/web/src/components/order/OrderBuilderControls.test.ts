@@ -12,8 +12,8 @@ import LineRow from './LineRow.vue'
 
 // The seeded catalog list price (ProductView.listPriceCents) is a required field.
 const products = [
-  { sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', unitCogsCents: 1450, available: 50, active: true, listPriceCents: 2999 },
-  { sku: 'VITD3-K2', name: 'Vitamin D3 + K2', unitCogsCents: 1125, available: 40, active: true, listPriceCents: 2499 }
+  { sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', unitCogsCents: 1450, available: 50, active: true, listPriceCents: 2999, listMarginBps: 5165 },
+  { sku: 'VITD3-K2', name: 'Vitamin D3 + K2', unitCogsCents: 1125, available: 40, active: true, listPriceCents: 2499, listMarginBps: 5498 }
 ]
 
 const line = {

@@ -50,9 +50,24 @@ export interface ProductView {
   /** Seeded catalog list price in integer cents; the price the New Order screen shows
    *  and the provider does not type (owner decision). Always set for catalog rows. */
   listPriceCents: number
+  /** Gross margin the list price represents over COGS, in basis points, rounded down
+   *  (ADR-025). Display context only; before the platform fee. */
+  listMarginBps: number
   /** on_hand - reserved for the single shared pool (ADR-009). */
   available: number
   active: boolean
+}
+
+/** GET /api/products/:sku/price-preview?marginBps= (ADR-025). All server-computed. */
+export interface PricePreview {
+  sku: string
+  marginBps: number
+  /** The unit price an order line would get at this margin. */
+  unitPriceCents: number
+  listPriceCents: number
+  listMarginBps: number
+  /** unitPriceCents minus listPriceCents; negative means cheaper than list. */
+  differenceFromListCents: number
 }
 
 /** One line in a quote/order response, with the full provider-facing economics. */

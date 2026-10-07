@@ -40,7 +40,7 @@ const draftQuote = {
   lines: [] as unknown[]
 }
 const products = [
-  { sku: 'PROBIO-50B', name: 'Probiotic 50B CFU', unitCogsCents: 2675, available: 2, active: true, listPriceCents: 4299 }
+  { sku: 'PROBIO-50B', name: 'Probiotic 50B CFU', unitCogsCents: 2675, available: 2, active: true, listPriceCents: 4299, listMarginBps: 3777 }
 ]
 
 beforeEach(() => {
