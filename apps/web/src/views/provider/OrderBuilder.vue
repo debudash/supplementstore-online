@@ -54,13 +54,23 @@ const hasOrder = computed(() => orderId.value !== null)
 const lines = computed(() => quote.value?.lines ?? [])
 const isDraft = computed(() => orderStatus.value === 'draft')
 const canSend = computed(() => isDraft.value && lines.value.length > 0)
+// Quantity already on this draft per SKU, for the Add form's "already on this order: N"
+// note. Straight from the quote lines - a display value, never stock arithmetic.
+const onOrderBySku = computed<Record<string, number>>(() => {
+  const map: Record<string, number> = {}
+  for (const l of lines.value) map[l.sku] = l.qty
+  return map
+})
 
 /** Turn an API error into a provider-facing message (exact copy for known codes). */
 function messageFor(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.code === 'INSUFFICIENT_STOCK') {
-      const available = Number((err.details as { available?: unknown }).available ?? 0)
-      return insufficientStockMessage(available)
+      // Prefer the server-computed remaining headroom (details.remaining); fall back to
+      // raw available if an older server omits it. Never subtract in the browser.
+      const details = err.details as { available?: unknown; remaining?: unknown }
+      const n = Number(details.remaining ?? details.available ?? 0)
+      return insufficientStockMessage(n)
     }
     if (err.code === 'MARGIN_NEGATIVE') {
       return "This line's margin after the platform fee would be negative. Raise the price or margin %."
@@ -306,6 +316,7 @@ function newOrder(): void {
         :products="products"
         :busy="busy"
         :error="addError"
+        :on-order="onOrderBySku"
         @add="addLine"
       />
 
