@@ -20,7 +20,7 @@ import type {
   ReconciliationLine
 } from '@cerbo/contracts'
 import { resolveReportPeriod, formatDateOnly, type ResolvedPeriod } from '../../reports/period'
-import { invalidInput } from '../errors'
+import { invalidInput, notFound } from '../errors'
 import {
   queryGmvCents,
   queryPlatformFeeCents,
@@ -199,6 +199,45 @@ export interface AdminMetricsOpts {
   to?: string
   groupBy?: string
   includeSynthetic?: boolean
+  /** Scope the whole report (headline, reconciliation, migration, groups) to one provider. */
+  providerId?: string
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** GET /api/admin/providers - every provider with its practice, ordered by name. */
+export async function listProviders(
+  db: Knex
+): Promise<Array<{ id: string; name: string; practiceId: string; practiceName: string | null }>> {
+  const rows: Array<{ id: string; name: string; practice_id: string; practice_name: string | null }> = await db('providers as pv')
+    .leftJoin('practices as pc', 'pc.id', 'pv.practice_id')
+    .orderBy([{ column: 'pv.name' }, { column: 'pv.id' }])
+    .select('pv.id', 'pv.name', 'pv.practice_id', 'pc.name as practice_name')
+  return rows.map((r) => ({ id: r.id, name: r.name, practiceId: r.practice_id, practiceName: r.practice_name }))
+}
+
+/** Validate a provider filter: a UUID of an existing provider (404 otherwise). */
+async function resolveProviderFilter(db: Knex, providerId: string | undefined): Promise<string | null> {
+  if (providerId === undefined) return null
+  if (!UUID_RE.test(providerId)) throw invalidInput('providerId must be a provider id (uuid)', { field: 'providerId' })
+  const exists = await db('providers').where({ id: providerId }).first('id')
+  if (!exists) throw notFound('No such provider', { providerId })
+  return providerId
+}
+
+/** Narrow the migration report to one provider; overall figures recomputed for that row only. */
+function migrationFor(m: MigrationReport, providerId: string): MigrationReport {
+  const providers = m.providers.filter((p) => p.providerId === providerId)
+  const inHouse = providers.reduce((a, p) => a + p.inHouseGmvCents, 0)
+  const baseline = providers.reduce((a, p) => a + p.baselineMonthlyGmvCents, 0)
+  return {
+    providers,
+    overallInHouseGmvCents: inHouse,
+    overallBaselineMonthlyGmvCents: baseline,
+    overallMigrationBps: baseline > 0 ? bps(inHouse, baseline) : null,
+    adoptionBps: providers.length > 0 ? bps(providers.filter((p) => p.adopted).length, providers.length) : null,
+    noBaselineProviderIds: m.noBaselineProviderIds.filter((id) => id === providerId)
+  }
 }
 
 /** Parse and validate the groupBy query value. */
@@ -213,21 +252,26 @@ export async function getAdminMetrics(db: Knex, opts: AdminMetricsOpts): Promise
   const period = resolveReportPeriod(opts.from, opts.to)
   const includeSynthetic = opts.includeSynthetic ?? false
   const groupBy = parseGroupBy(opts.groupBy)
-  const scope: MetricsScope = { period, includeSynthetic }
+  const providerId = await resolveProviderFilter(db, opts.providerId)
+  const scope: MetricsScope = providerId ? { period, includeSynthetic, providerId } : { period, includeSynthetic }
 
-  const [{ block: headline, reconciliation }, migration] = await Promise.all([
+  const [{ block: headline, reconciliation }, fullMigration] = await Promise.all([
     computeBlock(db, scope),
     computeMigration(db, period, includeSynthetic)
   ])
+  const migration = providerId ? migrationFor(fullMigration, providerId) : fullMigration
 
   const groups: MetricsGroup[] = []
   if (groupBy === 'month') {
     for (const sub of monthSubPeriods(period)) {
-      const { block, reconciliation: rec } = await computeBlock(db, { period: sub.period, includeSynthetic })
+      const subScope: MetricsScope = providerId
+        ? { period: sub.period, includeSynthetic, providerId }
+        : { period: sub.period, includeSynthetic }
+      const { block, reconciliation: rec } = await computeBlock(db, subScope)
       groups.push({ key: sub.key, block, reconciliation: rec })
     }
   } else if (groupBy === 'provider') {
-    const providerIds = await providersInScope(db, period, includeSynthetic)
+    const providerIds = providerId ? [providerId] : await providersInScope(db, period, includeSynthetic)
     for (const providerId of providerIds) {
       const { block, reconciliation: rec } = await computeBlock(db, { period, includeSynthetic, providerId })
       groups.push({ key: providerId, block, reconciliation: rec })
@@ -237,6 +281,7 @@ export async function getAdminMetrics(db: Knex, opts: AdminMetricsOpts): Promise
   // Display names for every provider id referenced in this response (additive lookup map,
   // so existing shapes are unchanged): migration rows, the no-baseline list, and groups.
   const ids = new Set<string>([
+    ...(providerId ? [providerId] : []),
     ...migration.providers.map((p) => p.providerId),
     ...migration.noBaselineProviderIds,
     ...(groupBy === 'provider' ? groups.map((g) => g.key) : [])
@@ -254,6 +299,7 @@ export async function getAdminMetrics(db: Knex, opts: AdminMetricsOpts): Promise
     period: { from: period.from, to: period.to },
     includeSynthetic,
     groupBy,
+    providerId,
     headline,
     reconciliation,
     migration,

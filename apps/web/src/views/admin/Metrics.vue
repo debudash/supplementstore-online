@@ -10,7 +10,8 @@
 // the whole current UTC month, the same window the old month picker produced.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
-import type { AdminMetricsResponse, MetricsGroupBy } from '@cerbo/contracts'
+import type { AdminMetricsResponse, AdminProviderListItem, MetricsGroupBy } from '@cerbo/contracts'
+import ProviderLabel from '../../components/admin/ProviderLabel.vue'
 import { formatMoney, formatBps } from '../../utils/money'
 import DemoBadge from '../../components/DemoBadge.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
@@ -37,6 +38,9 @@ const from = ref(initial.from)
 const to = ref(initial.to)
 const groupBy = ref<MetricsGroupBy>('none')
 const includeSynthetic = ref(false)
+/** '' = all providers; otherwise the provider the whole report is scoped to. */
+const providerFilter = ref('')
+const providerOptions = ref<AdminProviderListItem[]>([])
 const data = ref<AdminMetricsResponse | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -48,11 +52,26 @@ const rangeError = computed<string | null>(() => {
   return null
 })
 
-/** Provider ids are UUIDs; show a short prefix (full id on hover). */
-const shortId = (id: string): string => (id.length > 10 ? id.slice(0, 8) : id)
-/** Provider display name from the response's providerNames map (falls back to a short id). */
-const providerName = (id: string): string | null => data.value?.providerNames?.[id]?.providerName ?? null
-const practiceName = (id: string): string | null => data.value?.providerNames?.[id]?.practiceName ?? null
+/** Provider display names: from the response, else from the provider list. */
+const providerName = (id: string): string | null =>
+  data.value?.providerNames?.[id]?.providerName ?? providerOptions.value.find((p) => p.id === id)?.name ?? null
+const practiceName = (id: string): string | null =>
+  data.value?.providerNames?.[id]?.practiceName ?? providerOptions.value.find((p) => p.id === id)?.practiceName ?? null
+
+/** Load the provider list for the filter (non-fatal: the report works without it). */
+async function loadProviders(): Promise<void> {
+  try {
+    const res = await apiRequest<{ providers: AdminProviderListItem[] }>('/admin/providers')
+    providerOptions.value = Array.isArray(res?.providers) ? res.providers : []
+  } catch {
+    providerOptions.value = []
+  }
+}
+
+/** Scope the report to one provider (from the dropdown or a breakdown row). */
+function selectProvider(id: string): void {
+  providerFilter.value = id
+}
 
 // Only the newest request may write the result, so a slow earlier response never
 // overwrites a later one when controls change quickly.
@@ -70,6 +89,7 @@ async function load(): Promise<void> {
       groupBy: groupBy.value,
       includeSynthetic: String(includeSynthetic.value)
     })
+    if (providerFilter.value) params.set('providerId', providerFilter.value)
     const res = await apiRequest<AdminMetricsResponse>(`/admin/metrics?${params.toString()}`)
     if (seq === requestSeq) data.value = res
   } catch (err) {
@@ -87,14 +107,17 @@ watch([from, to], () => {
   if (timer) clearTimeout(timer)
   timer = setTimeout(load, 400)
 })
-watch([groupBy, includeSynthetic], () => {
+watch([groupBy, includeSynthetic, providerFilter], () => {
   if (timer) clearTimeout(timer)
   void load()
 })
 onBeforeUnmount(() => {
   if (timer) clearTimeout(timer)
 })
-onMounted(load)
+onMounted(() => {
+  void loadProviders()
+  void load()
+})
 </script>
 
 <template>
@@ -126,6 +149,14 @@ onMounted(load)
         <UiField v-slot="f" label="To (UTC)">
           <input :id="f.id" v-model="to" type="date" :aria-invalid="rangeError ? 'true' : undefined" data-testid="metrics-to" />
         </UiField>
+        <UiField v-slot="f" label="Provider">
+          <select :id="f.id" v-model="providerFilter" data-testid="metrics-provider">
+            <option value="">All providers</option>
+            <option v-for="p in providerOptions" :key="p.id" :value="p.id">
+              {{ p.name }}{{ p.practiceName ? ` - ${p.practiceName}` : '' }}
+            </option>
+          </select>
+        </UiField>
         <UiField v-slot="f" label="Group by">
           <select :id="f.id" v-model="groupBy" data-testid="metrics-group-by">
             <option value="none">No grouping</option>
@@ -156,6 +187,11 @@ onMounted(load)
         <strong>{{ data.period.from }}</strong> to <strong>{{ data.period.to }}</strong> (UTC) - synthetic data
         <strong>{{ data.includeSynthetic ? 'included' : 'excluded' }}</strong>
       </p>
+      <div v-if="data?.providerId" class="scope-chip" role="status" data-testid="provider-scope">
+        <span>Showing only</span>
+        <ProviderLabel :id="data.providerId" :name="providerName(data.providerId)" :practice="practiceName(data.providerId)" />
+        <button type="button" class="btn-sm" data-testid="clear-provider" @click="selectProvider('')">Show all providers</button>
+      </div>
 
       <div class="kpi-groups" :aria-busy="loading ? 'true' : undefined">
         <Card title="Volume" subtitle="What patients paid for in this window.">
@@ -231,11 +267,7 @@ onMounted(load)
             <tbody>
               <tr v-for="p in data.migration.providers" :key="p.providerId">
                 <td data-label="Provider">
-                  <span v-if="providerName(p.providerId)" class="who">
-                    <strong>{{ providerName(p.providerId) }}</strong>
-                    <span class="subtle">{{ practiceName(p.providerId) }}</span>
-                  </span>
-                  <code v-else :title="p.providerId">{{ shortId(p.providerId) }}</code>
+                  <ProviderLabel :id="p.providerId" :name="providerName(p.providerId)" :practice="practiceName(p.providerId)" />
                 </td>
                 <td data-label="Baseline monthly" class="num"><Money :cents="p.baselineMonthlyGmvCents" /></td>
                 <td data-label="In-house GMV" class="num"><Money :cents="p.inHouseGmvCents" /></td>
@@ -250,16 +282,20 @@ onMounted(load)
             </tbody>
           </table>
         </div>
-        <p v-if="data.migration.noBaselineProviderIds.length > 0" class="notice small">
-          Providers with in-house activity but no baseline (left out of migration):
-          <template v-for="(id, i) in data.migration.noBaselineProviderIds" :key="id">
-            <span v-if="providerName(id)">{{ providerName(id) }}{{ i < data.migration.noBaselineProviderIds.length - 1 ? ', ' : '' }}</span>
-            <code v-else :title="id" class="id-chip">{{ shortId(id) }}</code>
-          </template>
-        </p>
+        <div v-if="data.migration.noBaselineProviderIds.length > 0" class="notice small">
+          <p class="no-baseline-title">Providers with in-house activity but no baseline (left out of migration):</p>
+          <ul class="no-baseline">
+            <li v-for="id in data.migration.noBaselineProviderIds" :key="id">
+              <ProviderLabel :id="id" :name="providerName(id)" :practice="practiceName(id)" />
+            </li>
+          </ul>
+        </div>
       </Card>
 
       <Card v-if="data.groups.length > 0" :title="`Breakdown by ${data.groupBy}`" class="section">
+        <p v-if="data.groupBy === 'provider' && !data.providerId" class="subtle select-hint">
+          Select a provider to scope the whole report to them.
+        </p>
         <div class="table-wrap">
           <table class="table table-stack">
             <thead>
@@ -274,15 +310,25 @@ onMounted(load)
               </tr>
             </thead>
             <tbody>
-              <tr v-for="g in data.groups" :key="g.key">
+              <tr
+                v-for="g in data.groups"
+                :key="g.key"
+                :class="{ 'row-link': data.groupBy === 'provider' && !data.providerId, selected: data.providerId === g.key }"
+                :data-testid="`group-row-${g.key}`"
+                @click="data.groupBy === 'provider' && !data.providerId && selectProvider(g.key)"
+              >
                 <td :data-label="data.groupBy === 'month' ? 'Month' : 'Provider'">
-                  <template v-if="data.groupBy === 'provider'">
-                    <span v-if="providerName(g.key)" class="who">
-                      <strong>{{ providerName(g.key) }}</strong>
-                      <span class="subtle">{{ practiceName(g.key) }}</span>
-                    </span>
-                    <code v-else :title="g.key">{{ shortId(g.key) }}</code>
-                  </template>
+                  <div v-if="data.groupBy === 'provider'" class="provider-cell">
+                    <ProviderLabel :id="g.key" :name="providerName(g.key)" :practice="practiceName(g.key)" />
+                    <button
+                      v-if="!data.providerId"
+                      type="button"
+                      class="btn-sm select-btn"
+                      :aria-label="`Show only ${providerName(g.key) ?? g.key}`"
+                      :data-testid="`select-provider-${g.key}`"
+                      @click.stop="selectProvider(g.key)"
+                    >Select</button>
+                  </div>
                   <template v-else>{{ g.key }}</template>
                 </td>
                 <td data-label="GMV" class="num"><Money :cents="g.block.gmvCents" /></td>
@@ -430,12 +476,47 @@ input.switch:focus-visible {
   font-size: var(--text-sm);
   margin-top: var(--space-3);
 }
-.id-chip {
-  margin-right: var(--space-1);
+.no-baseline-title {
+  margin: 0 0 var(--space-2);
 }
-.who {
-  display: inline-flex;
-  flex-direction: column;
-  line-height: 1.3;
+.no-baseline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+}
+.scope-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--brand-tint);
+  border: 1px solid var(--brand-border);
+  border-radius: var(--radius);
+}
+.select-hint {
+  margin: 0 0 var(--space-3);
+}
+.provider-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.select-btn {
+  flex: none;
+}
+tr.selected > td {
+  background: var(--brand-tint);
+}
+@media (max-width: 640px) {
+  .provider-cell {
+    flex-direction: column;
+    align-items: flex-end;
+  }
 }
 </style>

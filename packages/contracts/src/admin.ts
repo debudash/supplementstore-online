@@ -114,6 +114,8 @@ export interface AdminMetricsResponse {
   period: ReportPeriod
   includeSynthetic: boolean
   groupBy: MetricsGroupBy
+  /** The provider the whole report is scoped to, or null for all providers. */
+  providerId: string | null
   /** The overall figures for the whole scope. */
   headline: MetricsBlock
   /** The overall reconciliation check (pass/fail line shown in the report). */
@@ -125,6 +127,14 @@ export interface AdminMetricsResponse {
   /** Display names for every provider id referenced above (migration rows, the
    *  no-baseline list, provider groups). Ids without a provider row are absent. */
   providerNames: Record<string, { providerName: string | null; practiceName: string | null }>
+}
+
+/** GET /api/admin/providers: every provider with its practice (metrics filter). */
+export interface AdminProviderListItem {
+  id: string
+  name: string
+  practiceId: string
+  practiceName: string | null
 }
 
 /** One rejected CSV row (RT-12): the 1-based row number, the raw line, and why. */

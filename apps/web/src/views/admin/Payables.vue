@@ -19,6 +19,7 @@ import EmptyState from '../../components/ui/EmptyState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import { formatMoney } from '../../utils/money'
 import { toast } from '../../components/ui/toast'
+import ProviderLabel from '../../components/admin/ProviderLabel.vue'
 
 function currentMonthToken(): string {
   const now = new Date()
@@ -42,8 +43,6 @@ const monthLabel = computed(() => {
   return new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 })
 const providerCount = computed(() => data.value?.statements.length ?? 0)
-
-const shortId = (id: string): string => (id.length > 10 ? id.slice(0, 8) : id)
 
 let requestSeq = 0
 
@@ -153,11 +152,7 @@ onMounted(load)
           <tbody>
             <tr v-for="s in data.statements" :key="s.providerId">
               <td data-label="Provider">
-                <span v-if="s.providerName" class="who">
-                  <strong>{{ s.providerName }}</strong>
-                  <span class="subtle">{{ s.practiceName }}</span>
-                </span>
-                <code v-else :title="s.providerId">{{ shortId(s.providerId) }}</code>
+                <ProviderLabel :id="s.providerId" :name="s.providerName" :practice="s.practiceName" />
               </td>
               <td data-label="Opening" class="num"><Money :cents="s.openingCents" /></td>
               <td data-label="Credits" class="num"><Money :cents="s.creditsCents" /></td>

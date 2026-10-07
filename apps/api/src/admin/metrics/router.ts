@@ -3,7 +3,7 @@
 // lives in the service - this router only parses query input and maps the HTTP envelope.
 import { Router, type Request, type Response } from 'express'
 import { db } from '../../db/knex'
-import { getAdminMetrics } from './service'
+import { getAdminMetrics, listProviders } from './service'
 import { handleError } from '../errors'
 
 export const adminMetricsRouter: Router = Router()
@@ -19,9 +19,19 @@ adminMetricsRouter.get('/metrics', async (req: Request, res: Response) => {
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
       groupBy: req.query.groupBy as string | undefined,
-      includeSynthetic: parseIncludeSynthetic(req.query.includeSynthetic)
+      includeSynthetic: parseIncludeSynthetic(req.query.includeSynthetic),
+      providerId: (req.query.providerId as string | undefined) || undefined
     })
     res.status(200).json(result)
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+// GET /api/admin/providers - every provider with its practice, for the metrics filter.
+adminMetricsRouter.get('/providers', async (_req: Request, res: Response) => {
+  try {
+    res.status(200).json({ providers: await listProviders(db) })
   } catch (err) {
     handleError(res, err)
   }
