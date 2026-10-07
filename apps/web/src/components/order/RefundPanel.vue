@@ -1,14 +1,16 @@
 <script setup lang="ts">
 // Provider refund controls on the order audit page.
-//  - A pending patient refund request: reason, note, date; Approve (runs the standard
-//    refund: patient paid back in full, margin reversed, platform fee kept, ADR-012; stock
-//    restocked unless already shipped, ADR-013) or Decline with a note the patient sees.
+//  - A pending patient refund request: reason, note, date, the patient's "unopened"
+//    confirmation and its review link (ADR-027); Approve (runs the standard refund
+//    immediately: patient paid back in full, margin reversed, platform fee kept, ADR-012;
+//    stock restocked unless already shipped, ADR-013) or Decline with a note the patient sees.
 //  - A paid order without a pending request: a direct "Refund order" with a required reason.
 // No money is computed here; the amount shown is the order subtotal from the server.
 import { computed, onMounted, ref, watch } from 'vue'
-import type { RefundRequestView, RefundReasonCode } from '@cerbo/contracts'
+import type { ProviderRefundRequestView, RefundReasonCode } from '@cerbo/contracts'
 import { apiRequest, ApiError } from '../../api/client'
 import { formatMoney } from '../../utils/money'
+import CopyLink from './CopyLink.vue'
 import Card from '../ui/Card.vue'
 import UiAlert from '../ui/UiAlert.vue'
 import UiButton from '../ui/UiButton.vue'
@@ -27,7 +29,10 @@ const REASON_LABEL: Record<string, string> = {
 }
 const DIRECT_REASONS: RefundReasonCode[] = ['damaged', 'wrong_item', 'patient_request', 'provider_error', 'other']
 
-const request = ref<RefundRequestView | null>(null)
+const REVIEW_REASON =
+  'In production the provider is emailed this review link. It is shown here so you can open the review page during the demo.'
+
+const request = ref<ProviderRefundRequestView | null>(null)
 const hasPending = computed(() => request.value?.status === 'pending')
 const loadError = ref<string | null>(null)
 const busy = ref(false)
@@ -43,7 +48,7 @@ const when = (iso: string | null): string =>
 async function load(): Promise<void> {
   loadError.value = null
   try {
-    const res = await apiRequest<{ request: RefundRequestView | null }>(`/orders/${encodeURIComponent(props.orderId)}/refund-request`)
+    const res = await apiRequest<{ request: ProviderRefundRequestView | null }>(`/orders/${encodeURIComponent(props.orderId)}/refund-request`)
     request.value = res && 'request' in res ? res.request : null
   } catch (err) {
     loadError.value = err instanceof ApiError ? err.message : 'Could not load refund requests.'
@@ -103,9 +108,18 @@ async function confirm(): Promise<void> {
       <dl class="facts">
         <div><dt>Reason</dt><dd>{{ REASON_LABEL[request.reasonCode] ?? request.reasonCode }}</dd></div>
         <div><dt>Requested</dt><dd>{{ when(request.createdAt) }}</dd></div>
+        <div>
+          <dt>Unopened</dt>
+          <dd data-testid="request-unopened">{{ request.unopenedConfirmed ? 'Confirmed by the patient' : 'Not confirmed' }}</dd>
+        </div>
       </dl>
       <p v-if="request.note" class="note"><span class="subtle">Patient's note:</span> {{ request.note }}</p>
-      <p class="subtle">The patient keeps or disposes of the product; nothing is returned.</p>
+      <p class="subtle">
+        Unopened products within 30 days of payment (ADR-027). Return shipping is outside this demo;
+        <template v-if="fulfilled">the order has shipped, so Cerbo writes off the returned stock.</template>
+        <template v-else>the order has not shipped, so the stock goes back to inventory.</template>
+      </p>
+      <CopyLink compact :pay-url="request.reviewPath" title="Refund review link" :reason="REVIEW_REASON" />
       <div class="actions">
         <UiButton variant="danger" :disabled="busy" data-testid="approve-refund" @click="open('approve')">Approve refund</UiButton>
         <UiButton :disabled="busy" data-testid="decline-refund" @click="open('decline')">Decline</UiButton>

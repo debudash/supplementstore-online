@@ -48,7 +48,9 @@ async function load(): Promise<void> {
   }
 }
 
-// ---- Refund request (no return; ADR-023) ----
+// ---- Refund request (ADR-027: unopened products, within 30 days of payment) ----
+// Eligibility and the window come from the server (canRequestRefund, refundWindowEndsAt);
+// the checkbox is the patient's confirmation, which the server also requires.
 const REASONS: Array<{ code: PatientRefundReason; label: string }> = [
   { code: 'damaged', label: 'Damaged or defective' },
   { code: 'wrong_item', label: 'Wrong item' },
@@ -58,7 +60,15 @@ const REASONS: Array<{ code: PatientRefundReason; label: string }> = [
 const requesting = ref<PatientOrderListItem | null>(null)
 const reason = ref<PatientRefundReason | ''>('')
 const note = ref('')
+const unopened = ref(false)
 const reasonError = ref<string | null>(null)
+const unopenedError = ref<string | null>(null)
+
+/** Window closed: a paid order past its 30 days with no request in flight. */
+function windowClosed(o: PatientOrderListItem): boolean {
+  return o.status === 'paid' && !o.canRequestRefund && o.refundRequest?.status !== 'pending' &&
+    !!o.refundWindowEndsAt && new Date(o.refundWindowEndsAt).getTime() < Date.now()
+}
 const sendError = ref<string | null>(null)
 const sending = ref(false)
 
@@ -66,23 +76,24 @@ function openRequest(o: PatientOrderListItem): void {
   requesting.value = o
   reason.value = ''
   note.value = ''
+  unopened.value = false
   reasonError.value = null
+  unopenedError.value = null
   sendError.value = null
 }
 
 async function sendRequest(): Promise<void> {
   const o = requesting.value
   if (!o) return
-  if (!reason.value) {
-    reasonError.value = 'Choose a reason.'
-    return
-  }
+  reasonError.value = reason.value ? null : 'Choose a reason.'
+  unopenedError.value = unopened.value ? null : 'Refunds are only for unopened products.'
+  if (reasonError.value || unopenedError.value) return
   sending.value = true
   sendError.value = null
   try {
     await apiRequest(`/patient/orders/${encodeURIComponent(o.orderId)}/refund-request`, {
       method: 'POST',
-      body: { reasonCode: reason.value, note: note.value.trim() || undefined }
+      body: { reasonCode: reason.value, unopened: true, note: note.value.trim() || undefined }
     })
     requesting.value = null
     toast('Refund requested. Your provider will review it.', 'success')
@@ -168,15 +179,22 @@ onMounted(load)
               {{ o.refundRequest.decisionNote || 'Your provider declined this request.' }}
             </UiAlert>
             <UiAlert v-else-if="o.refundRequest?.status === 'approved' || o.status === 'refunded'" tone="success" title="Refunded">
-              <Money :cents="o.amountCents" /> is on its way back to you. There is no need to send anything back.
+              <Money :cents="o.amountCents" /> is on its way back to you.
             </UiAlert>
-            <UiButton
-              v-if="o.canRequestRefund"
-              size="sm"
-              variant="danger-quiet"
-              :data-testid="`request-refund-${o.orderId}`"
-              @click="openRequest(o)"
-            >{{ o.refundRequest?.status === 'declined' ? 'Request again' : 'Request a refund' }}</UiButton>
+            <p v-if="windowClosed(o)" class="window subtle" :data-testid="`refund-window-closed-${o.orderId}`">
+              The 30-day refund window closed on {{ when(o.refundWindowEndsAt) }}.
+            </p>
+            <div v-if="o.canRequestRefund" class="refund-cta">
+              <UiButton
+                size="sm"
+                variant="danger-quiet"
+                :data-testid="`request-refund-${o.orderId}`"
+                @click="openRequest(o)"
+              >{{ o.refundRequest?.status === 'declined' ? 'Request again' : 'Request a refund' }}</UiButton>
+              <span class="window subtle" :data-testid="`refund-window-${o.orderId}`">
+                Unopened products, until {{ when(o.refundWindowEndsAt) }}
+              </span>
+            </div>
           </div>
         </Card>
       </li>
@@ -191,9 +209,15 @@ onMounted(load)
       @cancel="requesting = null"
     >
       <p>
-        Tell your provider what went wrong. <strong>You do not need to send anything back</strong> -
-        please keep or safely dispose of the product.
+        Refunds are available for <strong>unopened</strong> products within 30 days of payment
+        <template v-if="requesting?.refundWindowEndsAt">(until {{ when(requesting.refundWindowEndsAt) }})</template>.
+        Your provider reviews the request; once accepted, you are refunded in full straight away.
       </p>
+      <label class="req-check">
+        <input v-model="unopened" type="checkbox" data-testid="refund-unopened" :aria-invalid="unopenedError ? 'true' : undefined" />
+        <span>The product is unopened, with its seal intact.</span>
+      </label>
+      <span v-if="unopenedError" class="req-error">{{ unopenedError }}</span>
       <div class="req-field">
         <label for="refund-reason">Reason</label>
         <select id="refund-reason" v-model="reason" :aria-invalid="reasonError ? 'true' : undefined" data-testid="refund-reason">
@@ -296,6 +320,26 @@ onMounted(load)
 }
 .refund-area > :deep(.alert) {
   align-self: stretch;
+}
+.refund-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.window {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.req-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  font-weight: 600;
+}
+.req-check input {
+  margin-top: 0.2rem;
 }
 .req-field {
   display: flex;

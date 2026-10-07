@@ -17,6 +17,7 @@ import { payRouter } from './payments/router'
 import { patientOrdersRouter } from './patient-orders/router'
 import { schedulesRouter } from './recurring/router'
 import { reportsRouter } from './reports/router'
+import { refundReviewRouter } from './refund-requests/router'
 import { adminInventoryRouter } from './admin/inventory/router'
 import { adminMetricsRouter } from './admin/metrics/router'
 import { adminPayablesRouter } from './admin/payables/router'
@@ -80,6 +81,8 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api/orders', auth, requireRole('provider'), ordersRouter)
   app.use('/api/schedules', auth, requireRole('provider'), schedulesRouter)
   app.use('/api/reports', auth, requireRole('provider'), reportsRouter)
+  // Refund review link (ADR-027): token-addressed, but still the owning provider only.
+  app.use('/api/refund-review', auth, requireRole('provider'), refundReviewRouter)
 
   // Patient surface: token-based, NO X-Demo-User (AGENTS.md section 7).
   app.use('/api/pay', payRouter)

@@ -119,15 +119,22 @@ amounts, and **Invariants: all checks pass**. Tabs:
 
 ## Act 5 - Refunds (EVAL-07, EVAL-08)
 
-**Patient asks.** As **Cara Lopez > My orders**, the paid order has **Request a refund**. Pick
-a reason; the dialog says nothing needs to be sent back (keep or safely dispose, ADR-023).
+**Patient asks.** As **Cara Lopez > My orders**, the paid order has **Request a refund** with
+"Unopened products, until <date>" (30 days after payment, ADR-027). Pick a reason and tick
+**The product is unopened** (required; the server refuses without it). An order paid more
+than 30 days ago shows "The 30-day refund window closed" instead. Return shipping is out of
+scope.
 
 **Provider decides.** As **Dr. Ana Reyes**, the order shows **Refund requested** in Orders.
-Open its audit, review the request, **Approve refund** (or **Decline** with a note). Approving
-runs the standard refund:
+Open its audit: the request card shows the reason, "Unopened: Confirmed by the patient" and a
+**Refund review link** (DEMO badge; in production it is emailed, like the patient's pay link).
+Copy it into the address bar to show the review page, then **Accept and refund now** (or
+**Decline** with a note). **Approve refund** on the audit page does the same. Accepting
+refunds immediately through the standard refund:
 - Patient gets **$84.97** back. Cerbo keeps the **$0.64** fee; the provider is debited margin
   plus fee, so the provider ends this order at **-$0.64** (ADR-012).
-- Not yet fulfilled, so stock is restocked (Magnesium back to 50, Vitamin D3 to 40).
+- Not yet fulfilled, so stock is restocked (Magnesium back to 50, Vitamin D3 to 40). A
+  shipped order's return is always written off instead (ADR-013, ADR-027).
 - A REFUND journal is added; the original payment journal is never edited. A second refund is
   refused.
 

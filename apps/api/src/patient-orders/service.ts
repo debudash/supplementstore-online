@@ -20,7 +20,7 @@ import type { Knex } from 'knex'
 import type { Actor } from '../auth/types'
 import { toPatientView } from '../payments/serializer'
 import type { PatientPayItem } from '../payments/types'
-import { latestRequestsByOrder, type RefundRequestView } from '../refund-requests/service'
+import { latestRequestsByOrder, refundWindowEndsAt, type RefundRequestView } from '../refund-requests/service'
 
 /** One order as the patient sees it (mirrors @cerbo/contracts PatientOrderListItem; the
  * contracts package exports only its index barrel, so the API declares the shape locally
@@ -37,8 +37,11 @@ export interface PatientOrderListItem {
   items: PatientPayItem[]
   /** The latest refund request on this order, if any (status, reason, dates, provider note). */
   refundRequest: RefundRequestView | null
-  /** True when the patient may ask for a refund now (paid, real order, nothing pending). */
+  /** True when the patient may ask for a refund now (paid, real order, within the 30-day
+   * window, nothing pending; ADR-027). */
   canRequestRefund: boolean
+  /** When the refund window closes (paid_at + 30 days), or null if not paid. */
+  refundWindowEndsAt: string | null
 }
 
 export interface PatientOrdersResponse {
@@ -74,7 +77,7 @@ function toIso(value: Date | null): string | null {
  * actually been sent to the patient are listed - drafts (no token, no snapshot) are never
  * exposed. Returns an empty list for an actor with no patientId rather than leaking.
  */
-export async function listPatientOrders(db: Knex, actor: Actor): Promise<PatientOrdersResponse> {
+export async function listPatientOrders(db: Knex, actor: Actor, now: Date = new Date()): Promise<PatientOrdersResponse> {
   // Defensive belt-and-braces: the route already requires role = patient, but never query
   // without a concrete owner id, or an empty/null id could widen the scope.
   if (actor.role !== 'patient' || !actor.patientId) {
@@ -126,6 +129,8 @@ export async function listPatientOrders(db: Knex, actor: Actor): Promise<Patient
       }))
     })
 
+    const windowEnds = refundWindowEndsAt(order.paid_at)
+    const withinWindow = !!windowEnds && windowEnds.getTime() >= now.getTime()
     return {
       orderId: order.id,
       status: view.status,
@@ -138,7 +143,8 @@ export async function listPatientOrders(db: Knex, actor: Actor): Promise<Patient
       items: view.items,
       refundRequest: requests.get(order.id) ?? null,
       canRequestRefund:
-        order.status === 'paid' && !order.is_synthetic && requests.get(order.id)?.status !== 'pending'
+        order.status === 'paid' && !order.is_synthetic && withinWindow && requests.get(order.id)?.status !== 'pending',
+      refundWindowEndsAt: windowEnds ? windowEnds.toISOString() : null
     }
   })
 

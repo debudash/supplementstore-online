@@ -158,9 +158,9 @@ export type RefundRequestStatus = 'pending' | 'approved' | 'declined'
 export type PatientRefundReason = 'damaged' | 'wrong_item' | 'patient_request' | 'other'
 
 /**
- * A patient refund request (no return: the patient keeps or safely disposes of the
- * product, ADR-023). The provider approves (the standard refund runs) or declines with a
- * note the patient sees. Carries no economics.
+ * A patient refund request (ADR-027: unopened products, within 30 days of payment). The
+ * provider accepts (the standard refund runs immediately) or declines with a note the
+ * patient sees. Carries no economics and, in the patient view, no review token.
  */
 export interface RefundRequestView {
   id: string
@@ -171,4 +171,28 @@ export interface RefundRequestView {
   decisionNote: string | null
   decidedAt: string | null
   createdAt: string
+  /** The patient confirmed the product is unopened (false only on pre-ADR-027 requests). */
+  unopenedConfirmed: boolean
+}
+
+/** The provider's view of a request: adds the review link (like a pay link). */
+export interface ProviderRefundRequestView extends RefundRequestView {
+  /** Web path of the provider review page, e.g. /refund-review/<token>. */
+  reviewPath: string
+}
+
+/** GET /api/refund-review/:token - what the provider decides on. */
+export interface RefundReview {
+  request: ProviderRefundRequestView
+  order: {
+    id: string
+    status: OrderStatus
+    patientName: string | null
+    subtotalCents: number | null
+    paidAt: string | null
+    /** Shipped returns are written off; unshipped orders restock (ADR-013). */
+    shipped: boolean
+    refundWindowEndsAt: string | null
+    items: { sku: string; name: string; qty: number; lineTotalCents: number | null }[]
+  }
 }

@@ -10,6 +10,7 @@ import OrderAudit from './views/provider/OrderAudit.vue'
 import Recurring from './views/provider/Recurring.vue'
 import Dashboard from './views/provider/Dashboard.vue'
 import ProviderPayables from './views/provider/Payables.vue'
+import RefundReview from './views/provider/RefundReview.vue'
 import Pay from './views/patient/Pay.vue'
 import MyOrders from './views/patient/MyOrders.vue'
 import ScheduleAuthorize from './views/patient/ScheduleAuthorize.vue'
@@ -39,6 +40,8 @@ export const routes: RouteRecordRaw[] = [
   { path: '/recurring', name: 'recurring', component: Recurring, meta: { roles: ['provider'], tab: 'Recurring' } },
   { path: '/dashboard', name: 'dashboard', component: Dashboard, meta: { roles: ['provider'], tab: 'Dashboard' } },
   { path: '/payables', name: 'payables', component: ProviderPayables, meta: { roles: ['provider'], tab: 'Payables' } },
+  // Refund review link (ADR-027): reached by link like a pay page, no tab.
+  { path: '/refund-review/:token', name: 'refund-review', component: RefundReview, meta: { roles: ['provider'] } },
 
   // Patient. My Orders is a real tab; the pay/authorize pages are reached by an
   // unguessable token link (no tab), but are tagged as patient routes for clarity.
