@@ -126,7 +126,13 @@ onMounted(async () => {
               </button>
               <span v-else class="dash">-</span>
             </td>
-            <td>
+            <td class="actions">
+              <RouterLink
+                v-if="o.status === 'draft'"
+                class="resume-link"
+                :to="{ name: 'order-new', query: { orderId: o.id } }"
+                data-test="resume-draft"
+              >Resume</RouterLink>
               <RouterLink :to="{ name: 'order-audit', params: { id: o.id } }">View audit</RouterLink>
             </td>
           </tr>
@@ -179,6 +185,14 @@ onMounted(async () => {
 }
 .dash {
   color: var(--subtle);
+}
+.actions {
+  display: flex;
+  gap: 0.9rem;
+  align-items: baseline;
+}
+.resume-link {
+  font-weight: 600;
 }
 .link-row td {
   background: var(--surface-2);
