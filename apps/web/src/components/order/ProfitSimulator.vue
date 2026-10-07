@@ -137,6 +137,10 @@ const marginLabel = computed(() =>
           <span class="chev" aria-hidden="true">{{ open ? '▾' : '▸' }}</span>
           Profit simulator
         </button>
+        <DemoBadge
+          data-testid="profit-sim-demo"
+          reason="Demo affordance - a what-if tool built to make provider economics demonstrable. It saves nothing and is not part of the production order flow."
+        />
       </h2>
       <p class="sim-sub">See what you earn at different margins before you add an item. Nothing is saved.</p>
     </template>
@@ -254,6 +258,9 @@ const marginLabel = computed(() =>
 
 <style scoped>
 .sim-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin: 0;
   font-size: var(--text-lg);
 }
