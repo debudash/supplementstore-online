@@ -1,23 +1,15 @@
-// Display-only helpers for the provider order UI (T6).
+﻿// Display-only helpers for the provider order UI (T6).
 //
 // The UI DISPLAYS, it never CALCULATES money (AGENTS.md money rule 2): every fee,
 // allocation, and margin figure comes from the server quote endpoint. These helpers
 // only format integer cents for display and translate the margin-% INPUT into the
 // basis points the API expects. No float money math, no toFixed, no parseFloat.
 
-/**
- * Format integer cents as a dollar string, e.g. 8497 -> "$84.97", -64 -> "-$0.64".
- * Pure integer decomposition (trunc + modulo on cents), never float arithmetic on a
- * dollar value. Non-finite input is rendered as a dash so a bad value never throws.
- */
+import { formatMoney } from '../../utils/money'
+
+/** Format integer cents for display. Delegates to the shared formatter (utils/money.ts). */
 export function formatCents(cents: number): string {
-  if (!Number.isFinite(cents)) return '-'
-  const negative = cents < 0
-  const abs = Math.abs(Math.trunc(cents))
-  const dollars = Math.trunc(abs / 100)
-  const remainder = abs % 100
-  const centsPart = String(remainder).padStart(2, '0')
-  return `${negative ? '-' : ''}$${dollars.toLocaleString('en-US')}.${centsPart}`
+  return formatMoney(cents)
 }
 
 /**
