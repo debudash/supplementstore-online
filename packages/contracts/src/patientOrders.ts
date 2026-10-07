@@ -12,7 +12,7 @@
 // margin and provider economics never appear - the server builds each item through the
 // same whitelist serializer the pay page uses (apps/api/src/payments/serializer.ts), so
 // there is nothing to leak (EVAL-12, RT-10, NFR-5).
-import type { OrderStatus } from './orders'
+import type { OrderStatus, PatientRefundReason, RefundRequestView } from './orders'
 import type { PatientPayItem } from './payments'
 
 /** One order as the patient sees it in their list. All money is integer cents and
@@ -35,6 +35,17 @@ export interface PatientOrderListItem {
   isPayable: boolean
   /** Line preview, whitelisted (name, qty, unit price, line total) - no economics. */
   items: PatientPayItem[]
+  /** The latest refund request on this order (status, reason, dates, provider's note). */
+  refundRequest: RefundRequestView | null
+  /** True when the patient may ask for a refund now (paid, nothing pending). */
+  canRequestRefund: boolean
+}
+
+/** POST /api/patient/orders/:id/refund-request body. No return is needed (ADR-023). */
+export interface RefundRequestCreate {
+  reasonCode: PatientRefundReason
+  /** Optional detail for the provider, at most 500 characters. */
+  note?: string
 }
 
 /** GET /api/patient/orders response: the caller's own orders, most recently sent first. */

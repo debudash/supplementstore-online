@@ -508,6 +508,49 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/patient/orders/{id}/refund-request:
+    post:
+      tags: [Patient - listing]
+      summary: Ask the provider for a refund (ADR-026; no return - ADR-023)
+      description: Own paid, non-synthetic orders only; one pending request per order. Body { reasonCode (damaged|wrong_item|patient_request|other), note? (<=500) }.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "201": { description: Request created (status pending) }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "NOT_REFUNDABLE (not paid) or REFUND_REQUEST_EXISTS (one already pending)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/orders/{id}/refund-request:
+    get:
+      tags: [Provider - orders]
+      summary: The latest patient refund request on one of the provider's orders (or null)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: "{ request } (null when none)" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/orders/{id}/refund-request/approve:
+    post:
+      tags: [Provider - orders]
+      summary: Approve the pending request - runs the standard refund (ADR-012/013), then closes the request
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: "{ request, refund } - refund is null if the order had already been refunded" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "NO_PENDING_REQUEST, or a refund error such as NOT_REFUNDABLE", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/orders/{id}/refund-request/decline:
+    post:
+      tags: [Provider - orders]
+      summary: Decline the pending request with a note the patient sees
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string, minLength: 3, maxLength: 500 } } } } } }
+      responses:
+        "200": { description: "{ request } with status declined" }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: NO_PENDING_REQUEST, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
   /api/patient/orders:
     get:
       tags: [Patient - listing]

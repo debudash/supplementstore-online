@@ -8,6 +8,7 @@ import { createSeams } from '../seams'
 import { loadAudit } from '../ledger'
 import { refundOrder, handleRefundError } from '../refunds'
 import { handleError, notFound } from './errors'
+import { approveRefundRequest, declineRefundRequest, getRefundRequest } from '../refund-requests/service'
 import {
   createDraft,
   addLine,
@@ -111,6 +112,30 @@ ordersRouter.post('/:id/cancel', async (req: Request, res: Response) => {
 ordersRouter.post('/:id/refund', async (req: Request, res: Response) => {
   try {
     res.status(200).json(await refundOrder(db, actorOf(req), req.params.id, req.body, seams))
+  } catch (err) {
+    handleRefundError(res, err)
+  }
+})
+
+// Patient refund requests on the provider's own orders: view the latest, approve (runs
+// the standard refund) or decline with a note the patient sees.
+ordersRouter.get('/:id/refund-request', async (req: Request, res: Response) => {
+  try {
+    res.status(200).json({ request: await getRefundRequest(db, actorOf(req), req.params.id) })
+  } catch (err) {
+    handleRefundError(res, err)
+  }
+})
+ordersRouter.post('/:id/refund-request/approve', async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(await approveRefundRequest(db, actorOf(req), req.params.id, req.body, seams))
+  } catch (err) {
+    handleRefundError(res, err)
+  }
+})
+ordersRouter.post('/:id/refund-request/decline', async (req: Request, res: Response) => {
+  try {
+    res.status(200).json({ request: await declineRefundRequest(db, actorOf(req), req.params.id, req.body) })
   } catch (err) {
     handleRefundError(res, err)
   }

@@ -201,7 +201,16 @@ onMounted(async () => {
               @keydown.enter.self="openAudit(o)"
             >
               <td data-label="Patient" class="patient">{{ patientName(o.patientId) }}</td>
-              <td data-label="Status"><StatusChip :status="o.status" /></td>
+              <td data-label="Status">
+                <span class="status-cell">
+                  <StatusChip :status="o.status" />
+                  <span
+                    v-if="o.refundRequestStatus === 'pending'"
+                    class="badge badge-warning"
+                    :data-testid="`refund-requested-${o.id}`"
+                  >Refund requested</span>
+                </span>
+              </td>
               <td data-label="Subtotal" class="num"><Money :cents="o.subtotalCents" /></td>
               <td data-label="Created">{{ shortDate(o.createdAt) }}</td>
               <td data-label="Sent">{{ shortDate(o.sentAt) }}</td>
@@ -287,6 +296,12 @@ onMounted(async () => {
 }
 .patient {
   font-weight: 600;
+}
+.status-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
 }
 .actions {
   display: flex;

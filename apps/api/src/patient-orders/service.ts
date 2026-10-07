@@ -20,6 +20,7 @@ import type { Knex } from 'knex'
 import type { Actor } from '../auth/types'
 import { toPatientView } from '../payments/serializer'
 import type { PatientPayItem } from '../payments/types'
+import { latestRequestsByOrder, type RefundRequestView } from '../refund-requests/service'
 
 /** One order as the patient sees it (mirrors @cerbo/contracts PatientOrderListItem; the
  * contracts package exports only its index barrel, so the API declares the shape locally
@@ -34,6 +35,10 @@ export interface PatientOrderListItem {
   payPath: string | null
   isPayable: boolean
   items: PatientPayItem[]
+  /** The latest refund request on this order, if any (status, reason, dates, provider note). */
+  refundRequest: RefundRequestView | null
+  /** True when the patient may ask for a refund now (paid, real order, nothing pending). */
+  canRequestRefund: boolean
 }
 
 export interface PatientOrdersResponse {
@@ -48,6 +53,7 @@ interface OrderRow {
   pay_token: string | null
   sent_at: Date | null
   paid_at: Date | null
+  is_synthetic: boolean
 }
 
 interface LineRow {
@@ -80,9 +86,10 @@ export async function listPatientOrders(db: Knex, actor: Actor): Promise<Patient
     .where({ patient_id: patientId })
     .whereNotNull('sent_at')
     .orderBy('sent_at', 'desc')
-    .select('id', 'patient_id', 'status', 'subtotal_cents', 'pay_token', 'sent_at', 'paid_at')
+    .select('id', 'patient_id', 'status', 'subtotal_cents', 'pay_token', 'sent_at', 'paid_at', 'is_synthetic')
 
   if (orders.length === 0) return { orders: [] }
+  const requests = await latestRequestsByOrder(db, orders.map((o) => o.id))
 
   // Batch the line and product-name lookups (no N+1).
   const orderIds = orders.map((o) => o.id)
@@ -128,7 +135,10 @@ export async function listPatientOrders(db: Knex, actor: Actor): Promise<Patient
       payToken: order.pay_token,
       payPath: order.pay_token ? `/pay/${order.pay_token}` : null,
       isPayable: order.status === 'sent',
-      items: view.items
+      items: view.items,
+      refundRequest: requests.get(order.id) ?? null,
+      canRequestRefund:
+        order.status === 'paid' && !order.is_synthetic && requests.get(order.id)?.status !== 'pending'
     }
   })
 

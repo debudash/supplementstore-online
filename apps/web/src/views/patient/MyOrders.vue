@@ -12,9 +12,11 @@
 // `payPath` - neither is re-derived in the client.
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { apiRequest } from '../../api/client'
+import { apiRequest, ApiError } from '../../api/client'
 import { currentUser } from '../../api/session'
-import type { PatientOrdersResponse, PatientOrderListItem } from '@cerbo/contracts'
+import type { PatientOrdersResponse, PatientOrderListItem, PatientRefundReason } from '@cerbo/contracts'
+import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
+import { toast } from '../../components/ui/toast'
 import DemoBadge from '../../components/DemoBadge.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Card from '../../components/ui/Card.vue'
@@ -43,6 +45,52 @@ async function load(): Promise<void> {
     phase.value = res.orders.length === 0 ? 'empty' : 'ready'
   } catch {
     phase.value = 'error'
+  }
+}
+
+// ---- Refund request (no return; ADR-023) ----
+const REASONS: Array<{ code: PatientRefundReason; label: string }> = [
+  { code: 'damaged', label: 'Damaged or defective' },
+  { code: 'wrong_item', label: 'Wrong item' },
+  { code: 'patient_request', label: 'I no longer need it' },
+  { code: 'other', label: 'Other' }
+]
+const requesting = ref<PatientOrderListItem | null>(null)
+const reason = ref<PatientRefundReason | ''>('')
+const note = ref('')
+const reasonError = ref<string | null>(null)
+const sendError = ref<string | null>(null)
+const sending = ref(false)
+
+function openRequest(o: PatientOrderListItem): void {
+  requesting.value = o
+  reason.value = ''
+  note.value = ''
+  reasonError.value = null
+  sendError.value = null
+}
+
+async function sendRequest(): Promise<void> {
+  const o = requesting.value
+  if (!o) return
+  if (!reason.value) {
+    reasonError.value = 'Choose a reason.'
+    return
+  }
+  sending.value = true
+  sendError.value = null
+  try {
+    await apiRequest(`/patient/orders/${encodeURIComponent(o.orderId)}/refund-request`, {
+      method: 'POST',
+      body: { reasonCode: reason.value, note: note.value.trim() || undefined }
+    })
+    requesting.value = null
+    toast('Refund requested. Your provider will review it.', 'success')
+    await load()
+  } catch (err) {
+    sendError.value = err instanceof ApiError ? err.message : 'We could not send your request. Please try again.'
+  } finally {
+    sending.value = false
   }
 }
 
@@ -111,9 +159,55 @@ onMounted(load)
               <Money :cents="item.lineTotalCents" class="item-total" />
             </li>
           </ul>
+
+          <div class="refund-area" :data-testid="`refund-area-${o.orderId}`">
+            <UiAlert v-if="o.refundRequest?.status === 'pending'" tone="info" title="Refund requested">
+              Sent {{ when(o.refundRequest.createdAt) }}. Your provider will review it.
+            </UiAlert>
+            <UiAlert v-else-if="o.refundRequest?.status === 'declined'" tone="warning" title="Refund request declined">
+              {{ o.refundRequest.decisionNote || 'Your provider declined this request.' }}
+            </UiAlert>
+            <UiAlert v-else-if="o.refundRequest?.status === 'approved' || o.status === 'refunded'" tone="success" title="Refunded">
+              <Money :cents="o.amountCents" /> is on its way back to you. There is no need to send anything back.
+            </UiAlert>
+            <UiButton
+              v-if="o.canRequestRefund"
+              size="sm"
+              variant="danger-quiet"
+              :data-testid="`request-refund-${o.orderId}`"
+              @click="openRequest(o)"
+            >{{ o.refundRequest?.status === 'declined' ? 'Request again' : 'Request a refund' }}</UiButton>
+          </div>
         </Card>
       </li>
     </ul>
+
+    <ConfirmDialog
+      :open="requesting !== null"
+      title="Request a refund"
+      confirm-label="Send request"
+      :busy="sending"
+      @confirm="sendRequest"
+      @cancel="requesting = null"
+    >
+      <p>
+        Tell your provider what went wrong. <strong>You do not need to send anything back</strong> -
+        please keep or safely dispose of the product.
+      </p>
+      <div class="req-field">
+        <label for="refund-reason">Reason</label>
+        <select id="refund-reason" v-model="reason" :aria-invalid="reasonError ? 'true' : undefined" data-testid="refund-reason">
+          <option value="" disabled>Choose a reason</option>
+          <option v-for="r in REASONS" :key="r.code" :value="r.code">{{ r.label }}</option>
+        </select>
+        <span v-if="reasonError" class="req-error">{{ reasonError }}</span>
+      </div>
+      <div class="req-field">
+        <label for="refund-note">Details <span class="subtle">(optional)</span></label>
+        <textarea id="refund-note" v-model="note" rows="3" maxlength="500" data-testid="refund-note" />
+      </div>
+      <UiAlert v-if="sendError" tone="danger">{{ sendError }}</UiAlert>
+    </ConfirmDialog>
   </section>
 </template>
 
@@ -189,5 +283,37 @@ onMounted(load)
 }
 .item-total {
   font-weight: 650;
+}
+.refund-area {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+.refund-area:empty {
+  display: none;
+}
+.refund-area > :deep(.alert) {
+  align-self: stretch;
+}
+.req-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-4);
+}
+.req-field label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.req-field textarea {
+  width: 100%;
+  resize: vertical;
+}
+.req-error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+  font-weight: 550;
 }
 </style>
