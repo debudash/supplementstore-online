@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
 // Component test for deleting a draft from the Orders list: the Delete control appears
-// only on drafts, confirming sends DELETE /orders/:id and removes the row, and declining
-// the confirm sends nothing.
+// only on drafts, confirming the dialog sends DELETE /orders/:id and removes the row, and
+// cancelling the dialog sends nothing.
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -61,28 +61,36 @@ describe('Orders draft delete', () => {
     expect(deleteButtons(wrapper)).toHaveLength(1)
   })
 
-  it('deletes the draft after confirm and removes its row', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('asks for confirmation, then deletes the draft and removes its row', async () => {
     const wrapper = mount(Orders, { global: { stubs: { RouterLink: true } } })
     await flushPromises()
 
     await deleteButtons(wrapper)[0].trigger('click')
+    const dialog = wrapper.find('[data-testid="confirm-dialog"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('Delete this draft?')
+    expect(dialog.text()).toContain('cannot be undone')
+    expect(deleteCalls()).toHaveLength(0) // nothing sent until confirmed
+
+    await wrapper.find('[data-testid="confirm-ok"]').trigger('click')
     await flushPromises()
 
     expect(deleteCalls()).toEqual([['/orders/o-draft', { method: 'DELETE' }]])
     expect(deleteButtons(wrapper)).toHaveLength(0)
-    expect(wrapper.text()).toContain('sent')
+    expect(wrapper.find('[data-testid="confirm-dialog"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Sent')
   })
 
-  it('does nothing when the confirm is declined', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+  it('does nothing when the dialog is cancelled', async () => {
     const wrapper = mount(Orders, { global: { stubs: { RouterLink: true } } })
     await flushPromises()
 
     await deleteButtons(wrapper)[0].trigger('click')
+    await wrapper.find('[data-testid="confirm-cancel"]').trigger('click')
     await flushPromises()
 
     expect(deleteCalls()).toHaveLength(0)
     expect(deleteButtons(wrapper)).toHaveLength(1)
+    expect(wrapper.find('[data-testid="confirm-dialog"]').exists()).toBe(false)
   })
 })

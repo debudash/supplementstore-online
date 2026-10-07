@@ -354,6 +354,10 @@ button:disabled {
   letter-spacing: 0.03em;
   white-space: nowrap;
 }
+.table th.num,
+.table td.num {
+  text-align: right;
+}
 .table tbody tr:last-child > td {
   border-bottom: none;
 }
