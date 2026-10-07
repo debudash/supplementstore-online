@@ -832,10 +832,36 @@ paths:
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
         - { name: groupBy, in: query, required: false, schema: { type: string, enum: [none, month, provider] } }
+        - { name: providerId, in: query, required: false, description: "Scope the whole report (headline, reconciliation, migration, groups) to one provider. Echoed back as providerId (null when absent).", schema: { type: string, format: uuid } }
         - { $ref: "#/components/parameters/IncludeSynthetic" }
       responses:
         "200": { description: Metrics, content: { application/json: { schema: { $ref: "#/components/schemas/AdminMetricsResponse" } } } }
         "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/admin/providers:
+    get:
+      tags: [Cerbo Admin - metrics & payables]
+      summary: Every provider with its practice (for the metrics provider filter)
+      responses:
+        "200":
+          description: Providers, ordered by name
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+                        practiceId: { type: string, format: uuid }
+                        practiceName: { type: string, nullable: true }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
