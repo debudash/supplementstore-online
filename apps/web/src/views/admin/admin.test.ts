@@ -34,7 +34,7 @@ const metrics = (includeSynthetic: boolean) => ({
   reconciliation: recon,
   migration: {
     providers: [], overallInHouseGmvCents: 0, overallBaselineMonthlyGmvCents: 0,
-    overallMigrationBps: null, adoptionBps: null, noBaselineProviderIds: []
+    months: 1, overallMigrationBps: null, byMonth: [], adoptionBps: null, noBaselineProviderIds: []
   },
   groups: []
 })

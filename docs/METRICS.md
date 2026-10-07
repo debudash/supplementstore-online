@@ -32,7 +32,9 @@ Note: the reconciliation is computed per order in integer cents and then summed;
 |---|---|
 | Baseline monthly GMV (per provider) | Sum of baseline_orders.gmv_cents / number of distinct months covered in that provider's baseline |
 | Migration % (per provider, per month) | In-house Total GMV for the month / baseline monthly GMV. Can exceed 100% (growth beyond prior external volume) |
-| Migration % (overall) | Sum of in-house GMV for providers with a baseline / sum of their baseline monthly GMV |
+| Migration % (overall, per month) | Sum of in-house GMV for providers with a baseline in the month / sum of their baseline monthly GMV |
+| Migration trend (the leading indicator) | Migration % for each calendar month in the selected range, overall and per provider (`byMonth`). A rising trend means in-house volume is replacing marketplace volume |
+| Migration % for a multi-month range | Average month: in-house GMV in the range / (baseline monthly GMV x months in the range). A 3-month range is never divided by a single month's baseline |
 | Adoption | Providers with at least 1 in-house paid order in period / providers with a baseline |
 | No baseline | Providers without baseline rows are listed separately and excluded from migration % |
 

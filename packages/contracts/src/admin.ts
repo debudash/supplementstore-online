@@ -81,12 +81,25 @@ export interface MigrationProviderRow {
   /** In-house Total GMV for this provider in the period. */
   inHouseGmvCents: number
   /**
-   * Migration % = in-house GMV / baseline monthly GMV, in basis points. Can exceed
-   * 10000 (growth beyond prior external volume). Null when there is no baseline.
+   * Average monthly migration % = in-house GMV / (baseline monthly GMV x months in the
+   * period), in basis points. For a single month this is that month's migration. Can
+   * exceed 10000 (growth beyond prior external volume). Null when there is no baseline.
    */
   migrationBps: number | null
   /** True when the provider has >= 1 in-house paid order in the period (adoption). */
   adopted: boolean
+  /** The leading-indicator trend: this provider's migration for each month in the period. */
+  byMonth: MigrationMonth[]
+}
+
+/** One calendar month of the migration trend (docs/METRICS.md "Leading indicator"). */
+export interface MigrationMonth {
+  /** "YYYY-MM" (clipped to the requested window). */
+  month: string
+  /** In-house Total GMV in that month. */
+  inHouseGmvCents: number
+  /** In-house GMV / baseline monthly GMV, in bps. Null when there is no baseline. */
+  migrationBps: number | null
 }
 
 /** The migration-off-marketplaces report (docs/METRICS.md "Leading indicator"). */
@@ -97,8 +110,13 @@ export interface MigrationReport {
   overallInHouseGmvCents: number
   /** Overall baseline monthly GMV (providers with a baseline). */
   overallBaselineMonthlyGmvCents: number
-  /** Overall migration % in bps = overall in-house / overall baseline monthly. Null if no baseline. */
+  /** Calendar months in the period (the divisor that makes migration a monthly figure). */
+  months: number
+  /** Overall average monthly migration % in bps = overall in-house / (overall baseline
+   *  monthly x months). Null if no baseline. */
   overallMigrationBps: number | null
+  /** The leading-indicator trend: overall migration for each month in the period. */
+  byMonth: MigrationMonth[]
   /** Adoption = providers with >= 1 in-house paid order / providers with a baseline, in bps. */
   adoptionBps: number | null
   /** Providers with in-house activity but no baseline, listed separately and excluded. */

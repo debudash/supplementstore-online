@@ -8,7 +8,7 @@
 // The window is two inclusive UTC calendar dates (contracts admin.ts), so the From / To
 // date inputs map straight onto the endpoint's from / to query params. The default is
 // the whole current UTC month, the same window the old month picker produced.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
 import type { AdminMetricsResponse, AdminProviderListItem, MetricsGroupBy } from '@cerbo/contracts'
 import ProviderLabel from '../../components/admin/ProviderLabel.vue'
@@ -31,6 +31,33 @@ function currentMonthRange(): { from: string; to: string } {
   const m = now.getUTCMonth() + 1
   const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
   return { from: `${y}-${pad(m)}-01`, to: `${y}-${pad(m)}-${pad(lastDay)}` }
+}
+
+/** The last `n` calendar months ending with the current UTC month, as YYYY-MM-DD. */
+function lastMonthsRange(n: number): { from: string; to: string } {
+  const now = new Date()
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (n - 1), 1))
+  return { from: `${start.getUTCFullYear()}-${pad(start.getUTCMonth() + 1)}-01`, to: currentMonthRange().to }
+}
+
+/** Apply a preset range and reload at once (typed dates stay debounced). */
+function setRange(r: { from: string; to: string }): void {
+  from.value = r.from
+  to.value = r.to
+  void nextTick(() => {
+    if (timer) clearTimeout(timer)
+    void load()
+  })
+}
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** "2026-08" -> "Aug 2026" (display only). */
+const monthLabel = (key: string): string => `${MONTH_NAMES[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`
+
+/** Bar width for a migration % (display only): scaled to the largest month, at least 2%. */
+function barWidth(value: number | null, all: Array<number | null>): string {
+  const max = Math.max(1, ...all.map((v) => v ?? 0))
+  return `${Math.max(2, Math.round(((value ?? 0) * 100) / max))}%`
 }
 
 const initial = currentMonthRange()
@@ -135,6 +162,11 @@ onMounted(() => {
     </UiAlert>
 
     <Card class="controls" title="Report settings">
+      <div class="presets" role="group" aria-label="Date range presets">
+        <UiButton size="sm" data-testid="range-this-month" @click="setRange(currentMonthRange())">This month</UiButton>
+        <UiButton size="sm" data-testid="range-last-3" @click="setRange(lastMonthsRange(3))">Last 3 months</UiButton>
+        <UiButton size="sm" data-testid="range-last-6" @click="setRange(lastMonthsRange(6))">Last 6 months</UiButton>
+      </div>
       <div class="controls-grid">
         <UiField v-slot="f" label="From (UTC)" :error="rangeError">
           <input
@@ -254,11 +286,31 @@ onMounted(() => {
 
       <Card title="Migration off third-party marketplaces" class="section">
         <p class="period">
-          Overall migration <strong>{{ formatBps(data.migration.overallMigrationBps) }}</strong>
-          (in-house <Money :cents="data.migration.overallInHouseGmvCents" /> against a baseline of
+          {{ data.migration.months > 1 ? 'Average monthly migration' : 'Migration' }}
+          <strong>{{ formatBps(data.migration.overallMigrationBps) }}</strong>
+          (in-house <Money :cents="data.migration.overallInHouseGmvCents" /><template v-if="data.migration.months > 1"> over
+          {{ data.migration.months }} months</template> against a baseline of
           <Money :cents="data.migration.overallBaselineMonthlyGmvCents" /> a month). Adoption
           <strong>{{ formatBps(data.migration.adoptionBps) }}</strong>.
         </p>
+
+        <!-- The leading indicator: migration month by month across the selected range. -->
+        <div class="trend" data-testid="migration-trend">
+          <h3 class="trend-title">Migration by month</h3>
+          <p v-if="data.migration.months < 2" class="subtle trend-hint">
+            Choose <strong>Last 3 months</strong> or <strong>Last 6 months</strong> to see the trend.
+          </p>
+          <ol class="trend-bars">
+            <li v-for="m in data.migration.byMonth" :key="m.month" data-testid="migration-month">
+              <span class="trend-month">{{ monthLabel(m.month) }}</span>
+              <span class="trend-track" aria-hidden="true">
+                <span class="trend-bar" :style="{ width: barWidth(m.migrationBps, data.migration.byMonth.map((x) => x.migrationBps)) }" />
+              </span>
+              <strong class="trend-value">{{ formatBps(m.migrationBps) }}</strong>
+              <span class="subtle trend-gmv"><Money :cents="m.inHouseGmvCents" /> in-house</span>
+            </li>
+          </ol>
+        </div>
         <div class="table-wrap">
           <table class="table table-stack">
             <thead>
@@ -266,7 +318,8 @@ onMounted(() => {
                 <th scope="col">Provider</th>
                 <th scope="col" class="num">Baseline monthly</th>
                 <th scope="col" class="num">In-house GMV</th>
-                <th scope="col" class="num">Migration</th>
+                <th scope="col" class="num">{{ data.migration.months > 1 ? 'Avg monthly migration' : 'Migration' }}</th>
+                <th v-if="data.migration.months > 1" scope="col">Trend</th>
                 <th scope="col">Adopted</th>
               </tr>
             </thead>
@@ -278,12 +331,15 @@ onMounted(() => {
                 <td data-label="Baseline monthly" class="num"><Money :cents="p.baselineMonthlyGmvCents" /></td>
                 <td data-label="In-house GMV" class="num"><Money :cents="p.inHouseGmvCents" /></td>
                 <td data-label="Migration" class="num">{{ formatBps(p.migrationBps) }}</td>
+                <td v-if="data.migration.months > 1" data-label="Trend" class="provider-trend" data-testid="provider-trend">
+                  {{ p.byMonth.map((m) => formatBps(m.migrationBps)).join(' → ') }}
+                </td>
                 <td data-label="Adopted">
                   <span class="badge" :class="p.adopted ? 'badge-success' : 'badge-neutral'">{{ p.adopted ? 'Yes' : 'No' }}</span>
                 </td>
               </tr>
               <tr v-if="data.migration.providers.length === 0">
-                <td colspan="5" class="notice">No providers with a baseline in this window.</td>
+                <td :colspan="data.migration.months > 1 ? 6 : 5" class="notice">No providers with a baseline in this window.</td>
               </tr>
             </tbody>
           </table>
@@ -452,6 +508,63 @@ input.switch:focus-visible {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: var(--space-3);
+}
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.trend {
+  margin: var(--space-4) 0 var(--space-5);
+}
+.trend-title {
+  font-size: var(--text-base);
+  margin: 0 0 var(--space-2);
+}
+.trend-hint {
+  margin: 0 0 var(--space-2);
+}
+.trend-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.trend-bars li {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(4rem, 1fr) 4.5rem auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.trend-track {
+  height: 0.75rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.trend-bar {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  border-radius: var(--radius-sm);
+}
+.trend-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.provider-trend {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 560px) {
+  .trend-bars li {
+    grid-template-columns: 4.5rem 1fr 4rem;
+  }
+  .trend-gmv {
+    grid-column: 1 / -1;
+  }
 }
 .section {
   margin-top: var(--space-4);

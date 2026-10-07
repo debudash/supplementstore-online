@@ -182,6 +182,16 @@ On-hold stories: Probiotic x6 (out of stock) or an unauthorized schedule. Each c
 - **Refund exposure:** refund rate, refunds paid, fees kept (provider bears), cost of goods
   written off (Cerbo bears), by reason, and Cerbo's net after write-offs.
 
+**Migration leading indicator (the headline story):** on **Metrics**, turn on **Include
+synthetic demo data** and click **Last 3 months**. The **Migration off third-party
+marketplaces** card shows **Migration by month**: each month's in-house GMV against the
+providers' 6-month marketplace baseline, climbing month over month (for example 10% -> 18% ->
+44%). That climb is the leading indicator: providers are moving volume they used to send to
+marketplaces into Cerbo. The headline reads **Average monthly migration** for the range, and
+each provider row shows its own trend. The data comes from **Reset demo story** (Before you
+start, step 3): a seeded 6-month baseline per provider plus a 3-month in-house ramp, all marked
+synthetic, so turning the switch off shows real data only.
+
 **Metrics:** turn on **Include synthetic demo data** (a "Demo data included" banner appears),
 group by **Provider**, and **Select** a provider to scope the whole report to them. Each row
 shows the provider's name and full id. Reconciliation reads **Pass**. **Provider markup
