@@ -27,8 +27,8 @@ These scenarios are the acceptance bar. T13 implements them in `tests/e2e/golden
 | EVAL-01 | `prov-ana` order for `pat-cara`: MAG-GLY-120 x2 @ 2999, VITD3-K2 x1 @ 2499 | subtotal 8497, cogs 4025, fee 64, line fees [45, 19], line margins [3053, 1355], order margin 4408 |
 | EVAL-02 | OMEGA3-1000 x1 @ 4999 | fee 37 (37.4925 rounds down), margin 2682 |
 | EVAL-03 | Half-up boundary: VITD3-K2 x1 @ 2200 | fee 17 (exact 16.5 rounds up), margin 1058 |
-| EVAL-04 | Margin floor on VITD3-K2 (cogs 1125) | @1125 rejected MARGIN_NEGATIVE (margin -8); @1132 rejected (-1); @1133 accepted with margin 0 |
-| EVAL-04b | Margin % mode: MAG-GLY-120 with marginBps 5000 | unit price 2900 |
+| EVAL-04 | Margin floor on VITD3-K2 (cogs 1125) | split(): @1125 rejected MARGIN_NEGATIVE (margin -8); @1132 rejected (-1); @1133 accepted with margin 0. API (ADR-028): markup 0 prices at 1135 (cost + fee + 1 cent of rounding headroom) with margin 1; a $0 markup is priced as 1 cent so fee allocation can never push a line negative |
+| EVAL-04b | Markup mode (ADR-028): MAG-GLY-120 with markupCents 1000 | unit price 2469, fee 19, margin 1000 |
 | EVAL-P1 | Property tests (fast-check, 10k runs): random 1 to 10 lines, qty 1 to 100, prices >= cogs | line fees sum to order fee; each line cogs + fee + margin = total; fee = half-up of subtotal x 0.0075; allocation deterministic |
 
 ## Inventory
@@ -68,7 +68,7 @@ These scenarios are the acceptance bar. T13 implements them in `tests/e2e/golden
 | EVAL-11 | Schedule MAG-GLY-120 x1 @ 2999, authorized, run cycle | child order kind recurring_cycle, paid, fee 22, margin 1527, MAG on_hand -1 |
 | EVAL-11b | Schedule PROBIO-50B x6 | cycle on_hold, hold_reason INSUFFICIENT_STOCK, no journal |
 | EVAL-11c | Unauthorized schedule run | on_hold, NOT_AUTHORIZED |
-| EVAL-11d | Raise MAG cogs to 3000 (test helper), run cycle | on_hold, MARGIN_NEGATIVE |
+| EVAL-11d | Raise MAG cogs to 3000 (test helper), run cycle (schedule markup 1526) | paid at 4561 (fee 34); provider margin stays 1527 - the cost passes through (ADR-028) |
 
 ## Privacy and demo isolation
 | ID | Scenario | Expected |

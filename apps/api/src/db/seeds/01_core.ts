@@ -40,16 +40,13 @@ const USERS = [
 ]
 
 // SKU, name, unit_cogs_cents, on_hand_qty - verbatim from docs/EVALS.md seed table.
-// list_price_cents is the seeded catalog list price (owner decision); it is NOT part of
-// the protected EVALS seed table (which pins only cogs + on_hand) and is additive. Prices
-// match the demo/eval numbers so the walkthrough needs no typing; a fresh DB gets them
-// here, while an already-seeded (live) DB gets them from migration 6's backfill.
+// There is no catalog list price: providers price each line with a markup (ADR-028).
 const PRODUCTS = [
-  { sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', unit_cogs_cents: 1450, on_hand_qty: 50, list_price_cents: 2999 },
-  { sku: 'VITD3-K2', name: 'Vitamin D3 + K2', unit_cogs_cents: 1125, on_hand_qty: 40, list_price_cents: 2499 },
-  { sku: 'OMEGA3-1000', name: 'Omega-3 Fish Oil 1000mg', unit_cogs_cents: 2280, on_hand_qty: 30, list_price_cents: 4999 },
-  { sku: 'PROBIO-50B', name: 'Probiotic 50B CFU', unit_cogs_cents: 2675, on_hand_qty: 5, list_price_cents: 4299 },
-  { sku: 'ZINC-30', name: 'Zinc Picolinate 30mg', unit_cogs_cents: 690, on_hand_qty: 0, list_price_cents: 1290 }
+  { sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', unit_cogs_cents: 1450, on_hand_qty: 50 },
+  { sku: 'VITD3-K2', name: 'Vitamin D3 + K2', unit_cogs_cents: 1125, on_hand_qty: 40 },
+  { sku: 'OMEGA3-1000', name: 'Omega-3 Fish Oil 1000mg', unit_cogs_cents: 2280, on_hand_qty: 30 },
+  { sku: 'PROBIO-50B', name: 'Probiotic 50B CFU', unit_cogs_cents: 2675, on_hand_qty: 5 },
+  { sku: 'ZINC-30', name: 'Zinc Picolinate 30mg', unit_cogs_cents: 690, on_hand_qty: 0 }
 ]
 
 /**
@@ -66,7 +63,7 @@ export async function seedCore(knex: Knex): Promise<void> {
   await knex('products')
     .insert(PRODUCTS)
     .onConflict('sku')
-    .merge(['name', 'unit_cogs_cents', 'on_hand_qty', 'list_price_cents'])
+    .merge(['name', 'unit_cogs_cents', 'on_hand_qty'])
 }
 
 /** Run the core seed only when the products table is empty (server-boot helper). */

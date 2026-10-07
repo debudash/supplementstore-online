@@ -14,17 +14,13 @@ const STATUS_BY_CODE: Record<string, number> = {
   INSUFFICIENT_STOCK: 409,
   ORDER_NOT_EDITABLE: 409,
   ORDER_NOT_PAYABLE: 409,
-  // ADR-025 admin list-price edits: a stale edit (someone changed it first) and a price
-  // at or below Cerbo's cost.
-  PRICE_CONFLICT: 409,
   // Refund requests: only paid (real) orders, one open request at a time, and a decision
   // needs a pending request.
   NOT_REFUNDABLE: 409,
   REFUND_REQUEST_EXISTS: 409,
   REFUND_WINDOW_CLOSED: 409,
   NO_PENDING_REQUEST: 409,
-  MARGIN_NEGATIVE: 422,
-  PRICE_BELOW_COST: 422
+  MARGIN_NEGATIVE: 422
 }
 
 /** A business error with a stable code, HTTP status, and optional detail payload. */

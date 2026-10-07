@@ -27,6 +27,7 @@ import type { Notifier } from '../../src/seams'
 import type { Actor } from '../../src/auth/types'
 import { refundOrder } from '../../src/refunds'
 import { fulfillOrder } from '../../src/fulfillment'
+import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
 function migrateViaCli(): void {
@@ -122,7 +123,7 @@ async function sendNewOrder(lines: Line[]): Promise<{ orderId: string; token: st
   for (const l of lines) {
     const r = await asUser(PROV_USER)
       .post(`/api/orders/${orderId}/lines`)
-      .send({ sku: l.sku, qty: l.qty, unitPriceCents: l.price })
+      .send({ sku: l.sku, qty: l.qty, markupCents: markupFor(l.sku, l.price) })
     expect(r.status).toBe(200)
   }
   const send = await asUser(PROV_USER).post(`/api/orders/${orderId}/send`).send({})

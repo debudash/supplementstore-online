@@ -41,8 +41,8 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'EVAL-01', area: 'money', task: 'T1/T3', plan: 'live', summary: 'MAG x2@2999 + VITD3 x1@2499 -> subtotal 8497, fee 64, line fees [45,19], margins [3053,1355]' },
   { id: 'EVAL-02', area: 'money', task: 'T1/T3', plan: 'live', summary: 'OMEGA3 x1@4999 -> fee 37, margin 2682' },
   { id: 'EVAL-03', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 x1@2200 half-up -> fee 17, margin 1058' },
-  { id: 'EVAL-04', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 margin floor: @1125 and @1132 rejected MARGIN_NEGATIVE; @1133 margin 0' },
-  { id: 'EVAL-04b', area: 'money', task: 'T1/T3', plan: 'live', summary: 'MAG marginBps 5000 -> unit price 2900' },
+  { id: 'EVAL-04', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 margin floor: markup 0 -> price 1135 (cost + fee + 1 cent headroom), margin 1 (split floor still rejects @1125/@1132)' },
+  { id: 'EVAL-04b', area: 'money', task: 'T1/T3', plan: 'live', summary: 'MAG markup 1000 -> unit price 2469, fee 19, margin 1000 (ADR-028)' },
   { id: 'EVAL-P1', area: 'money', task: 'T1/T3', plan: 'live', summary: 'Property: line fees sum to order fee; cogs+fee+margin=total; fee half-up; deterministic (API-driven)' },
 
   // Inventory (T3, merged).
@@ -72,7 +72,7 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'EVAL-11', area: 'recurring', task: 'T9', plan: 'live', summary: 'authorized cycle pays: recurring_cycle, fee 22, margin 1527, MAG on_hand -1; balanced PAYMENT journal via T4 path' },
   { id: 'EVAL-11b', area: 'recurring', task: 'T9', plan: 'live', summary: 'schedule PROBIO x6 -> cycle on_hold INSUFFICIENT_STOCK, no journal, stock untouched' },
   { id: 'EVAL-11c', area: 'recurring', task: 'T9', plan: 'live', summary: 'unauthorized schedule run -> cycle on_hold NOT_AUTHORIZED, no journal' },
-  { id: 'EVAL-11d', area: 'recurring', task: 'T9', plan: 'live', summary: 'raise MAG cogs to 3000, run cycle -> on_hold MARGIN_NEGATIVE (ADR-017 surfaced, not absorbed)' },
+  { id: 'EVAL-11d', area: 'recurring', task: 'T9', plan: 'live', summary: 'raise MAG cogs to 3000, run cycle -> pays at 4561, provider still nets the 1527 markup (ADR-028 pass-through)' },
 
   // Privacy + demo isolation.
   { id: 'EVAL-12', area: 'privacy', task: 'T4', plan: 'live', summary: 'GET /api/pay/:token strict whitelist; no cogs/fee/margin/provider economics' },
@@ -86,7 +86,7 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'RT-04', area: 'redteam', task: 'T4', plan: 'live', summary: '10 parallel pays (mixed keys) -> exactly 1 payment, 1 journal, stock sold once' },
   { id: 'RT-05', area: 'redteam', task: 'T3', plan: 'live', summary: 'two concurrent sends for last units -> exactly one wins; reserved <= on_hand' },
   { id: 'RT-06', area: 'redteam', task: 'T3', plan: 'live', summary: 'edit lines after send -> 409 ORDER_NOT_EDITABLE' },
-  { id: 'RT-07', area: 'redteam', task: 'T3', plan: 'live', summary: 'negative/zero/decimal/string/huge qty & price -> 400 INVALID_INPUT; no float reaches money' },
+  { id: 'RT-07', area: 'redteam', task: 'T3', plan: 'live', summary: 'negative/zero/decimal/string/huge qty & markup, and retired price/margin fields -> 400 INVALID_INPUT; no float reaches money' },
   { id: 'RT-08', area: 'redteam', task: 'T5', plan: 'live', summary: '10 parallel refunds -> exactly 1 refund, 1 REFUND journal, restock once' },
   { id: 'RT-09', area: 'redteam', task: 'T0/T11', plan: 'live', summary: 'provider calls restock/metrics/demo -> 403 FORBIDDEN (role guard)' },
   { id: 'RT-10', area: 'redteam', task: 'T4', plan: 'live', summary: 'patient routes and error bodies never leak COGS/margin/fee' },

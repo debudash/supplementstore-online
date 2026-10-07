@@ -11,7 +11,8 @@
 // PAYMENT journal or its entries (money rule 6, ADR-007). The ledger is append-only.
 //
 // REFUND is the exact mirror of PAYMENT, except the platform fee is NOT reversed: the
-// fee the provider paid is RETAINED by Cerbo and the provider is debited for it
+// platform fee (built into the patient's price, ADR-028) is RETAINED by Cerbo and the
+// provider is debited for it
 // (memo `fee_retention`, ADR-012). PLATFORM_FEE_REVENUE is intentionally untouched.
 //
 //   CASH_CLEARING    -line total   (credit: cash goes back to the patient)

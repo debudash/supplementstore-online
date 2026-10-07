@@ -13,10 +13,10 @@ A provider creates a draft order for one of their practice's patients and adds o
 - AC4: Lines can be edited or removed while the order is `draft`; any edit after `draft` returns `ORDER_NOT_EDITABLE`
 
 ### FR-2 Per-item pricing (Tier 1)
-The provider sets a patient-facing unit price in cents, OR a margin percent from which the price is derived.
-- AC1: Price is the stored canonical value. Margin percent mode computes `price = ceil(unit_cogs * 10000 / (10000 - margin_bps))`, margin_bps from 0 to 9500
-- AC2: The UI and the quote endpoint show, per line and per order: price, COGS, allocated fee, and net margin
-- AC3: A line whose net margin after its allocated fee is below 0 is rejected with `MARGIN_NEGATIVE`, naming the line (EVAL-04)
+The provider prices each line with a per-unit dollar markup (ADR-028). The patient pays COGS + markup + the 0.75% fee (built into the unit price; no fee line is shown to the patient).
+- AC1: Each line requires `markupCents`, integer cents from 0 to 100000 ($0 to $1,000). The server derives `unit_price = ceil((unit_cogs + max(markup, 1)) * 10000 / (10000 - fee_bps))` and stores both the price and `unit_markup_cents`. A $0 markup is priced as 1 cent of rounding headroom (a $0 line nets 0 or 1 cent). `unitPriceCents` and `marginBps` are rejected with 400 `INVALID_INPUT`
+- AC2: The UI shows a live, server-computed quote while the provider types the markup ("Patient pays $X per unit"; `GET /api/products/:sku/price-preview`), and the UI and the quote endpoint show, per line and per order: price, COGS, allocated fee, and net margin. Order net margin is always >= the sum of qty x markup; one line can be 1 cent under its markup after fee allocation
+- AC3: The split still guards every line: a line whose net margin after its allocated fee is below 0 is rejected with `MARGIN_NEGATIVE`, naming the line (EVAL-04). A markup-priced line cannot reach it (the round-up plus the 1-cent headroom always cover the fee); the guard remains for legacy pre-ADR-028 lines
 
 ### FR-3 Stock check at add-to-cart (Tier 1)
 - AC1: Adding or increasing a line is allowed only if `available = on_hand - reserved` is >= the requested total quantity for that SKU in this cart
@@ -24,7 +24,7 @@ The provider sets a patient-facing unit price in cents, OR a margin percent from
 - AC3: Out-of-stock SKUs are visible but marked unavailable
 
 ### FR-4 Send to patient (Tier 1 send and snapshot, Tier 2 reservation)
-- AC1: Send snapshots unit COGS onto every line, computes the split via `packages/money`, persists totals, and sets status `sent`
+- AC1: Send snapshots unit COGS onto every line, re-derives each line's unit price from its markup against that snapshot COGS (a draft follows the current COGS until then), computes the split via `packages/money`, persists prices and totals, and sets status `sent`
 - AC2: Send re-checks stock and reserves the quantity (`reserved += qty`) in the same transaction. Failure returns `INSUFFICIENT_STOCK` and nothing is reserved
 - AC3: Reservation expires 7 days after send. Expiry sets status `expired` and releases stock (EVAL-14)
 - AC4: Send generates an unguessable patient pay token and calls `Notifier` (stub logs the link). The provider UI shows a copyable patient link
@@ -72,10 +72,10 @@ Whole-order refunds only.
 - AC4: Payout is a stub seam (`PayoutService`), not executed
 
 ### FR-12 Recurring orders (Tier 3)
-- AC1: Provider creates a schedule for a patient with lines (SKU, qty, price) and `interval_days` (default 30, range 7 to 90). One-off remains the default order type
-- AC2: Patient authorizes once via their pay link (stubbed saved payment method token)
-- AC3: Each cycle creates a child order (`kind = recurring_cycle`) with fresh COGS snapshot and the schedule's locked prices, checks stock and margin, charges the saved method, and posts the PAYMENT journal, all in one transaction
-- AC4: If stock is short, margin would go negative, or the schedule is not authorized, the cycle order is `on_hold` with a reason and the provider sees an alert. Retry is possible after the cause is fixed (EVAL-11)
+- AC1: Provider creates a schedule for a patient with lines (SKU, qty, markup; `markupCents` required, 0 to 100000) and `interval_days` (default 30, range 7 to 90). One-off remains the default order type
+- AC2: Patient authorizes once via their pay link (stubbed saved payment method token). The authorization copy says the per-cycle amount shown is current and can change if product costs change
+- AC3: Each cycle creates a child order (`kind = recurring_cycle`) with a fresh COGS snapshot and prices each line from that CURRENT COGS + the schedule's markup (ADR-028), so a cost rise passes through to the patient and the provider keeps the markup (EVAL-11d); it checks stock and margin, charges the saved method, and posts the PAYMENT journal, all in one transaction
+- AC4: If stock is short, margin would go negative (possible only for legacy pre-ADR-028 lines without a markup), or the schedule is not authorized, the cycle order is `on_hold` with a reason and the provider sees an alert. Retry is possible after the cause is fixed (EVAL-11)
 - AC5: Provider can pause or cancel a schedule
 - AC6: Demo: "Run cycle now" action and a `run-due-schedules` job endpoint replace a real scheduler
 

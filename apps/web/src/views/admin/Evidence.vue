@@ -307,7 +307,7 @@ function humanizeReason(code: string): string {
 
         <h3 class="sub-title">Options to close the gap</h3>
         <ul class="options">
-          <li>Raise the platform fee toward {{ breakevenLabel }}</li>
+          <li>Raise the platform fee toward {{ breakevenLabel }} (it is built into the patient's price, so prices rise slightly)</li>
           <li>Pass card processing through to the patient or provider</li>
           <li>Add a fixed per-order fee for small orders</li>
         </ul>

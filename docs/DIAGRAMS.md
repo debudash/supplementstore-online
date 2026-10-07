@@ -189,6 +189,7 @@ erDiagram
     int qty "1..100"
     int unit_price_cents "gt 0"
     int unit_cogs_cents "snapshot"
+    int unit_markup_cents "null or 0..100000 (ADR-028)"
     int line_total_cents
     int line_cogs_cents
     int line_fee_cents
@@ -252,9 +253,10 @@ Source: `apps/api/src/db/migrations/20261005120001_reference_and_catalog.ts`,
 
 ## 3. Sequence - order creation to send (MERGED, T3)
 
-Provider builds a draft, adds lines by explicit price or by margin % (the server derives
-the price), watches the live server-computed quote, then sends. Send takes a `products`
-row lock, snapshots COGS and the computed split onto the order and lines, reserves stock
+Provider builds a draft, adds lines with a per-unit dollar markup (the server derives the
+price as COGS + markup + fee, ADR-028), watches the live server-computed quote, then sends. Send takes a `products`
+row lock, snapshots COGS, re-derives each line's price from that COGS + its markup, and
+writes the computed split onto the order and lines, reserves stock
 with a 7-day expiry, and moves the order to `sent`. All split math is in `packages/money`
 and runs server-side; the UI never computes fees, margins, or allocations.
 
@@ -264,7 +266,7 @@ sequenceDiagram
   actor Prov as Provider (SPA)
   participant API as orders/router.ts
   participant Svc as orders/service.ts
-  participant Money as packages/money (split, priceFromMarginBps)
+  participant Money as packages/money (split, priceFromMarkupCents)
   participant Inv as inventory/service.ts
   participant DB as Postgres
   participant Notif as Notifier (stub)
@@ -275,13 +277,12 @@ sequenceDiagram
   Svc->>DB: insert order (status=draft) + order_events(to draft)
   API-->>Prov: 201 OrderView (status draft)
 
-  Prov->>API: POST /api/orders/:id/lines { sku, qty, unitPriceCents or marginBps }
+  Prov->>API: POST /api/orders/:id/lines { sku, qty, markupCents }
+  Note over API,Svc: unitPriceCents or marginBps then 400 INVALID_INPUT (retired)
   API->>Svc: addLine(...)
   Svc->>DB: load product (catalog COGS)
-  alt marginBps given
-    Svc->>Money: priceFromMarginBps(unitCogs, marginBps)
-    Money-->>Svc: canonical unit price
-  end
+  Svc->>Money: priceFromMarkupCents(unitCogs, markupCents, fee_bps)
+  Money-->>Svc: unit price = ceil((COGS + max(markup, 1)) / (1 - fee))
   Svc->>DB: merge or insert line (qty sums for same SKU)
   Note over Svc,Inv: add-to-cart stock gate: available = on_hand - reserved
   Svc->>Money: split(lines, fee_bps) re-validate whole cart
@@ -300,7 +301,7 @@ sequenceDiagram
   rect rgb(235,245,255)
     Note over Svc,DB: ONE transaction with products row lock (FOR UPDATE, ordered by sku)
     Svc->>DB: SELECT products FOR UPDATE (snapshot COGS now, ADR-006)
-    Svc->>Money: split(inputs, fee_bps) from snapshot
+    Svc->>Money: priceFromMarkupCents(snapshot COGS, markup) per line, then split(inputs, fee_bps)
     Money-->>Svc: per-line total/cogs/fee/margin (or MARGIN_NEGATIVE then rollback)
     Svc->>Inv: reserveLines(...) re-check available, inc reserved_qty, write reserve movement
     Note over Inv,DB: INSUFFICIENT_STOCK then rollback, nothing reserved
@@ -539,7 +540,8 @@ flowchart TB
 
 Source: `packages/money/src/fee.ts` (`orderFee`), `packages/money/src/allocate.ts`
 (`allocateFee`), `packages/money/src/split.ts` (`split`), `packages/money/src/refund.ts`,
-`packages/money/src/pricing.ts` (`priceFromMarginBps`). Expected values from
+`packages/money/src/pricing.ts` (`priceFromMarkupCents`; EVAL-01 prices come from markups 1526
+and 1355 at these COGS). Expected values from
 `docs/EVALS.md` EVAL-01.
 
 ---

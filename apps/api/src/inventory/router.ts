@@ -18,11 +18,12 @@ productsRouter.get('/', async (_req, res) => {
   }
 })
 
-// GET /api/products/:sku/price-preview?marginBps=4000 - the price a margin would set
-// (ADR-025). Read-only; lets the order builder preview without browser money math.
+// GET /api/products/:sku/price-preview?markupCents=1000&qty=1 - the price a per-unit
+// markup would set (ADR-028). Read-only; lets the order builder preview without browser
+// money math.
 productsRouter.get('/:sku/price-preview', async (req, res) => {
   try {
-    res.status(200).json(await previewPrice(db, req.params.sku, req.query.marginBps, req.query.qty))
+    res.status(200).json(await previewPrice(db, req.params.sku, req.query.markupCents, req.query.qty))
   } catch (err) {
     handleError(res, err)
   }

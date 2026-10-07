@@ -14,12 +14,6 @@ export interface AdminInventoryItem {
   sku: string
   name: string
   unitCogsCents: number
-  /** Catalog list price (ADR-025: editable by Cerbo Admin only). */
-  listPriceCents: number
-  /** Gross margin at the list price, basis points, rounded down. */
-  listMarginBps: number
-  /** Active recurring schedules containing this SKU; they reprice on their next cycle. */
-  activeScheduleCount: number
   onHandQty: number
   reservedQty: number
   /** available = on_hand - reserved for the shared pool (docs/ARCHITECTURE.md section 6). */
@@ -51,61 +45,4 @@ export interface RestockResult {
   available: number
   /** The inventory_movements row id written for this restock. */
   movementId: number
-}
-
-/** PATCH /api/admin/products/:sku/list-price request (ADR-025). */
-export interface UpdateListPriceRequest {
-  /** New list price, integer cents, above the unit cost, at most 10,000,000. */
-  listPriceCents: number
-  /** The price the admin saw; a mismatch returns 409 PRICE_CONFLICT (no lost update). */
-  expectedCurrentPriceCents: number
-  /** Why the price changed (3 to 500 characters); stored in the price history. */
-  reason: string
-}
-
-/** One append-only price history row. */
-export interface PriceChange {
-  id: number
-  sku: string
-  oldPriceCents: number
-  newPriceCents: number
-  reason: string
-  actorUserId: string
-  actorName: string | null
-  changedAt: string
-}
-
-/** PATCH /api/admin/products/:sku/list-price response. */
-export interface UpdateListPriceResult {
-  sku: string
-  name: string
-  unitCogsCents: number
-  previousPriceCents: number
-  listPriceCents: number
-  previousMarginBps: number
-  listMarginBps: number
-  activeScheduleCount: number
-  change: PriceChange
-}
-
-/** GET /api/admin/products/:sku/list-price-preview?listPriceCents= (read-only review). */
-export interface ListPricePreview {
-  sku: string
-  name: string
-  unitCogsCents: number
-  currentPriceCents: number
-  listPriceCents: number
-  currentMarginBps: number
-  listMarginBps: number
-  /** True when the proposed price is at or below cost; saving would be refused. */
-  belowCost: boolean
-  /** listPriceCents minus currentPriceCents, server-computed. */
-  differenceCents: number
-  activeScheduleCount: number
-}
-
-/** GET /api/admin/products/:sku/price-history response (newest first, last 50). */
-export interface PriceHistoryResponse {
-  sku: string
-  changes: PriceChange[]
 }

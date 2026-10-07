@@ -12,6 +12,7 @@ import { db } from '../src/db/knex'
 import { createApp } from '../src/app'
 import { createKnexActorLoader } from '../src/auth/loadActor'
 import { seedCore } from '../src/db/seeds/01_core'
+import { markupFor } from './pricing'
 
 const apiRoot = path.resolve(__dirname, '..')
 const app = createApp({ db, loadActor: createKnexActorLoader(db) })
@@ -51,7 +52,7 @@ const as = (u: string) => ({
 async function orderForCara(pay = true): Promise<string> {
   const caraPatientId = (await db('users').where({ id: CARA }).first()).patient_id
   const draft = await as(ANA).post('/api/orders').send({ patientId: caraPatientId })
-  await as(ANA).post(`/api/orders/${draft.body.id}/lines`).send({ sku: 'MAG-GLY-120', qty: 1, unitPriceCents: 2999 })
+  await as(ANA).post(`/api/orders/${draft.body.id}/lines`).send({ sku: 'MAG-GLY-120', qty: 1, markupCents: markupFor('MAG-GLY-120', 2999) })
   const sent = await as(ANA).post(`/api/orders/${draft.body.id}/send`)
   if (pay) {
     const token = String(sent.body.payUrl).split('/').pop()
@@ -142,8 +143,9 @@ describe('guards', () => {
   })
 
   it('the patient list never leaks economics or the review link', async () => {
-    const blob = JSON.stringify((await as(CARA).get('/api/patient/orders')).body).toLowerCase()
-    for (const leak of ['cogs', 'margin', 'fee', 'review']) expect(blob).not.toContain(leak)
+    // Check JSON KEYS only: a random uuid or token can contain "fee" as hex/base64 text.
+    const keys = (JSON.stringify((await as(CARA).get('/api/patient/orders')).body).match(/"[^"]+":/g) ?? []).join(' ').toLowerCase()
+    for (const leak of ['cogs', 'margin', 'fee', 'review', 'markup']) expect(keys).not.toContain(leak)
   })
 })
 

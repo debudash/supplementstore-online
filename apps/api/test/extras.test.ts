@@ -10,6 +10,7 @@ import { db } from '../src/db/knex'
 import { createApp } from '../src/app'
 import { createKnexActorLoader } from '../src/auth/loadActor'
 import { seedCore } from '../src/db/seeds/01_core'
+import { markupFor } from './pricing'
 
 const apiRoot = path.resolve(__dirname, '..')
 const app = createApp({ db, loadActor: createKnexActorLoader(db) })
@@ -34,7 +35,7 @@ beforeAll(async () => {
   patientName = patients[0].name
   const draft = await as(PROVIDER).post('/api/orders').send({ patientId: patients[0].id })
   orderId = draft.body.id
-  await as(PROVIDER).post(`/api/orders/${orderId}/lines`).send({ sku: 'MAG-GLY-120', qty: 1, unitPriceCents: 2999 })
+  await as(PROVIDER).post(`/api/orders/${orderId}/lines`).send({ sku: 'MAG-GLY-120', qty: 1, markupCents: markupFor('MAG-GLY-120', 2999) })
   const sent = await as(PROVIDER).post(`/api/orders/${orderId}/send`)
   payToken = String(sent.body.payUrl).split('/').pop() as string
   firstPay = await request(app).post(`/api/pay/${payToken}`).send({ idempotencyKey: `k-${randomUUID()}` })

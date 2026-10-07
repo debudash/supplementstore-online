@@ -5,7 +5,7 @@
 //
 // WHITELIST (NFR-5, RT-10, EVAL-12): the page renders ONLY the fields the server's
 // patient serializer returns - item name/qty/unitPrice/lineTotal, order total, status,
-// first name. There is no fee line (ADR-002: the provider bears the fee). COGS, margin,
+// first name. There is no fee line (the fee is built into the unit price, ADR-028). COGS, margin,
 // and fee never appear here, in the happy path or any error state.
 //
 // Money is DISPLAY ONLY: integer cents from the server, formatted at the last moment by

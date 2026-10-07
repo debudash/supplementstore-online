@@ -8,6 +8,7 @@
 // SURFACES as an on_hold cycle with a reason, never a silent charge.
 import { afterAll, beforeEach, describe, expect } from 'vitest'
 import { anon, asUser, db, evalCase, resetState, PROV_ANA, PAT_CARA, SKU } from './_harness'
+import { markupFor } from './_harness'
 
 beforeEach(async () => {
   await resetState()
@@ -19,7 +20,7 @@ afterAll(async () => {
 interface SchedLine {
   sku: string
   qty: number
-  unitPriceCents: number
+  markupCents: number
 }
 
 /** Create a schedule for prov-ana / pat-cara; return its id and patient pay token. */
@@ -43,7 +44,7 @@ async function runCycle(scheduleId: string) {
   return asUser(PROV_ANA).post(`/api/schedules/${scheduleId}/run`).send({})
 }
 
-const MAG_SCHEDULE: SchedLine[] = [{ sku: SKU.MAG, qty: 1, unitPriceCents: 2999 }]
+const MAG_SCHEDULE: SchedLine[] = [{ sku: SKU.MAG, qty: 1, markupCents: markupFor(SKU.MAG, 2999) }]
 
 describe('recurring (golden)', () => {
   evalCase('EVAL-11', 'authorized cycle pays: recurring_cycle, fee 22, margin 1527, MAG -1', async () => {
@@ -86,7 +87,7 @@ describe('recurring (golden)', () => {
   })
 
   evalCase('EVAL-11b', 'insufficient stock -> cycle on_hold INSUFFICIENT_STOCK, no journal', async () => {
-    const { id, token } = await createSchedule([{ sku: SKU.PROBIO, qty: 6, unitPriceCents: 4000 }])
+    const { id, token } = await createSchedule([{ sku: SKU.PROBIO, qty: 6, markupCents: markupFor(SKU.PROBIO, 4000) }])
     await authorize(token) // authorize first, so the hold reason is STOCK not AUTH
     const run = await runCycle(id)
     expect(run.status).toBe(200)
@@ -110,24 +111,22 @@ describe('recurring (golden)', () => {
     expect((await db('products').where({ sku: SKU.MAG }).first()).on_hand_qty).toBe(50) // untouched
   })
 
-  evalCase('EVAL-11d', 'COGS rise to 3000 -> cycle on_hold MARGIN_NEGATIVE (surfaced, not absorbed)', async () => {
+  evalCase('EVAL-11d', 'COGS rise to 3000 -> cycle pays at 4561, provider still nets the 1527 markup (ADR-028)', async () => {
     const { id, token } = await createSchedule(MAG_SCHEDULE)
     await authorize(token)
-    // Test helper: the catalog COGS rises above the locked price's margin headroom. The
-    // cycle snapshots FRESH COGS, so the split now goes negative (ADR-006/017).
+    // Test helper: the catalog COGS rises. The cycle snapshots FRESH COGS and re-derives
+    // the price from COGS + the schedule markup, so the cost passes through (ADR-028).
     await db('products').where({ sku: SKU.MAG }).update({ unit_cogs_cents: 3000 })
 
     const run = await runCycle(id)
     expect(run.status).toBe(200)
-    expect(run.body.cycle).toMatchObject({ status: 'on_hold', holdReason: 'MARGIN_NEGATIVE' })
+    expect(run.body.cycle).toMatchObject({ status: 'paid' })
 
     const orderId = run.body.cycle.orderId as string
-    // Nothing charged or sold; totals stay null while on_hold.
-    expect(await db('journals').where({ order_id: orderId }).then((r) => r.length)).toBe(0)
-    expect(await db('payments').where({ order_id: orderId }).then((r) => r.length)).toBe(0)
-    expect((await db('products').where({ sku: SKU.MAG }).first()).on_hand_qty).toBe(50)
     const order = await db('orders').where({ id: orderId }).first()
-    expect(order.margin_cents).toBeNull()
+    // (3000 + 1526) * 10000 / 9925 = 4560.20 -> 4561; fee 34; margin 4561 - 3000 - 34 = 1527.
+    expect(order).toMatchObject({ subtotal_cents: 4561, cogs_cents: 3000, fee_cents: 34, margin_cents: 1527 })
+    expect(await db('journals').where({ order_id: orderId, type: 'PAYMENT' }).then((r) => r.length)).toBe(1)
   })
 
   evalCase('RT-13', 'cycle triggered twice for the same period -> exactly ONE child order', async () => {

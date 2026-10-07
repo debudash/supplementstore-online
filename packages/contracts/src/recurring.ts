@@ -30,6 +30,8 @@ export interface ScheduleLineView {
   name: string
   qty: number
   unitPriceCents: number
+  /** The provider's per-unit markup (ADR-028). */
+  unitMarkupCents: number
 }
 
 /** A child order produced by a cycle, summarised for the provider's schedule view. */
@@ -67,9 +69,8 @@ export interface CreateScheduleRequest {
   lines: Array<{
     sku: string
     qty: number
-    /** Exactly one of unitPriceCents or marginBps (same input modes as order lines). */
-    unitPriceCents?: number
-    marginBps?: number
+    /** Per-unit dollar markup, 0..100000; each cycle charges current COGS + markup + fee (ADR-028). */
+    markupCents: number
   }>
 }
 

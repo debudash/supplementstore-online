@@ -1,41 +1,27 @@
 import { assertSafeIntegerInRange, assertSafePositiveInt } from "./validate";
 
-/** Maximum margin percent, in basis points, accepted in margin-% pricing mode. */
-export const MAX_MARGIN_BPS = 9500;
+/** Largest per-unit markup a provider may enter: $1,000.00 (ADR-028, guards typos). */
+export const MAX_MARKUP_CENTS = 100000;
 
 /**
- * Derive a patient-facing unit price (integer cents) from a target margin percent.
+ * Derive a patient-facing unit price (integer cents) from the provider's per-unit dollar
+ * markup (ADR-028). The patient pays COGS + markup + the platform fee, so the price is
+ * grossed up until the fee on it is covered:
  *
- * ADR-005 / FR-2 AC1: price is the canonical stored value; margin % is an input
- * mode that derives it. Margin % is defined as (price - cogs) / price, so:
+ *   price = ceil((unitCogs + max(markup, 1)) * 10000 / (10000 - feeBps))
  *
- *   price = ceil(unitCogs * 10000 / (10000 - marginBps))
- *
- * We round UP so the realised margin is at least the requested margin, never below
- * it. `marginBps` is in [0, 9500] (FR-2 AC1); 10000 would divide by zero and is
- * rejected as INVALID_INPUT. Integer math only (ADR-003): no float division.
+ * We round UP so the fee never eats into the markup: across an order the provider's net
+ * margin is always >= the sum of qty x markup (the half-up order fee can add at most half
+ * a cent, which the integer ceiling absorbs). A single line can come out 1 cent below its
+ * markup once the order fee is allocated across lines by largest remainder (ADR-003), so a
+ * $0 markup is priced as 1 cent: that cent of headroom keeps every line margin >= 0 (the
+ * ADR-004 floor) - a $0 line nets 0 or 1 cent, never a loss. Integer math only (ADR-003):
+ * the inputs are safe integers and the quotient is ceiled once.
  */
-export function priceFromMarginBps(unitCogsCents: number, marginBps: number): number {
+export function priceFromMarkupCents(unitCogsCents: number, markupCents: number, feeBps: number): number {
   assertSafePositiveInt(unitCogsCents, "unitCogsCents");
-  assertSafeIntegerInRange(marginBps, "marginBps", 0, MAX_MARGIN_BPS);
-  return Math.ceil((unitCogsCents * 10000) / (10000 - marginBps));
-}
-
-/** Largest price (cents) for which `(price - cogs) * 10000` stays a safe integer. */
-export const MAX_PRICE_FOR_MARGIN_CENTS = Math.floor(Number.MAX_SAFE_INTEGER / 10000);
-
-/**
- * The gross margin, in basis points, that a unit price represents over its COGS - the
- * inverse of priceFromMarginBps, using the same definition (price - cogs) / price.
- *
- *   marginBps = floor((price - cogs) * 10000 / price)
- *
- * Rounded DOWN (toward negative infinity) so a displayed margin is never overstated.
- * Negative when the price is below cost. This is a gross figure BEFORE the platform
- * fee; it is shown to people as context, never used to compute a charge.
- */
-export function marginBpsFromPrice(unitCogsCents: number, unitPriceCents: number): number {
-  assertSafePositiveInt(unitCogsCents, "unitCogsCents");
-  assertSafeIntegerInRange(unitPriceCents, "unitPriceCents", 1, MAX_PRICE_FOR_MARGIN_CENTS);
-  return Math.floor(((unitPriceCents - unitCogsCents) * 10000) / unitPriceCents);
+  assertSafeIntegerInRange(markupCents, "markupCents", 0, MAX_MARKUP_CENTS);
+  assertSafeIntegerInRange(feeBps, "feeBps", 0, 9999);
+  const pricedMarkup = Math.max(markupCents, 1);
+  return Math.ceil(((unitCogsCents + pricedMarkup) * 10000) / (10000 - feeBps));
 }

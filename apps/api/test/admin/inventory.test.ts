@@ -21,6 +21,7 @@ import { db } from '../../src/db/knex'
 import { createApp } from '../../src/app'
 import { createKnexActorLoader } from '../../src/auth/loadActor'
 import { seedCore } from '../../src/db/seeds/01_core'
+import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
 function migrateViaCli(): void {
@@ -182,7 +183,7 @@ describe('FR-9 demo jobs: expire-reservations and run-due-schedules', () => {
     const orderId = draft.body.id as string
     const line = await asUser(PROV_USER)
       .post(`/api/orders/${orderId}/lines`)
-      .send({ sku: SKU_MAG, qty: 3, unitPriceCents: 2999 })
+      .send({ sku: SKU_MAG, qty: 3, markupCents: markupFor(SKU_MAG, 2999) })
     expect(line.status).toBe(200)
     const sent = await asUser(PROV_USER).post(`/api/orders/${orderId}/send`)
     expect(sent.status).toBe(200)

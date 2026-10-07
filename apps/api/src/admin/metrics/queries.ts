@@ -128,6 +128,32 @@ export async function queryProviderNetMarginCents(db: Knex, scope: MetricsScope)
   return sumToInt(row)
 }
 
+/**
+ * The providers' own markup on settled sales (ADR-028): sum(qty x unit_markup_cents) and
+ * the units it covers, over lines of orders paid in the period and NOT refunded. Lines
+ * priced before ADR-028 have no markup and are left out (not counted as $0). Provider net
+ * margin from settled sales is always >= this figure; the gap is the price round-up.
+ */
+export async function queryProviderMarkup(db: Knex, scope: MetricsScope): Promise<{ markupCents: number; units: number }> {
+  const q = db('order_lines as ol')
+    .join('orders as o', 'o.id', 'ol.order_id')
+    .where('o.paid_at', '>=', scope.period.startTs)
+    .where('o.paid_at', '<', scope.period.endTsExclusive)
+    .whereNotNull('ol.unit_markup_cents')
+    .whereNotExists(function () {
+      this.select('*').from('refunds as r').whereRaw('r.order_id = o.id')
+    })
+  if (scope.providerId) q.where('o.provider_id', scope.providerId)
+  applySynthetic(q, scope, 'o.is_synthetic')
+  const row = await q
+    .select(
+      db.raw('coalesce(sum(ol.qty::bigint * ol.unit_markup_cents), 0)::text as markup'),
+      db.raw('coalesce(sum(ol.qty), 0)::text as units')
+    )
+    .first<{ markup: string; units: string }>()
+  return { markupCents: parseBigIntSafe(row?.markup ?? '0'), units: parseBigIntSafe(row?.units ?? '0') }
+}
+
 /** Count of orders paid in the period (includes later-refunded orders; they were paid). */
 export async function queryPaidOrderCount(db: Knex, scope: MetricsScope): Promise<number> {
   const q = db('orders as o')

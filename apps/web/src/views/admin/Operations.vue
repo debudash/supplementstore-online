@@ -233,6 +233,14 @@ const rawBody = computed(() => (result.value?.ok ? JSON.stringify(result.value.b
           <div v-if="order.refundedAt"><dt>Refunded</dt><dd>{{ fmtDate(order.refundedAt) }}</dd></div>
           <div><dt>Items</dt><dd>{{ audit?.lines.length ?? 0 }} line(s)</dd></div>
         </dl>
+        <!-- The provider's markup per line (ADR-028): Cerbo tracks it, it never sets it. -->
+        <ul v-if="audit?.lines.length" class="markups" data-testid="order-markups">
+          <li v-for="l in audit.lines" :key="l.id">
+            {{ l.qty }} × {{ l.name }} -
+            <template v-if="l.unitMarkupCents !== null">provider markup <Money :cents="l.unitMarkupCents" /> per unit</template>
+            <span v-else class="subtle">priced before markup tracking</span>
+          </li>
+        </ul>
       </div>
     </Card>
 
@@ -470,5 +478,10 @@ const rawBody = computed(() => (result.value?.ok ? JSON.stringify(result.value.b
     margin-top: 0;
     width: 100%;
   }
+}
+.markups {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
 }
 </style>

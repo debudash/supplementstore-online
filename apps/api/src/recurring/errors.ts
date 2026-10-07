@@ -10,6 +10,7 @@
 import type { Response } from 'express'
 import { MoneyError } from '@cerbo/money'
 import { sendError } from '../http'
+import { ApiError } from '../orders/errors'
 
 const STATUS_BY_CODE: Record<string, number> = {
   INVALID_INPUT: 400,
@@ -44,7 +45,8 @@ export const notActionable = (message: string, details: Record<string, unknown> 
 
 /** Provider-surface error mapper (economics allowed in the provider's own details). */
 export function handleError(res: Response, err: unknown): void {
-  if (err instanceof ScheduleError) {
+  // Shared input validators (orders/validation: qty, markupCents) throw the orders ApiError.
+  if (err instanceof ScheduleError || err instanceof ApiError) {
     sendError(res, err.status, err.code, err.message, err.details)
     return
   }

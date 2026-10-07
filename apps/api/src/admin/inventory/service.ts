@@ -18,14 +18,11 @@ import type { AdminInventoryItem, RestockResult } from '@cerbo/contracts'
 import type { Actor } from '../../auth/types'
 import { assertSafeInteger } from '../../db/types'
 import { invalidInput, notFound } from '../../orders/errors'
-import { marginBpsFromPrice } from '@cerbo/money'
-import { activeScheduleCounts } from '../pricing/service'
 
 interface ProductRow {
   sku: string
   name: string
   unit_cogs_cents: number
-  list_price_cents: number
   on_hand_qty: number
   reserved_qty: number
   active: boolean
@@ -40,14 +37,10 @@ const MAX_RESTOCK_QTY = 10000
  * counts, not just `available`. */
 export async function listInventory(db: Knex): Promise<AdminInventoryItem[]> {
   const rows = await db<ProductRow>('products').select('*').orderBy('sku')
-  const schedules = await activeScheduleCounts(db)
   return rows.map((r) => ({
     sku: r.sku,
     name: r.name,
     unitCogsCents: r.unit_cogs_cents,
-    listPriceCents: r.list_price_cents,
-    listMarginBps: marginBpsFromPrice(r.unit_cogs_cents, r.list_price_cents),
-    activeScheduleCount: schedules.get(r.sku) ?? 0,
     onHandQty: r.on_hand_qty,
     reservedQty: r.reserved_qty,
     available: r.on_hand_qty - r.reserved_qty,

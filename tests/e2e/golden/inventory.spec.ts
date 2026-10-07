@@ -18,6 +18,7 @@ import {
 import { randomUUID } from 'node:crypto'
 import { runExpireReservations } from '../../../apps/api/src/jobs/expire'
 import { RESERVATION_DAYS } from '../../../apps/api/src/orders/service'
+import { markupFor } from './_harness'
 
 beforeEach(async () => {
   await resetState()
@@ -29,18 +30,18 @@ afterAll(async () => {
 describe('inventory (golden)', () => {
   evalCase('EVAL-05', 'PROBIO x6 -> 409 available 5; x5 succeeds', async () => {
     const id = await newDraft()
-    const over = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.PROBIO, qty: 6, unitPriceCents: 4000 })
+    const over = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.PROBIO, qty: 6, markupCents: markupFor(SKU.PROBIO, 4000) })
     expect(over.status).toBe(409)
     expect(over.body.error.code).toBe('INSUFFICIENT_STOCK')
     expect(over.body.error.details.available).toBe(5)
 
-    const ok = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.PROBIO, qty: 5, unitPriceCents: 4000 })
+    const ok = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.PROBIO, qty: 5, markupCents: markupFor(SKU.PROBIO, 4000) })
     expect(ok.status).toBe(200)
   })
 
   evalCase('EVAL-05b', 'ZINC x1 -> 409 available 0', async () => {
     const id = await newDraft()
-    const res = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.ZINC, qty: 1, unitPriceCents: 1500 })
+    const res = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.ZINC, qty: 1, markupCents: markupFor(SKU.ZINC, 1500) })
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe('INSUFFICIENT_STOCK')
     expect(res.body.error.details.available).toBe(0)
@@ -49,12 +50,12 @@ describe('inventory (golden)', () => {
   evalCase('EVAL-05c', 'cross-order reservation: ben blocked at 0, freed after ana cancels', async () => {
     // prov-ana reserves all 5 PROBIO by sending.
     const ana = await newDraft()
-    expect((await asUser(PROV_ANA).post(`/api/orders/${ana}/lines`).send({ sku: SKU.PROBIO, qty: 5, unitPriceCents: 4000 })).status).toBe(200)
+    expect((await asUser(PROV_ANA).post(`/api/orders/${ana}/lines`).send({ sku: SKU.PROBIO, qty: 5, markupCents: markupFor(SKU.PROBIO, 4000) })).status).toBe(200)
     expect((await asUser(PROV_ANA).post(`/api/orders/${ana}/send`).send({})).status).toBe(200)
 
     // prov-ben now sees availability 0 (reserved by ana) and is blocked.
     const ben = await newDraft(PAT_DEV, PROV_BEN)
-    const benAdd = await asUser(PROV_BEN).post(`/api/orders/${ben}/lines`).send({ sku: SKU.PROBIO, qty: 1, unitPriceCents: 4000 })
+    const benAdd = await asUser(PROV_BEN).post(`/api/orders/${ben}/lines`).send({ sku: SKU.PROBIO, qty: 1, markupCents: markupFor(SKU.PROBIO, 4000) })
     expect(benAdd.status).toBe(409)
     expect(benAdd.body.error.details.available).toBe(0)
 
@@ -63,7 +64,7 @@ describe('inventory (golden)', () => {
     const products = await asUser(PROV_BEN).get('/api/products')
     const probio = products.body.products.find((p: { sku: string }) => p.sku === SKU.PROBIO)
     expect(probio.available).toBe(5)
-    const benAdd2 = await asUser(PROV_BEN).post(`/api/orders/${ben}/lines`).send({ sku: SKU.PROBIO, qty: 1, unitPriceCents: 4000 })
+    const benAdd2 = await asUser(PROV_BEN).post(`/api/orders/${ben}/lines`).send({ sku: SKU.PROBIO, qty: 1, markupCents: markupFor(SKU.PROBIO, 4000) })
     expect(benAdd2.status).toBe(200)
   })
 

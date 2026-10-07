@@ -25,20 +25,21 @@ Demo logins (the picker stands in for sign-in; it carries a DEMO badge):
 | Patient | Dev Patel | Summit |
 | Cerbo Admin | Cerbo Admin | - |
 
-Seeded catalog (list prices are set by Cerbo Admin; providers adjust only through margin %):
+Seeded catalog. Cerbo sets only its cost; the provider types a dollar markup per unit and
+the patient pays cost + markup + the 0.75% fee (ADR-028). There is no list price.
 
-| Product | Cerbo cost | List price | Margin at list | Stock | Use |
-|---|---|---|---|---|---|
-| Magnesium Glycinate 120ct | $14.50 | $29.99 | 51.65% | 50 | main order |
-| Vitamin D3 + K2 | $11.25 | $24.99 | 54.98% | 40 | main order, margin floor |
-| Omega-3 Fish Oil 1000mg | $22.80 | $49.99 | 54.39% | 30 | post-fulfillment refund |
-| Probiotic 50B CFU | $26.75 | $42.99 | 37.77% | 5 | low stock |
-| Zinc Picolinate 30mg | $6.90 | $12.90 | 46.51% | 0 | out of stock |
+| Product | Cerbo cost | Stock | Use | Markup to type (patient pays) |
+|---|---|---|---|---|
+| Magnesium Glycinate 120ct | $14.50 | 50 | main order, recurring | $15.26 ($29.99) |
+| Vitamin D3 + K2 | $11.25 | 40 | main order, margin floor, decline | $13.55 ($24.99); $0 ($11.35); $1.78 ($13.13) |
+| Omega-3 Fish Oil 1000mg | $22.80 | 30 | post-fulfillment refund | $26.81 ($49.99) |
+| Probiotic 50B CFU | $26.75 | 5 | low stock | $15.91 ($42.99) |
+| Zinc Picolinate 30mg | $6.90 | 0 | out of stock | - |
 
 ## The 2-minute version
 
-1. **Provider (Dr. Ana Reyes) > New order > Cara Lopez.** Add Magnesium x2 and Vitamin D3 x1
-   at list price. Order summary: **Patient pays $84.97, COGS $40.25, fee $0.64, your net
+1. **Provider (Dr. Ana Reyes) > New order > Cara Lopez.** Add Magnesium x2 with markup
+   **$15.26** and Vitamin D3 x1 with markup **$13.55**. Order summary: **Patient pays $84.97, COGS $40.25, fee $0.64, your net
    margin $44.08.** Review & send; copy the pay link.
 2. **Open the pay link** (phone-sized window). One total, one button: pay **$84.97**. Receipt.
 3. **Provider > Orders > the order > audit.** Invariants: all checks pass. Ledger tab: the
@@ -51,8 +52,9 @@ Seeded catalog (list prices are set by Cerbo Admin; providers adjust only throug
 
 Switch to **Dr. Ana Reyes** > **New order** > choose **Cara Lopez** > **Start order**.
 
-1. Add **Magnesium Glycinate, quantity 2**, margin blank (list price $29.99).
-2. Add **Vitamin D3 + K2, quantity 1**, margin blank (list price $24.99).
+1. Add **Magnesium Glycinate, quantity 2**, **Your markup $15.26**. Before you add it the live
+   preview reads **Patient pays $29.99 per unit (cost $14.50 + you net $15.27 + fee $0.22)**.
+2. Add **Vitamin D3 + K2, quantity 1**, **Your markup $13.55** (patient pays **$24.99** per unit).
 
 The items table and Order summary read:
 
@@ -64,16 +66,17 @@ The items table and Order summary read:
 
 Talking points: the 0.75% fee is computed once on $84.97 (64c, half-up) and split 45/19 by
 largest remainder, so the lines add back exactly. Every line satisfies cost + fee + margin =
-total, and margin is never negative.
+total, and margin is never negative. The provider keeps the markup they typed: the order nets
+$44.08 against $44.07 of markup (2 x $15.26 + $13.55); the extra cent is round-up headroom.
 
-**Margin instead of price.** Type **50** in Margin % for Magnesium: the live preview shows
-**At 50%: $29.00 per unit ($0.99 below list)** before you add it. Price is never typed; a
-margin sets it from Cerbo's cost (`price = cost / (1 - margin)`, rounded up).
+**Price is never typed.** The provider enters a dollar markup; the server derives the price as
+cost + markup grossed up for the fee (`price = ceil((cost + markup) / (1 - 0.0075))`, a $0
+markup counted as 1 cent). The preview line is the server's own calculation, the same one the
+order uses.
 
-**Profit simulator** (below the items). Pick Magnesium, set **units per month to 10**: at list
-price you earn **$152.65 a month**; drag the margin to **40%** and it shows **$24.17 per unit,
-$94.89 a month**. Drag to **0%** and it warns the margin cannot cover the platform fee.
-Nothing is saved; every figure comes from the same calculation the order uses.
+**Change markup** on a line: on the Magnesium line click **Change markup**, type **$10.00** -
+the preview reads **Patient pays $24.69 per unit** (fee $0.19, you net $10.00). Apply it to show
+the line re-price, or Cancel to keep $15.26 for the rest of the walkthrough.
 
 Click **Review & send**. The dialog lists the items and **$84.97**, and says stock is reserved
 for 7 days. Confirm. The success card shows the **copyable patient pay link** (DEMO badge: in
@@ -86,9 +89,10 @@ In a new draft:
 - **Low stock.** Add **Probiotic, quantity 6**. Refused with "On-hand stock cannot meet this
   quantity (available: 5). Wait for restock or reduce quantity." Quantity 5 is accepted.
 - **Out of stock.** Zinc is listed but disabled ("Out of stock").
-- **Margin floor.** Add **Vitamin D3, margin 0** (price equals cost, $11.25). Refused: the
-  line's margin after the platform fee would be negative. With **margin 0.7** the price is
-  **$11.33** and it is accepted at exactly zero net margin. A provider can never sell at a loss.
+- **Margin floor.** Add **Vitamin D3, markup $0**. The patient pays **$11.35** (cost + fee + 1
+  cent of rounding headroom) and the provider nets **$0.01**. Because the price is always cost +
+  markup grossed up for the fee, a markup-priced line can never go below zero: a provider can
+  never sell at a loss (the `MARGIN_NEGATIVE` guard still exists for legacy lines, EVAL-04).
 
 Delete the draft from **Orders** (Delete asks for confirmation; drafts hold no stock).
 
@@ -105,14 +109,15 @@ Click **Pay $84.97**. Receipt with the amount, confirmation number and date paid
 - Paying twice from the same page returns the same payment (idempotency key per page load).
 
 **Decline (optional).** The gateway stub declines exactly $13.13. Build Vitamin D3 x1 with
-**margin 14.31** (price $13.13), send, pay: the page shows the decline and **Try again**; the
+**markup $1.78** (patient pays $13.13), send, pay: the page shows the decline and **Try again**; the
 order stays sent and nothing is posted.
 
 ## Act 4 - The audit: every cent traceable
 
 **Dr. Ana Reyes > Orders**, click the order row. The audit page shows the patient, status and
 amounts, and **Invariants: all checks pass**. Tabs:
-- **Money split:** each line's total, COGS, fee and net; totals from the order record.
+- **Money split:** each line's total, COGS, fee and net, plus the provider's **Markup / unit**
+  ($15.26 and $13.55); totals from the order record.
 - **Ledger:** the payment journal with Debit and Credit columns and a **Balanced** badge.
 - **Timeline:** draft, sent, paid. **Stock:** reserve at send, sale at pay.
 - **Checks:** each invariant in plain English, all passing.
@@ -153,12 +158,17 @@ settled, platform fees and net margin, all read from the ledger.
 
 ## Act 7 - Recurring orders (EVAL-11)
 
-**Dr. Ana Reyes > Recurring**: create a schedule for Cara Lopez, Magnesium x1, every 30 days.
-The card shows next run, per-cycle subtotal and the authorize link. Authorize as the patient
-(consent checkbox), then **Run cycle now**: a paid cycle at **fee $0.22, net $15.27**.
-On-hold stories: Probiotic x6 (out of stock), an unauthorized schedule, or a cost rise that
-makes margin negative. Each cycle is parked **On hold** with the reason and the fix, never
-charged at a loss.
+**Dr. Ana Reyes > Recurring**: create a schedule for Cara Lopez, Magnesium x1, **your markup
+$15.26**, every 30 days. The card shows next run, the per-cycle amount at today's cost ($29.99
+each, incl. your $15.26) and the authorize link. Authorize as the patient (consent checkbox; the
+copy says the amount is current and can change if product costs change), then **Run cycle
+now**: a paid cycle at **fee $0.22, net $15.27**.
+
+**A cost rise passes through** (EVAL-11d, set by a test helper; there is no cost editor in the
+UI): with Magnesium's cost raised to $30.00, the next cycle pays **$45.61** (fee $0.34) and the
+provider still nets **$15.27**. The patient pays the new cost; the provider keeps the markup.
+On-hold stories: Probiotic x6 (out of stock) or an unauthorized schedule. Each cycle is parked
+**On hold** with the reason and the fix, never charged at a loss.
 
 ## Act 8 - Cerbo Admin: proof and economics
 
@@ -174,15 +184,16 @@ charged at a loss.
 
 **Metrics:** turn on **Include synthetic demo data** (a "Demo data included" banner appears),
 group by **Provider**, and **Select** a provider to scope the whole report to them. Each row
-shows the provider's name and full id. Reconciliation reads **Pass**.
+shows the provider's name and full id. Reconciliation reads **Pass**. **Provider markup
+(settled)** shows the markup providers earned and the average per unit ("Set by providers, not
+Cerbo"); provider net margin is always at least that amount.
 
-**Inventory and pricing:** Catalog pricing shows cost, list price and margin at list. **Change
-price** on a product: enter a price and a reason, review the server's preview (new margin,
-difference, active recurring schedules affected), save. **History** shows who changed it and
-why; the history cannot be edited. A stale edit from a second window is refused. Stock restock
-is in its own Demo-only section.
+**Inventory:** Cerbo's unit cost and the shared stock pool; Cerbo Admin does not set a price
+or see a margin percent (ADR-028). Stock restock is in its own Demo-only section.
 
-**Operations:** look up any order, fulfill, refund (reason required), each with a confirmation.
+**Operations:** look up any order (each line lists the provider's markup per unit), fulfill,
+refund (reason required), each with a confirmation. The order audit shows the same markup in
+its **Markup / unit** column.
 **Payables:** a month can be closed only after it ends; closed statements are immutable.
 
 ## If something fails mid-demo

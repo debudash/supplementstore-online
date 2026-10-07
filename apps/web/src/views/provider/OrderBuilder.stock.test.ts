@@ -40,7 +40,7 @@ const draftQuote = {
   lines: [] as unknown[]
 }
 const products = [
-  { sku: 'PROBIO-50B', name: 'Probiotic 50B CFU', unitCogsCents: 2675, available: 2, active: true, listPriceCents: 4299, listMarginBps: 3777 }
+  { sku: 'PROBIO-50B', name: 'Probiotic 50B CFU', unitCogsCents: 2675, available: 2, active: true }
 ]
 
 beforeEach(() => {
@@ -67,6 +67,7 @@ describe('OrderBuilder - INSUFFICIENT_STOCK shows server remaining as N', () => 
 
     // Add PROBIO over availability -> server rejects, carrying its remaining headroom.
     await wrapper.find('select').setValue('PROBIO-50B')
+    await wrapper.find('[data-test="markup-input"]').setValue('10')
     await wrapper.find('form.add-line').trigger('submit')
     await flushPromises()
 
