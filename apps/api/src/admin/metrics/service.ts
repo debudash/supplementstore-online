@@ -234,6 +234,22 @@ export async function getAdminMetrics(db: Knex, opts: AdminMetricsOpts): Promise
     }
   }
 
+  // Display names for every provider id referenced in this response (additive lookup map,
+  // so existing shapes are unchanged): migration rows, the no-baseline list, and groups.
+  const ids = new Set<string>([
+    ...migration.providers.map((p) => p.providerId),
+    ...migration.noBaselineProviderIds,
+    ...(groupBy === 'provider' ? groups.map((g) => g.key) : [])
+  ])
+  const providerNames: Record<string, { providerName: string | null; practiceName: string | null }> = {}
+  if (ids.size > 0) {
+    const rows: Array<{ id: string; provider_name: string | null; practice_name: string | null }> = await db('providers as pv')
+      .leftJoin('practices as pc', 'pc.id', 'pv.practice_id')
+      .whereIn('pv.id', [...ids])
+      .select('pv.id', 'pv.name as provider_name', 'pc.name as practice_name')
+    for (const r of rows) providerNames[r.id] = { providerName: r.provider_name, practiceName: r.practice_name }
+  }
+
   return {
     period: { from: period.from, to: period.to },
     includeSynthetic,
@@ -241,6 +257,7 @@ export async function getAdminMetrics(db: Knex, opts: AdminMetricsOpts): Promise
     headline,
     reconciliation,
     migration,
-    groups
+    groups,
+    providerNames
   }
 }

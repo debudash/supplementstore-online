@@ -56,22 +56,28 @@ paths:
   /api/health:
     get:
       tags: [Health]
-      summary: Health check (DB connectivity)
-      description: 200 when the DB is reachable, 503 otherwise. No auth.
+      summary: Health and readiness (DB + seeded catalog)
+      description: |
+        The deploy readiness gate (Railway healthcheck and the CI post-deploy poll). 200 only
+        when the DB answers AND the product catalog is migrated and seeded. 503 `degraded`
+        when connected but the catalog is missing or empty; 503 `error` when the DB is down.
+        No auth.
       security: []
       responses:
         "200":
-          description: Service healthy
+          description: Service ready
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HealthResponse" }
-              example: { status: ok, db: { connected: true } }
+              example: { status: ok, db: { connected: true }, catalog: { ready: true, products: 5 } }
         "503":
-          description: Database unreachable
+          description: Not ready - database unreachable (error) or catalog missing/empty (degraded)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HealthResponse" }
-              example: { status: error, db: { connected: false, error: "connection refused" } }
+              examples:
+                degraded: { value: { status: degraded, db: { connected: true }, catalog: { ready: false, products: 0 } } }
+                error: { value: { status: error, db: { connected: false, error: "connection refused" } } }
 
   /api/products:
     get:
@@ -168,7 +174,7 @@ paths:
       parameters:
         - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/OrderStatus" } }
         - { name: from, in: query, required: false, description: "ISO timestamp lower bound on created_at", schema: { type: string } }
-        - { name: to, in: query, required: false, description: "ISO timestamp upper bound on created_at", schema: { type: string } }
+        - { name: to, in: query, required: false, description: "Upper bound on created_at. A date-only value (YYYY-MM-DD) includes that whole UTC day; a full ISO timestamp is inclusive as given.", schema: { type: string } }
       responses:
         "200":
           description: Order summaries
@@ -573,6 +579,29 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/pay/{token}/practice:
+    get:
+      tags: [Patient - pay (token)]
+      summary: Practice and provider names for a pay link
+      description: Token-gated like the pay view; names only. Kept separate so the pay view's whitelist is unchanged.
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Names, content: { application/json: { schema: { $ref: "#/components/schemas/PatientPracticeView" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/pay/schedule/{token}/practice:
+    get:
+      tags: [Patient - pay (token)]
+      summary: Practice and provider names for a recurring authorize link
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Names, content: { application/json: { schema: { $ref: "#/components/schemas/PatientPracticeView" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/pay/schedule/{token}:
     get:
       tags: [Patient - pay (token)]
@@ -838,7 +867,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
-          description: Month already closed
+          description: ALREADY_CLOSED (month already closed) or PERIOD_NOT_ENDED (the month has not ended yet; details.endsAt)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -1059,6 +1088,12 @@ components:
           properties:
             connected: { type: boolean }
             error: { type: string }
+        catalog:
+          type: object
+          description: Present when the DB is reachable
+          properties:
+            ready: { type: boolean }
+            products: { type: integer }
 
     ProductView:
       type: object
@@ -1374,6 +1409,14 @@ components:
         paymentId: { type: string, format: uuid }
         status: { type: string, enum: [paid] }
         totalCents: { type: integer, description: 'Total charged, INTEGER CENTS' }
+        paidAt: { type: string, format: date-time, description: When the payment was recorded; same value on an idempotent replay }
+
+    PatientPracticeView:
+      type: object
+      description: Who the patient is paying. Separate from the pay view so its strict whitelist is unchanged.
+      properties:
+        practiceName: { type: string, nullable: true }
+        providerName: { type: string, nullable: true }
 
     PatientOrderListItem:
       type: object

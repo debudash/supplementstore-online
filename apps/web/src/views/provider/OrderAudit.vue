@@ -51,7 +51,9 @@ async function load(): Promise<void> {
   audit.value = null
   try {
     audit.value = await apiRequest<AuditResponse>(`/orders/${orderId.value}/audit`)
-    void loadPatientName(audit.value.order.patientId)
+    // The audit carries the patient name; fall back to the roster only if it is absent.
+    if (audit.value.order.patientName) patientName.value = audit.value.order.patientName
+    else void loadPatientName(audit.value.order.patientId)
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound.value = true
     else error.value = err instanceof ApiError ? err.message : 'Failed to load the audit.'

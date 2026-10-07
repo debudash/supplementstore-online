@@ -6,7 +6,7 @@
 import { Router, type Request, type Response } from 'express'
 import { db } from '../db/knex'
 import { createSeams } from '../seams'
-import { getPayView, pay } from './service'
+import { getPayPractice, getPayView, pay } from './service'
 import { handlePaymentError } from './errors'
 import { getScheduleAuthorizeView, authorizeSchedule } from '../recurring/service'
 import { handlePatientError } from '../recurring/errors'
@@ -16,6 +16,23 @@ import { handlePatientError } from '../recurring/errors'
 const seams = createSeams()
 
 export const payRouter: Router = Router()
+
+// Practice + provider names for a pay / authorize link. A SEPARATE response so the pay
+// view's strict whitelist (EVAL-12, RT-10) is untouched. Names only.
+payRouter.get('/schedule/:token/practice', async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(await getPayPractice(db, req.params.token, 'schedule'))
+  } catch (err) {
+    handlePaymentError(res, err)
+  }
+})
+payRouter.get('/:token/practice', async (req: Request, res: Response) => {
+  try {
+    res.status(200).json(await getPayPractice(db, req.params.token, 'order'))
+  } catch (err) {
+    handlePaymentError(res, err)
+  }
+})
 
 // Recurring schedule authorization (T9, FR-12 AC2). Token route, patient-safe whitelist
 // (no economics). Delegates to the recurring service; T0/T4 reserved these two stubs.

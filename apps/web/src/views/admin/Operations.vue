@@ -217,7 +217,17 @@ const rawBody = computed(() => (result.value?.ok ? JSON.stringify(result.value.b
         <dl class="facts">
           <div><dt>Order total</dt><dd><Money :cents="order.subtotalCents" strong /></dd></div>
           <div><dt>Platform fee</dt><dd>{{ formatBps(order.feeBps) }}</dd></div>
-          <div><dt>Patient</dt><dd><code :title="order.patientId">{{ order.patientId }}</code></dd></div>
+          <div>
+            <dt>Patient</dt>
+            <dd>
+              <span v-if="order.patientName" :title="order.patientId">{{ order.patientName }}</span>
+              <code v-else :title="order.patientId">{{ order.patientId }}</code>
+            </dd>
+          </div>
+          <div v-if="order.providerName">
+            <dt>Provider</dt>
+            <dd>{{ order.providerName }}<span v-if="order.practiceName" class="subtle"> · {{ order.practiceName }}</span></dd>
+          </div>
           <div><dt>Paid</dt><dd>{{ fmtDate(order.paidAt) }}</dd></div>
           <div><dt>Fulfilled</dt><dd>{{ fmtDate(order.fulfilledAt) }}</dd></div>
           <div v-if="order.refundedAt"><dt>Refunded</dt><dd>{{ fmtDate(order.refundedAt) }}</dd></div>

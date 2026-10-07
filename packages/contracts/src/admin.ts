@@ -122,6 +122,9 @@ export interface AdminMetricsResponse {
   migration: MigrationReport
   /** Per-month or per-provider breakdown; empty when groupBy = none. */
   groups: MetricsGroup[]
+  /** Display names for every provider id referenced above (migration rows, the
+   *  no-baseline list, provider groups). Ids without a provider row are absent. */
+  providerNames: Record<string, { providerName: string | null; practiceName: string | null }>
 }
 
 /** One rejected CSV row (RT-12): the 1-based row number, the raw line, and why. */

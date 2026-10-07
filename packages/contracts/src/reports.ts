@@ -58,6 +58,9 @@ export interface SalesReport {
 /** One order's net contribution to the payable movement in the period (FR-11 AC2). */
 export interface PayableContributingOrder {
   orderId: string
+  /** The order's patient (the provider's own); null only if the order row is missing. */
+  patientId: string | null
+  patientName: string | null
   /** Margins credited to the provider in the period for this order. */
   creditsCents: number
   /** Margin reversals + fee retentions debited in the period for this order. */
@@ -106,6 +109,9 @@ export interface PayableStatement {
   closingCents: number
   closedAt: string
   closedBy: string | null
+  /** Display names (admin views); null if the record is missing. */
+  providerName?: string | null
+  practiceName?: string | null
 }
 
 /** POST /api/admin/payables/close request body (FR-11 AC3). */

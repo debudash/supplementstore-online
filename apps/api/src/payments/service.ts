@@ -16,7 +16,7 @@ import { assertSafeInteger } from '../db/types'
 import { postPaymentJournal } from '../ledger'
 import { requireString } from '../orders/validation'
 import { toPatientView } from './serializer'
-import type { PatientPayView, PayResult } from './types'
+import type { PatientPayView, PatientPracticeView, PayResult } from './types'
 import {
   notFound,
   orderNotPayable,
@@ -35,6 +35,7 @@ interface OrderRow {
   is_synthetic: boolean
   subtotal_cents: number | null
   reservation_expires_at: Date | null
+  paid_at: Date | null
 }
 
 interface LineRow {
@@ -55,6 +56,7 @@ interface PaymentRow {
   gateway_ref: string | null
   amount_cents: number
   is_synthetic: boolean
+  created_at: Date | null
 }
 
 /** GET /api/pay/:token - the patient-safe view (FR-5 AC1). 404 for an unknown token. */
@@ -116,7 +118,9 @@ export async function pay(
       const existing = await trx<PaymentRow>('payments').where('order_id', order.id).first()
       if (existing && existing.idempotency_key === idempotencyKey) {
         // Same key replayed on a paid order -> the original result, no second charge.
-        return { paymentId: existing.id, status: 'paid', totalCents: existing.amount_cents }
+        // orders.paid_at is set from the same clock value the first pay returned.
+        const paidAt = order.paid_at ?? existing.created_at ?? now
+        return { paymentId: existing.id, status: 'paid', totalCents: existing.amount_cents, paidAt: new Date(paidAt).toISOString() }
       }
       throw alreadyPaid()
     }
@@ -148,8 +152,30 @@ export async function pay(
       amountCents,
       now
     })
-    return { paymentId: payment.id, status: 'paid', totalCents: payment.amount_cents }
+    return { paymentId: payment.id, status: 'paid', totalCents: payment.amount_cents, paidAt: now.toISOString() }
   })
+}
+
+/**
+ * GET /api/pay/:token/practice and /api/pay/schedule/:token/practice - the practice and
+ * provider names for a pay or authorize link, so the patient knows who they are paying.
+ * Token-gated like the pay view; returns names only. 404 for an unknown token.
+ */
+export async function getPayPractice(
+  db: Knex,
+  token: string,
+  kind: 'order' | 'schedule' = 'order'
+): Promise<PatientPracticeView> {
+  const row =
+    kind === 'order'
+      ? await db('orders').where('pay_token', token).first('provider_id', 'practice_id')
+      : await db('recurring_schedules').where('pay_token', token).first('provider_id', 'practice_id')
+  if (!row) throw notFound(kind === 'order' ? 'No order for this pay link' : 'No schedule for this link')
+  const [provider, practice] = await Promise.all([
+    db('providers').where({ id: row.provider_id }).first('name'),
+    db('practices').where({ id: row.practice_id }).first('name')
+  ])
+  return { practiceName: practice?.name ?? null, providerName: provider?.name ?? null }
 }
 
 export interface RecordPaymentInput {

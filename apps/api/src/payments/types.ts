@@ -24,4 +24,16 @@ export interface PayResult {
   paymentId: string
   status: 'paid'
   totalCents: number
+  /** When the payment was recorded (ISO). Same value on an idempotent replay. */
+  paidAt: string
+}
+
+/**
+ * GET /api/pay/:token/practice - who the patient is paying. Deliberately a SEPARATE
+ * response from PatientPayView so that view's strict whitelist (EVAL-12, RT-10) is
+ * unchanged. Names only; no ids, economics or contact details.
+ */
+export interface PatientPracticeView {
+  practiceName: string | null
+  providerName: string | null
 }
