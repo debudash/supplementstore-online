@@ -20,6 +20,10 @@ const props = defineProps<{
   busy: boolean
   /** Error from the last add attempt (INSUFFICIENT_STOCK / MARGIN_NEGATIVE / other). */
   error: string | null
+  /** Quantity already on this draft per SKU (from the quote). Adding a SKU SUMS with
+   *  this (FR-1 AC2), so showing it explains why availability can be "short" even when
+   *  the catalog shows stock: the units already on the order count against it. */
+  onOrder?: Record<string, number>
 }>()
 
 const emit = defineEmits<{
@@ -34,6 +38,9 @@ const inputError = ref<string | null>(null)
 const selectedProduct = computed(() => props.products.find((p) => p.sku === sku.value) ?? null)
 // The catalog list price for the chosen SKU (null only when no SKU is selected yet).
 const selectedListPrice = computed(() => selectedProduct.value?.listPriceCents ?? null)
+// How many of the selected SKU are ALREADY on this draft (display only - the quote's
+// line qty, not a stock figure). Adding more sums with this.
+const alreadyOnOrder = computed(() => (sku.value ? (props.onOrder?.[sku.value] ?? 0) : 0))
 
 function submit(): void {
   inputError.value = null
@@ -119,9 +126,15 @@ function submit(): void {
       <button type="submit" class="btn-primary" :disabled="busy">Add to order</button>
     </div>
 
+    <p v-if="alreadyOnOrder > 0" class="on-order" role="status" data-test="already-on-order">
+      Already on this order: {{ alreadyOnOrder }}. Adding more increases that line's quantity
+      (and both count against stock).
+    </p>
+
     <p class="hint">
       The price starts from the catalog value. Set a margin % to have the server re-derive
       the price - the new figure appears on the line and in the quote. You never type a price.
+      Leave margin blank to use the catalog price.
     </p>
 
     <p v-if="inputError" class="inline-error" role="alert">{{ inputError }}</p>
@@ -173,6 +186,12 @@ function submit(): void {
   color: var(--muted);
   font-size: 0.82em;
   margin: 0.6rem 0 0;
+}
+.on-order {
+  color: var(--muted);
+  font-size: 0.82em;
+  margin: 0.6rem 0 0;
+  font-weight: 600;
 }
 .inline-error {
   color: var(--danger);

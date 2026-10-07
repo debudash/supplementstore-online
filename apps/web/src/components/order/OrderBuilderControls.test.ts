@@ -55,6 +55,18 @@ describe('AddLineForm - price read-only, margin editable, demo-badged', () => {
     expect(wrapper.findAll('.demo-badge').length).toBeGreaterThanOrEqual(2)
   })
 
+  it('surfaces "already on this order: N" for a SKU already on the draft (no arithmetic)', async () => {
+    const wrapper = mount(AddLineForm, {
+      props: { products, busy: false, error: null, onOrder: { 'MAG-GLY-120': 3 } }
+    })
+    // Nothing shown until the SKU with existing qty is selected.
+    expect(wrapper.find('[data-test="already-on-order"]').exists()).toBe(false)
+    await wrapper.find('select').setValue('MAG-GLY-120')
+    const note = wrapper.find('[data-test="already-on-order"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('Already on this order: 3')
+  })
+
   it('sends the catalog price (not typed) when no margin is entered', async () => {
     const wrapper = mount(AddLineForm, { props: { products, busy: false, error: null } })
     await wrapper.find('select').setValue('MAG-GLY-120')

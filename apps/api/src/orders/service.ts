@@ -286,10 +286,16 @@ export async function addLine(
     }
 
     // Add-to-cart stock gate (FR-3 AC1): available must cover the cart total for this SKU.
+    // Because adding SUMS with what is already on the order (FR-1 AC2), the remaining
+    // headroom the provider can still add is `available - already on the order`, clamped
+    // at 0. We surface it as `remaining` so the UI can show the honest "how many more"
+    // number without doing stock arithmetic in the browser (the server owns stock truth).
     const available = availableOf(product)
     if (available < mergedQty) {
+      const remaining = Math.max(0, available - (existing?.qty ?? 0))
       throw new ApiError('INSUFFICIENT_STOCK', 'Not enough stock to satisfy this quantity', {
-        available
+        available,
+        remaining
       })
     }
 
