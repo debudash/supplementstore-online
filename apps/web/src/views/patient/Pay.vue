@@ -17,7 +17,7 @@
 import { onMounted, ref, computed, watch, watchEffect, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
-import type { PatientPayView, PayResult, PayRequest } from '@cerbo/contracts'
+import type { PatientPayView, PayResult, PayRequest, PatientPracticeView } from '@cerbo/contracts'
 import { formatCents } from './format'
 import {
   phaseForStatus,
@@ -40,6 +40,13 @@ const phase = ref<PayPhase>('loading')
 const view = ref<PatientPayView | null>(null)
 const receipt = ref<PayResult | null>(null)
 const paidOn = ref('')
+// Who the patient is paying (separate token endpoint; the pay view's whitelist is unchanged).
+const practice = ref<PatientPracticeView | null>(null)
+const payeeLine = computed(() => {
+  const p = practice.value
+  if (!p || (!p.providerName && !p.practiceName)) return ''
+  return [p.providerName, p.practiceName].filter(Boolean).join(' · ')
+})
 const submitting = ref(false)
 const declined = ref(false)
 const heading = ref<HTMLHeadingElement | null>(null)
@@ -92,11 +99,22 @@ watch(phase, async () => {
   heading.value?.focus()
 })
 
+/** Best-effort: the page works without it, so a failure is silent. */
+async function loadPractice(): Promise<void> {
+  try {
+    const p = await apiRequest<PatientPracticeView>(`/pay/${token}/practice`, { auth: false })
+    practice.value = p && typeof p === 'object' && ('practiceName' in p || 'providerName' in p) ? p : null
+  } catch {
+    practice.value = null
+  }
+}
+
 async function load(): Promise<void> {
   phase.value = 'loading'
   try {
     view.value = await apiRequest<PatientPayView>(`/pay/${token}`, { auth: false })
     phase.value = phaseForStatus(view.value.status)
+    void loadPractice() // only once the link is known to be valid
   } catch (err) {
     phase.value = err instanceof ApiError && err.code === 'NOT_FOUND' ? 'notFound' : 'error'
   }
@@ -109,7 +127,9 @@ async function pay(): Promise<void> {
   try {
     const body: PayRequest = { idempotencyKey }
     receipt.value = await apiRequest<PayResult>(`/pay/${token}`, { method: 'POST', body, auth: false })
-    paidOn.value = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    // The server's payment time (exact, and the same on a retried request).
+    const paidAt = receipt.value?.paidAt ? new Date(receipt.value.paidAt) : new Date()
+    paidOn.value = paidAt.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
     phase.value = 'paid'
   } catch (err) {
     if (err instanceof ApiError && err.code === 'PAYMENT_DECLINED') {
@@ -138,6 +158,7 @@ onMounted(load)
     <Card :tone="tone" class="pay-card" :data-phase="phase">
       <span v-if="isTerminal" class="state-icon" :class="`state-icon-${tone}`" aria-hidden="true">{{ icon }}</span>
 
+      <p v-if="payeeLine && (phase === 'payable' || phase === 'paid')" class="payee" data-testid="payee">{{ payeeLine }}</p>
       <p v-if="phase === 'payable' && view?.patientFirstName" class="greeting">Hi {{ view.patientFirstName }},</p>
       <h1 ref="heading" tabindex="-1" class="pay-title" :class="{ centered: isTerminal }">{{ title }}</h1>
 
@@ -226,6 +247,14 @@ onMounted(load)
 }
 .pay-card {
   padding: var(--space-6);
+}
+.payee {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--brand-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: var(--space-3);
 }
 .greeting {
   font-weight: 600;

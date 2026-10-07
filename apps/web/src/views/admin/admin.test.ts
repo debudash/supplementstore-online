@@ -170,8 +170,10 @@ describe('Admin demo data - reset', () => {
 })
 
 describe('Admin payables - close month', () => {
-  it('confirms with the provider count before closing', async () => {
+  it('confirms with the provider count before closing a past month', async () => {
     const w = mount(Payables)
+    await flushPromises()
+    await w.find('[data-testid="payables-month"]').setValue('2026-09')
     await flushPromises()
     await w.find('[data-testid="payables-close"]').trigger('click')
     expect(posts()).toHaveLength(0)
@@ -183,11 +185,12 @@ describe('Admin payables - close month', () => {
     expect(apiRequest.mock.calls.find(([p]) => p === '/admin/payables/close')?.[1]).toMatchObject({ method: 'POST' })
   })
 
-  it('warns when the month is still in progress', async () => {
+  it('does not offer to close a month that is still in progress', async () => {
     const w = mount(Payables)
     await flushPromises()
-    await w.find('[data-testid="payables-close"]').trigger('click')
-    // The default month is the current UTC month.
+    // The default month is the current UTC month: Close is disabled and the reason shown.
+    expect(w.find('[data-testid="payables-close"]').attributes('disabled')).toBeDefined()
     expect(w.find('[data-testid="close-in-progress"]').text()).toContain('This month is still in progress')
+    expect(posts()).toHaveLength(0)
   })
 })

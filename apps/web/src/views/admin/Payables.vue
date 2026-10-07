@@ -8,7 +8,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
 import type { AdminPayablesResponse, ClosePayablesResult } from '@cerbo/contracts'
-import DemoBadge from '../../components/DemoBadge.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Card from '../../components/ui/Card.vue'
 import Money from '../../components/ui/Money.vue'
@@ -112,7 +111,8 @@ onMounted(load)
         <UiButton :busy="loading" busy-label="Loading..." :disabled="closing" data-testid="payables-refresh" @click="load">Refresh</UiButton>
         <UiButton
           variant="primary"
-          :disabled="loading || closing || !data || data.closed"
+          :disabled="loading || closing || !data || data.closed || inProgress"
+          :aria-describedby="inProgress && !data?.closed ? 'close-in-progress' : undefined"
           data-testid="payables-close"
           @click="confirmOpen = true"
         >
@@ -120,6 +120,9 @@ onMounted(load)
         </UiButton>
       </div>
       <p v-if="data?.closed" class="subtle closed-note">This month is closed. Its statements are immutable.</p>
+      <p v-else-if="inProgress" id="close-in-progress" class="subtle closed-note" data-testid="close-in-progress">
+        This month is still in progress. It can be closed once it ends, so its statements are complete.
+      </p>
     </Card>
 
     <div class="section" aria-live="polite">
@@ -149,7 +152,13 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-for="s in data.statements" :key="s.providerId">
-              <td data-label="Provider"><code :title="s.providerId">{{ shortId(s.providerId) }}</code></td>
+              <td data-label="Provider">
+                <span v-if="s.providerName" class="who">
+                  <strong>{{ s.providerName }}</strong>
+                  <span class="subtle">{{ s.practiceName }}</span>
+                </span>
+                <code v-else :title="s.providerId">{{ shortId(s.providerId) }}</code>
+              </td>
               <td data-label="Opening" class="num"><Money :cents="s.openingCents" /></td>
               <td data-label="Credits" class="num"><Money :cents="s.creditsCents" /></td>
               <td data-label="Debits" class="num">
@@ -175,10 +184,6 @@ onMounted(load)
       <p data-testid="close-consequence">
         Creates immutable statements for {{ providerCount }} provider{{ providerCount === 1 ? '' : 's' }}. This cannot be undone.
       </p>
-      <UiAlert v-if="inProgress" tone="warning" title="This month is still in progress" data-testid="close-in-progress">
-        Closing now freezes statements before {{ monthLabel }} has ended.
-        <DemoBadge reason="Demo affordance - the server lets you close a month before it ends so a demo can show statements. In production the close runs after month end." />
-      </UiAlert>
     </ConfirmDialog>
   </section>
 </template>
@@ -207,6 +212,11 @@ onMounted(load)
 }
 .section:empty {
   margin-top: 0;
+}
+.who {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.3;
 }
 @media (max-width: 480px) {
   .toolbar > button {

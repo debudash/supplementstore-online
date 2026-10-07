@@ -47,10 +47,15 @@ export async function apiRequest<T = unknown>(path: string, opts: RequestOptions
 }
 
 export interface HealthResponse {
-  status: string
+  /** 'ok' (200), 'degraded' (503: DB up but catalog missing/empty), 'error' (503: DB down). */
+  status: 'ok' | 'degraded' | 'error' | string
   db: { connected: boolean; error?: string }
+  catalog?: { ready: boolean; products: number }
 }
 
-export function getHealth(): Promise<HealthResponse> {
-  return apiRequest<HealthResponse>('/health', { auth: false })
+/** Health is read even on 503, because its body says WHY the system is not ready. */
+export async function getHealth(): Promise<HealthResponse> {
+  const res = await fetch('/api/health')
+  const text = await res.text()
+  return (text ? JSON.parse(text) : { status: 'error', db: { connected: false } }) as HealthResponse
 }

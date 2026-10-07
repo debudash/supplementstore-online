@@ -50,6 +50,9 @@ const rangeError = computed<string | null>(() => {
 
 /** Provider ids are UUIDs; show a short prefix (full id on hover). */
 const shortId = (id: string): string => (id.length > 10 ? id.slice(0, 8) : id)
+/** Provider display name from the response's providerNames map (falls back to a short id). */
+const providerName = (id: string): string | null => data.value?.providerNames?.[id]?.providerName ?? null
+const practiceName = (id: string): string | null => data.value?.providerNames?.[id]?.practiceName ?? null
 
 // Only the newest request may write the result, so a slow earlier response never
 // overwrites a later one when controls change quickly.
@@ -227,7 +230,13 @@ onMounted(load)
             </thead>
             <tbody>
               <tr v-for="p in data.migration.providers" :key="p.providerId">
-                <td data-label="Provider"><code :title="p.providerId">{{ shortId(p.providerId) }}</code></td>
+                <td data-label="Provider">
+                  <span v-if="providerName(p.providerId)" class="who">
+                    <strong>{{ providerName(p.providerId) }}</strong>
+                    <span class="subtle">{{ practiceName(p.providerId) }}</span>
+                  </span>
+                  <code v-else :title="p.providerId">{{ shortId(p.providerId) }}</code>
+                </td>
                 <td data-label="Baseline monthly" class="num"><Money :cents="p.baselineMonthlyGmvCents" /></td>
                 <td data-label="In-house GMV" class="num"><Money :cents="p.inHouseGmvCents" /></td>
                 <td data-label="Migration" class="num">{{ formatBps(p.migrationBps) }}</td>
@@ -243,7 +252,10 @@ onMounted(load)
         </div>
         <p v-if="data.migration.noBaselineProviderIds.length > 0" class="notice small">
           Providers with in-house activity but no baseline (left out of migration):
-          <code v-for="id in data.migration.noBaselineProviderIds" :key="id" :title="id" class="id-chip">{{ shortId(id) }}</code>
+          <template v-for="(id, i) in data.migration.noBaselineProviderIds" :key="id">
+            <span v-if="providerName(id)">{{ providerName(id) }}{{ i < data.migration.noBaselineProviderIds.length - 1 ? ', ' : '' }}</span>
+            <code v-else :title="id" class="id-chip">{{ shortId(id) }}</code>
+          </template>
         </p>
       </Card>
 
@@ -264,7 +276,13 @@ onMounted(load)
             <tbody>
               <tr v-for="g in data.groups" :key="g.key">
                 <td :data-label="data.groupBy === 'month' ? 'Month' : 'Provider'">
-                  <code v-if="data.groupBy === 'provider'" :title="g.key">{{ shortId(g.key) }}</code>
+                  <template v-if="data.groupBy === 'provider'">
+                    <span v-if="providerName(g.key)" class="who">
+                      <strong>{{ providerName(g.key) }}</strong>
+                      <span class="subtle">{{ practiceName(g.key) }}</span>
+                    </span>
+                    <code v-else :title="g.key">{{ shortId(g.key) }}</code>
+                  </template>
                   <template v-else>{{ g.key }}</template>
                 </td>
                 <td data-label="GMV" class="num"><Money :cents="g.block.gmvCents" /></td>
@@ -414,5 +432,10 @@ input.switch:focus-visible {
 }
 .id-chip {
   margin-right: var(--space-1);
+}
+.who {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.3;
 }
 </style>

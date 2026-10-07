@@ -22,18 +22,19 @@ const tabs = computed(() =>
 const ROLE_LABEL: Record<string, string> = { provider: 'Provider', patient: 'Patient', cerbo_admin: 'Cerbo Admin' }
 const roleLabel = computed(() => (role.value ? ROLE_LABEL[role.value] : ''))
 
-type Health = 'checking' | 'ok' | 'db-down' | 'unreachable'
+type Health = 'checking' | 'ok' | 'degraded' | 'db-down' | 'unreachable'
 const health = ref<Health>('checking')
 const HEALTH_TEXT: Record<Health, string> = {
   checking: 'Checking system...',
   ok: 'System online',
+  degraded: 'Catalog not ready',
   'db-down': 'Database down',
   unreachable: 'API unreachable'
 }
 onMounted(async () => {
   try {
     const h = await getHealth()
-    health.value = h.db.connected ? 'ok' : 'db-down'
+    health.value = !h.db?.connected ? 'db-down' : h.status === 'ok' ? 'ok' : 'degraded'
   } catch {
     health.value = 'unreachable'
   }
@@ -215,6 +216,13 @@ watch(
 .health-db-down,
 .health-unreachable {
   color: var(--danger);
+  font-weight: 650;
+}
+.health-degraded .dot {
+  background: var(--warning);
+}
+.health-degraded {
+  color: var(--warning);
   font-weight: 650;
 }
 .content {

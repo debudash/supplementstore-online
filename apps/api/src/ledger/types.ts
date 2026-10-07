@@ -16,6 +16,10 @@ export interface AuditOrder {
   providerId: string
   practiceId: string
   patientId: string
+  /** Display names (provider/admin audit only). Null if the record is missing. */
+  patientName: string | null
+  providerName: string | null
+  practiceName: string | null
   feeBps: number
   subtotalCents: number | null
   cogsCents: number | null

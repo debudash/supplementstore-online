@@ -48,4 +48,15 @@ export interface PayResult {
   paymentId: string
   status: Extract<OrderStatus, 'paid'>
   totalCents: number
+  /** When the payment was recorded (ISO); same value on an idempotent replay. */
+  paidAt: string
+}
+
+/**
+ * GET /api/pay/:token/practice and /api/pay/schedule/:token/practice: who the patient
+ * is paying. Separate from PatientPayView so that view's strict whitelist is unchanged.
+ */
+export interface PatientPracticeView {
+  practiceName: string | null
+  providerName: string | null
 }

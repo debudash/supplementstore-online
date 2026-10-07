@@ -44,17 +44,31 @@ export function createApp(deps: AppDeps): Express {
   const app = express()
   app.use(express.json())
 
-  // Health (FR-17 AC2): 200 with DB connectivity status; 503 if the DB is down.
+  // Health (FR-17 AC2) doubles as the deploy readiness gate (Railway healthcheck + the CI
+  // post-deploy poll). 200 only when the DB answers AND the catalog is migrated and
+  // seeded; 503 'degraded' when connected but the catalog is missing or empty (e.g. an
+  // unmigrated or wiped database), 503 'error' when the DB is unreachable. Boot migrates
+  // and seeds before listening, so a healthy deploy is never reported as degraded.
   app.get('/api/health', async (_req: Request, res: Response) => {
     try {
       await db.raw('select 1')
-      res.status(200).json({ status: 'ok', db: { connected: true } })
     } catch (err) {
-      res.status(503).json({
-        status: 'error',
-        db: { connected: false, error: (err as Error).message }
-      })
+      res.status(503).json({ status: 'error', db: { connected: false, error: (err as Error).message } })
+      return
     }
+    let products = 0
+    try {
+      const result = await db.raw('select count(*)::int as n from products')
+      products = Number(result?.rows?.[0]?.n ?? 0)
+    } catch {
+      products = 0 // products table missing: migrations have not run
+    }
+    const ready = products > 0
+    res.status(ready ? 200 : 503).json({
+      status: ready ? 'ok' : 'degraded',
+      db: { connected: true },
+      catalog: { ready, products }
+    })
   })
 
   const auth = demoUser(loadActor)

@@ -11,7 +11,7 @@ import type {
   AdminPayablesResponse
 } from '@cerbo/contracts'
 import { parseBigIntSafe } from '../db/types'
-import { alreadyClosed } from './errors'
+import { alreadyClosed, periodNotEnded } from './errors'
 import { resolveReportPeriod, resolveMonth, type ResolvedPeriod } from './period'
 import {
   queryGmvCents,
@@ -71,11 +71,26 @@ export async function getPayableReport(
   const includeSynthetic = opts.includeSynthetic ?? false
   const scope: ReportScope = { providerId, period, includeSynthetic }
 
-  const [openingCents, movement, contributingOrders] = await Promise.all([
+  const [openingCents, movement, contributions] = await Promise.all([
     queryPayableBalanceBefore(db, providerId, period.startTs, includeSynthetic),
     queryPayableMovement(db, scope),
     queryPayableContributingOrders(db, scope)
   ])
+
+  // Patient display names for the contributing orders (the provider's own patients).
+  const orderIds = contributions.map((c) => c.orderId).filter(Boolean)
+  const patientRows: Array<{ id: string; patient_id: string; name: string | null }> = orderIds.length
+    ? await db('orders as o')
+        .leftJoin('patients as p', 'p.id', 'o.patient_id')
+        .whereIn('o.id', orderIds)
+        .select('o.id', 'o.patient_id', 'p.name')
+    : []
+  const byOrder = new Map(patientRows.map((r) => [r.id, r]))
+  const contributingOrders = contributions.map((c) => ({
+    ...c,
+    patientId: byOrder.get(c.orderId)?.patient_id ?? null,
+    patientName: byOrder.get(c.orderId)?.name ?? null
+  }))
 
   return {
     period: { from: period.from, to: period.to },
@@ -101,11 +116,15 @@ interface StatementRow {
   closing_cents: string | number
   closed_at: Date | string
   closed_by: string | null
+  provider_name?: string | null
+  practice_name?: string | null
 }
 
 /** Map a payable_statements DB row to the contract shape (bigint cents -> safe int). */
 function toStatement(r: StatementRow): PayableStatement {
   return {
+    providerName: r.provider_name ?? null,
+    practiceName: r.practice_name ?? null,
     id: r.id,
     providerId: r.provider_id,
     practiceId: r.practice_id,
@@ -122,19 +141,24 @@ function toStatement(r: StatementRow): PayableStatement {
 
 /** Select statement columns with dates as text so pg date parsing never shifts them. */
 function selectStatements(db: Knex) {
-  return db('payable_statements').select(
-    'id',
-    'provider_id',
-    'practice_id',
-    db.raw(`to_char(period_start, 'YYYY-MM-DD') as period_start`),
-    db.raw(`to_char(period_end, 'YYYY-MM-DD') as period_end`),
-    'opening_cents',
-    'credits_cents',
-    'debits_cents',
-    'closing_cents',
-    'closed_at',
-    'closed_by'
-  )
+  return db('payable_statements')
+    .leftJoin('providers as pv', 'pv.id', 'payable_statements.provider_id')
+    .leftJoin('practices as pc', 'pc.id', 'payable_statements.practice_id')
+    .select(
+      'payable_statements.id',
+      'payable_statements.provider_id',
+      'payable_statements.practice_id',
+      db.raw(`to_char(payable_statements.period_start, 'YYYY-MM-DD') as period_start`),
+      db.raw(`to_char(payable_statements.period_end, 'YYYY-MM-DD') as period_end`),
+      'payable_statements.opening_cents',
+      'payable_statements.credits_cents',
+      'payable_statements.debits_cents',
+      'payable_statements.closing_cents',
+      'payable_statements.closed_at',
+      'payable_statements.closed_by',
+      'pv.name as provider_name',
+      'pc.name as practice_name'
+    )
 }
 
 /**
@@ -168,9 +192,15 @@ async function computeStatementFigures(
 export async function closePayables(
   db: Knex,
   closedBy: string,
-  month: string
+  month: string,
+  now: Date = new Date()
 ): Promise<ClosePayablesResult> {
   const period = resolveMonth(month)
+  // Statements are immutable (ADR-016): closing a month that has not ended would freeze
+  // an incomplete period, so it is refused until the month is over.
+  if (period.endTsExclusive.getTime() > now.getTime()) {
+    throw periodNotEnded(month, period.endTsExclusive.toISOString())
+  }
 
   return db.transaction(async (trx) => {
     const providers = await queryProvidersWithPayableActivity(trx, period.endTsExclusive)
@@ -227,8 +257,8 @@ export async function getAdminPayables(db: Knex, month: string): Promise<AdminPa
   const period = resolveMonth(month)
 
   const stored = (await selectStatements(db)
-    .where('period_start', period.from)
-    .orderBy('provider_id')) as StatementRow[]
+    .where('payable_statements.period_start', period.from)
+    .orderBy('payable_statements.provider_id')) as StatementRow[]
 
   if (stored.length > 0) {
     return {
@@ -242,6 +272,14 @@ export async function getAdminPayables(db: Knex, month: string): Promise<AdminPa
 
   // Live preview: what a close would produce right now.
   const providers = await queryProvidersWithPayableActivity(db, period.endTsExclusive)
+  const providerIds = providers.map((p) => p.providerId)
+  const nameRows: Array<{ id: string; provider_name: string | null; practice_name: string | null }> = providerIds.length
+    ? await db('providers as pv')
+        .leftJoin('practices as pc', 'pc.id', 'pv.practice_id')
+        .whereIn('pv.id', providerIds)
+        .select('pv.id', 'pv.name as provider_name', 'pc.name as practice_name')
+    : []
+  const namesById = new Map(nameRows.map((r) => [r.id, r]))
   const statements: PayableStatement[] = []
   for (const p of providers) {
     const figures = await computeStatementFigures(db, p.providerId, period)
@@ -249,6 +287,8 @@ export async function getAdminPayables(db: Knex, month: string): Promise<AdminPa
       id: '',
       providerId: p.providerId,
       practiceId: p.practiceId,
+      providerName: namesById.get(p.providerId)?.provider_name ?? null,
+      practiceName: namesById.get(p.providerId)?.practice_name ?? null,
       periodStart: period.from,
       periodEnd: period.to,
       openingCents: figures.openingCents,

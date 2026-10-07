@@ -14,6 +14,9 @@ const STATUS_BY_CODE: Record<string, number> = {
   FORBIDDEN: 403,
   NOT_FOUND: 404,
   ALREADY_CLOSED: 409,
+  // A month can only be closed once it has ended (statements are immutable, so closing
+  // early would freeze an incomplete period).
+  PERIOD_NOT_ENDED: 409,
   INTERNAL: 500
 }
 
@@ -42,6 +45,9 @@ export const alreadyClosed = (month: string, providerIds: string[]): ApiError =>
     month,
     providerIds
   })
+
+export const periodNotEnded = (month: string, endsAt: string): ApiError =>
+  new ApiError('PERIOD_NOT_ENDED', 'This month has not ended yet, so it cannot be closed', { month, endsAt })
 
 /** Map any thrown error to the standard envelope (see apps/api/src/orders/errors.ts). */
 export function handleError(res: Response, err: unknown): void {

@@ -7,7 +7,7 @@
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
-import type { PayableReport, OrderSummary, PatientView } from '@cerbo/contracts'
+import type { PayableReport } from '@cerbo/contracts'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Money from '../../components/ui/Money.vue'
 import UiAlert from '../../components/ui/UiAlert.vue'
@@ -25,7 +25,6 @@ const to = ref('')
 const loading = ref(true)
 const error = ref<string | null>(null)
 const rangeError = ref<string | null>(null)
-const patientByOrder = ref<Record<string, string>>({})
 
 /** YYYY-MM-DD for a UTC date (calendar dates, not money). */
 function isoDate(d: Date): string {
@@ -71,29 +70,13 @@ async function load(): Promise<void> {
   }
 }
 
-/** Best-effort patient names for the contributing orders (falls back to the order id). */
-async function loadPatientNames(): Promise<void> {
-  try {
-    const [o, p] = await Promise.all([
-      apiRequest<{ orders: OrderSummary[] }>('/orders'),
-      apiRequest<{ patients: PatientView[] }>('/patients')
-    ])
-    const names = Object.fromEntries(p.patients.map((x) => [x.id, x.name]))
-    patientByOrder.value = Object.fromEntries(o.orders.filter((x) => names[x.patientId]).map((x) => [x.id, names[x.patientId]]))
-  } catch {
-    patientByOrder.value = {}
-  }
-}
-
 function choose(p: Preset): void {
   preset.value = p
   rangeError.value = null
   if (p !== 'custom') void load()
 }
 
-onMounted(async () => {
-  await Promise.all([load(), loadPatientNames()])
-})
+onMounted(load)
 </script>
 
 <template>
@@ -175,7 +158,7 @@ onMounted(async () => {
             </thead>
             <tbody>
               <tr v-for="o in report.contributingOrders" :key="o.orderId">
-                <td data-label="Patient">{{ patientByOrder[o.orderId] ?? '-' }}</td>
+                <td data-label="Patient">{{ o.patientName ?? '-' }}</td>
                 <td data-label="Order">
                   <RouterLink :to="{ name: 'order-audit', params: { id: o.orderId } }">
                     View audit <span class="subtle">{{ o.orderId.slice(0, 8) }}</span>

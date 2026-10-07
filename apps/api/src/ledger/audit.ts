@@ -95,6 +95,13 @@ export async function loadAudit(db: Knex, orderId: string): Promise<AuditRespons
     : []
   const names = new Map<string, string>(productRows.map((p) => [p.sku, p.name]))
 
+  // Display names for the people on the order (audit is provider/admin-only).
+  const [patientRow, providerRow, practiceRow] = await Promise.all([
+    db('patients').where({ id: order.patient_id }).first('name'),
+    db('providers').where({ id: order.provider_id }).first('name'),
+    db('practices').where({ id: order.practice_id }).first('name')
+  ])
+
   const journalIds = journalRows.map((j) => j.id)
   const entryRows: EntryRow[] = journalIds.length
     ? await db<EntryRow>('ledger_entries').whereIn('journal_id', journalIds).orderBy('id')
@@ -151,6 +158,9 @@ export async function loadAudit(db: Knex, orderId: string): Promise<AuditRespons
       providerId: order.provider_id,
       practiceId: order.practice_id,
       patientId: order.patient_id,
+      patientName: patientRow?.name ?? null,
+      providerName: providerRow?.name ?? null,
+      practiceName: practiceRow?.name ?? null,
       feeBps: order.fee_bps,
       subtotalCents: order.subtotal_cents,
       cogsCents: order.cogs_cents,

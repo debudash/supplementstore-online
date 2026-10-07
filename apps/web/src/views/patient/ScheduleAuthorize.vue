@@ -98,10 +98,22 @@ watch(phase, async () => {
   heading.value?.focus()
 })
 
+// Who the patient is authorizing (separate token endpoint; names only). Best-effort.
+const payeeLine = ref('')
+async function loadPractice(): Promise<void> {
+  try {
+    const p = await apiRequest<{ practiceName: string | null; providerName: string | null }>(`/pay/schedule/${token}/practice`, { auth: false })
+    payeeLine.value = p && typeof p === 'object' ? [p.providerName, p.practiceName].filter(Boolean).join(' · ') : ''
+  } catch {
+    payeeLine.value = ''
+  }
+}
+
 async function load(): Promise<void> {
   phase.value = 'loading'
   try {
     schedule.value = await apiRequest<ScheduleAuthorizeView>(`/pay/schedule/${token}`, { auth: false })
+    void loadPractice() // only once the link is known to be valid
     phase.value = schedule.value.authorized ? 'authorized' : 'review'
   } catch (err) {
     if (err instanceof ApiError && err.code === 'NOT_IMPLEMENTED') phase.value = 'unavailable'
@@ -134,6 +146,7 @@ onMounted(load)
     <Card :tone="tone" class="authorize-card" :data-phase="phase">
       <span v-if="isTerminal" class="state-icon" :class="`state-icon-${tone}`" aria-hidden="true">{{ icon }}</span>
 
+      <p v-if="payeeLine && phase === 'review'" class="payee" data-testid="payee">{{ payeeLine }}</p>
       <p v-if="phase === 'review' && schedule?.patientFirstName" class="greeting">Hi {{ schedule.patientFirstName }},</p>
       <h1 ref="heading" tabindex="-1" class="authorize-title" :class="{ centered: isTerminal }">{{ title }}</h1>
 
@@ -203,6 +216,14 @@ onMounted(load)
 }
 .authorize-card {
   padding: var(--space-6);
+}
+.payee {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--brand-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: var(--space-3);
 }
 .greeting {
   font-weight: 600;

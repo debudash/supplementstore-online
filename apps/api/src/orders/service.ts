@@ -614,6 +614,19 @@ export async function deleteDraft(db: Knex, actor: Actor, orderId: string): Prom
   })
 }
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/** The start of the UTC day after a YYYY-MM-DD date, as an ISO timestamp. */
+function nextUtcDay(date: string): string {
+  const d = new Date(`${date}T00:00:00.000Z`)
+  // Reject impossible dates (e.g. 2026-02-31) that JS would silently roll over.
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+    throw invalidInput('to must be a valid date', { field: 'to', value: date })
+  }
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString()
+}
+
 /** GET /api/orders?status=&from=&to= - the provider's own orders (FR). */
 export async function listOrders(
   db: Knex,
@@ -634,7 +647,13 @@ export async function listOrders(
     .orderBy('created_at', 'desc')
   if (filters.status) q = q.andWhere({ status: filters.status })
   if (filters.from) q = q.andWhere('created_at', '>=', filters.from)
-  if (filters.to) q = q.andWhere('created_at', '<=', filters.to)
+  if (filters.to) {
+    // A date-only `to` (YYYY-MM-DD) includes that whole UTC day, so it means "up to the
+    // start of the next day", not midnight at the start of `to`. Full timestamps are
+    // used as given (inclusive), as before.
+    if (DATE_ONLY_RE.test(filters.to)) q = q.andWhere('created_at', '<', nextUtcDay(filters.to))
+    else q = q.andWhere('created_at', '<=', filters.to)
+  }
   const rows = await q
   // Surface the pay link so the provider can recover it after send (the token is stored
   // on the order but was previously only returned by create/add/send). This is the

@@ -62,7 +62,7 @@ function ordersPath(): string {
   if (statusFilter.value) params.set('status', statusFilter.value)
   if (fromDate.value) params.set('from', fromDate.value)
   // The API compares created_at <= to, so send the end of that day to include it.
-  if (toDate.value) params.set('to', `${toDate.value}T23:59:59.999Z`)
+  if (toDate.value) params.set('to', toDate.value) // server includes the whole day
   const qs = params.toString()
   return qs ? `/orders?${qs}` : '/orders'
 }
