@@ -19,7 +19,7 @@ defineProps<{ totals: OrderTotals | null; itemCount?: number }>()
         <dd class="money" data-test="subtotal">{{ formatCents(totals.subtotalCents) }}</dd>
       </div>
       <div class="row">
-        <dt class="label-row">Cerbo cost (COGS) <DemoBadge reason="COGS is Cerbo's wholesale cost. A prescribing doctor would not normally see it; shown here to make the order economics demonstrable." /></dt>
+        <dt class="label-row">COGS <DemoBadge reason="COGS is Cerbo's wholesale cost. A prescribing doctor would not normally see it; shown here to make the order economics demonstrable." /></dt>
         <dd class="money" data-test="cogs">{{ formatCents(totals.cogsCents) }}</dd>
       </div>
       <div class="row">

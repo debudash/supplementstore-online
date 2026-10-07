@@ -79,6 +79,7 @@ function openMargin(): void {
     <td data-label="Item" class="item-cell">
       <strong class="name">{{ line.name }}</strong>
       <span class="sku">{{ line.sku }}</span>
+      <button type="button" class="btn-link remove" :disabled="busy" :aria-label="`Remove ${line.name}`" data-testid="remove-line" @click="emit('remove')">Remove</button>
     </td>
     <td data-label="Qty" class="qty-cell">
       <div class="qty-wrap">
@@ -111,12 +112,9 @@ function openMargin(): void {
     </td>
     <td data-label="Fee" class="num"><span class="money">{{ formatCents(line.lineFeeCents) }}</span></td>
     <td data-label="Net margin" class="num"><Money :cents="line.lineMarginCents" strong data-test="line-margin" /></td>
-    <td data-label="" class="actions-cell">
-      <button type="button" class="btn-danger-quiet btn-sm" :disabled="busy" :aria-label="`Remove ${line.name}`" data-testid="remove-line" @click="emit('remove')">Remove</button>
-    </td>
   </tr>
   <tr v-if="editingMargin" class="margin-row">
-    <td colspan="8">
+    <td colspan="7">
       <form class="margin-form" @submit.prevent="applyMargin">
         <label :for="`m-${line.id}`">New margin % for {{ line.name }}</label>
         <span class="pct">
@@ -130,7 +128,7 @@ function openMargin(): void {
     </td>
   </tr>
   <tr v-if="inputError || error" class="error-row">
-    <td :id="errId" colspan="8">
+    <td :id="errId" colspan="7">
       <span v-if="inputError" class="inline-error" role="alert">{{ inputError }}</span>
       <span v-if="error" class="inline-error" role="alert" data-test="line-error">{{ error }}</span>
     </td>
@@ -167,8 +165,14 @@ function openMargin(): void {
 .cogs-head {
   margin-right: var(--space-1);
 }
-.actions-cell {
-  text-align: right;
+.remove {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+.remove:hover:not(:disabled) {
+  color: var(--danger-strong);
 }
 .margin-row td {
   background: var(--brand-tint);
@@ -205,9 +209,6 @@ function openMargin(): void {
   .change {
     display: inline;
     margin-left: var(--space-2);
-  }
-  .actions-cell {
-    justify-content: flex-end;
   }
 }
 </style>

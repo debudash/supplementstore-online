@@ -61,7 +61,7 @@ function step(delta: number): void {
 .step {
   border: none;
   border-radius: 0;
-  min-width: 2.5rem;
+  min-width: 2.25rem;
   padding: 0 var(--space-2);
   font-size: var(--text-lg);
   background: var(--surface-2);
@@ -70,7 +70,7 @@ function step(delta: number): void {
   box-shadow: inset var(--focus-ring);
 }
 input {
-  width: 3.75rem;
+  width: 3rem;
   border: none;
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);

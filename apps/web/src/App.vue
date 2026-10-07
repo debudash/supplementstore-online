@@ -75,8 +75,8 @@ watch(
         </nav>
         <span class="spacer" />
         <span class="health" :class="`health-${health}`" role="status" data-testid="health">
-          <span class="dot" aria-hidden="true" />
-          {{ HEALTH_TEXT[health] }}
+          <span class="dot" aria-hidden="true" :title="HEALTH_TEXT[health]" />
+          <span class="health-text">{{ HEALTH_TEXT[health] }}</span>
         </span>
         <RoleSwitcher />
       </div>
@@ -116,9 +116,8 @@ watch(
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-4);
-  max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--space-6);
   min-height: var(--topbar-h);
 }
 .brand {
@@ -171,7 +170,7 @@ watch(
 }
 .tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-1);
 }
 .tabs a {
@@ -181,6 +180,7 @@ watch(
   font-size: var(--text-sm);
   font-weight: 550;
   text-decoration: none;
+  white-space: nowrap;
 }
 .tabs a:hover {
   background: var(--n-100);
@@ -226,7 +226,20 @@ watch(
   outline: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1360px) and (min-width: 1101px) {
+  .brand-sub,
+  .health-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .tabs a {
+    padding: 0.45rem 0.55rem;
+  }
+}
+@media (max-width: 1100px) {
   .menu-toggle {
     display: inline-flex;
   }
@@ -254,6 +267,9 @@ watch(
   }
 }
 @media (max-width: 640px) {
+  .brand-sub {
+    display: none;
+  }
   .topbar-inner {
     padding: var(--space-2) var(--space-4);
   }

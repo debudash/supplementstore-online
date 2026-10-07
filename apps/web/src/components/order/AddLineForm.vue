@@ -189,7 +189,7 @@ function submit(): void {
 }
 .grid {
   display: grid;
-  grid-template-columns: minmax(14rem, 2fr) minmax(7rem, auto) auto minmax(8rem, 1fr) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-4);
   align-items: start;
 }
@@ -252,9 +252,17 @@ function submit(): void {
   width: 100%;
   min-width: 5rem;
 }
+.product {
+  grid-column: span 2;
+}
+.field > :deep(.stepper) {
+  align-self: flex-start;
+}
 .submit {
   align-self: end;
-  padding-top: 1.6rem;
+}
+.submit button {
+  width: 100%;
 }
 .err {
   color: var(--danger);
@@ -276,24 +284,12 @@ function submit(): void {
   color: var(--danger-strong);
   font-weight: 550;
 }
-@media (max-width: 980px) {
-  .grid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .product {
-    grid-column: 1 / -1;
-  }
-  .submit {
-    grid-column: 1 / -1;
-    padding-top: 0;
-  }
-  .submit button {
-    width: 100%;
-  }
-}
-@media (max-width: 480px) {
+@media (max-width: 560px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+  .product {
+    grid-column: auto;
   }
 }
 </style>

@@ -38,7 +38,7 @@ const selected = computed({
 <style scoped>
 .role-switcher {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-2);
   align-items: center;
 }
@@ -50,9 +50,9 @@ const selected = computed({
 select {
   font-size: var(--text-sm);
   min-height: 2.25rem;
-  max-width: 17rem;
+  max-width: 13rem;
 }
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   select {
     flex: 1;
     max-width: none;

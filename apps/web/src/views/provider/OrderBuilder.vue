@@ -387,7 +387,6 @@ function goOrders(e: Event): void {
                   <th scope="col" class="num">COGS</th>
                   <th scope="col" class="num">Fee</th>
                   <th scope="col" class="num">Net margin</th>
-                  <th scope="col"><span class="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -531,7 +530,7 @@ function goOrders(e: Event): void {
 }
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 20rem;
+  grid-template-columns: minmax(0, 1fr) 17.5rem;
   gap: var(--space-6);
   align-items: start;
 }
@@ -564,8 +563,11 @@ function goOrders(e: Event): void {
   color: var(--muted);
   font-weight: 500;
 }
-.items-table :deep(td) {
+.items-table :deep(td),
+.items-table th {
   vertical-align: middle;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
 }
 .send {
   margin-top: var(--space-4);
