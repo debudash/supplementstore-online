@@ -511,14 +511,47 @@ paths:
   /api/patient/orders/{id}/refund-request:
     post:
       tags: [Patient - listing]
-      summary: Ask the provider for a refund (ADR-026; no return - ADR-023)
-      description: Own paid, non-synthetic orders only; one pending request per order. Body { reasonCode (damaged|wrong_item|patient_request|other), note? (<=500) }.
+      summary: Ask the provider for a refund (ADR-026, ADR-027 - unopened, within 30 days of payment)
+      description: Own paid, non-synthetic orders only, within 30 days of payment; one pending request per order. Body { reasonCode (damaged|wrong_item|patient_request|other), unopened (must be true), note? (<=500) }. The response never carries the review token.
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
       responses:
-        "201": { description: Request created (status pending) }
+        "201": { description: Request created (status pending, unopenedConfirmed true) }
         "400": { $ref: "#/components/responses/InvalidInput" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { description: "NOT_REFUNDABLE (not paid) or REFUND_REQUEST_EXISTS (one already pending)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "NOT_REFUNDABLE (not paid), REFUND_WINDOW_CLOSED (more than 30 days after payment; details.windowEndsAt) or REFUND_REQUEST_EXISTS (one already pending)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/refund-review/{token}:
+    get:
+      tags: [Provider - orders]
+      summary: The refund review link (ADR-027) - the request plus the order being decided on
+      description: Token-addressed like a pay link, but role = provider and only the provider who owns the order (404 otherwise). Returns { request (with reviewPath, unopenedConfirmed), order { id, status, patientName, subtotalCents, paidAt, shipped, refundWindowEndsAt, items[] } }.
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: "{ request, order }" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/refund-review/{token}/accept:
+    post:
+      tags: [Provider - orders]
+      summary: Accept - refunds immediately through the standard refund path (same as /api/orders/{id}/refund-request/approve)
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: "{ request, refund } - refund is null if the order had already been refunded" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "NO_PENDING_REQUEST, or a refund error such as NOT_REFUNDABLE", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/refund-review/{token}/decline:
+    post:
+      tags: [Provider - orders]
+      summary: Decline with a note the patient sees (same as /api/orders/{id}/refund-request/decline)
+      parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string, minLength: 3, maxLength: 500 } } } } } }
+      responses:
+        "200": { description: "{ request } with status declined" }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: NO_PENDING_REQUEST, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/orders/{id}/refund-request:
     get:
@@ -526,7 +559,7 @@ paths:
       summary: The latest patient refund request on one of the provider's orders (or null)
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
       responses:
-        "200": { description: "{ request } (null when none)" }
+        "200": { description: "{ request } (null when none); request.reviewPath is the provider review link (/refund-review/<token>)" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/orders/{id}/refund-request/approve:

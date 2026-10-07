@@ -33,10 +33,14 @@ const posts = () => apiRequest.mock.calls.filter(([, o]) => o?.method === 'POST'
 
 describe('RefundPanel', () => {
   it('approves a pending request after stating the consequences', async () => {
-    current = { id: 'r1', orderId: 'o1', reasonCode: 'damaged', note: 'Cracked', status: 'pending', decisionNote: null, decidedAt: null, createdAt: '2026-10-07T11:00:00Z' }
+    current = { id: 'r1', orderId: 'o1', reasonCode: 'damaged', note: 'Cracked', status: 'pending', decisionNote: null, decidedAt: null, createdAt: '2026-10-07T11:00:00Z', unopenedConfirmed: true, reviewPath: '/refund-review/tok123' }
     const w = mount(RefundPanel, { props })
     await flushPromises()
-    expect(w.find('[data-testid="refund-request-card"]').text()).toContain('Damaged or defective')
+    const card = w.find('[data-testid="refund-request-card"]')
+    expect(card.text()).toContain('Damaged or defective')
+    expect(w.find('[data-testid="request-unopened"]').text()).toBe('Confirmed by the patient')
+    expect(card.text()).toContain('Refund review link')
+    expect((w.find('[data-test="pay-url"]').element as HTMLInputElement).value).toMatch(/\/refund-review\/tok123$/)
     expect(w.find('[data-testid="direct-refund"]').exists()).toBe(false)
 
     await w.find('[data-testid="approve-refund"]').trigger('click')
@@ -51,7 +55,7 @@ describe('RefundPanel', () => {
   })
 
   it('declining needs a note for the patient', async () => {
-    current = { id: 'r1', orderId: 'o1', reasonCode: 'other', note: null, status: 'pending', decisionNote: null, decidedAt: null, createdAt: '2026-10-07T11:00:00Z' }
+    current = { id: 'r1', orderId: 'o1', reasonCode: 'other', note: null, status: 'pending', decisionNote: null, decidedAt: null, createdAt: '2026-10-07T11:00:00Z', unopenedConfirmed: true, reviewPath: '/refund-review/tok456' }
     const w = mount(RefundPanel, { props })
     await flushPromises()
     await w.find('[data-testid="decline-refund"]').trigger('click')

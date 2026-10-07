@@ -37,13 +37,17 @@ export interface PatientOrderListItem {
   items: PatientPayItem[]
   /** The latest refund request on this order (status, reason, dates, provider's note). */
   refundRequest: RefundRequestView | null
-  /** True when the patient may ask for a refund now (paid, nothing pending). */
+  /** True when the patient may ask for a refund now (paid, within 30 days, nothing pending). */
   canRequestRefund: boolean
+  /** When the 30-day refund window closes (ADR-027), or null if not paid. */
+  refundWindowEndsAt: string | null
 }
 
-/** POST /api/patient/orders/:id/refund-request body. No return is needed (ADR-023). */
+/** POST /api/patient/orders/:id/refund-request body (ADR-027: unopened, within 30 days). */
 export interface RefundRequestCreate {
   reasonCode: PatientRefundReason
+  /** Must be true: the patient confirms the product is unopened. */
+  unopened: true
   /** Optional detail for the provider, at most 500 characters. */
   note?: string
 }

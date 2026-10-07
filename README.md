@@ -220,7 +220,13 @@ the product:
 - **ADR-023 - Refunded patients are told to keep or safely dispose of the product; no returns
   are accepted.** Returned ingestibles are not resellable anyway (ADR-013), so accepting
   returns would pay return shipping for stock that is written off regardless, and telling the
-  patient nothing would risk unnecessary returns.
+  patient nothing would risk unnecessary returns. *Superseded in part by ADR-027.*
+- **ADR-027 - Patients can request a refund for unopened products within 30 days of payment.**
+  The patient confirms "unopened" (required), and the server enforces the 30-day window. The
+  provider decides through a review link (`/refund-review/:token`, like a pay link but only
+  for the owning provider). Accept refunds immediately through the standard refund. Shipped
+  returns are always written off; unshipped orders restock (ADR-013). Return shipping is out
+  of scope.
 
 ## What is stubbed
 
@@ -300,6 +306,9 @@ These capabilities are implemented and merged, and each is covered by at least o
   carries a demo badge because real stock would come from procurement.
 - **Patient My Orders view.** A patient has a page listing their orders, not just the single
   pay link.
+- **Patient refund requests with a provider review link (ADR-026, ADR-027).** From My Orders a
+  patient requests a refund for unopened products within 30 days of payment. The provider
+  accepts (instant refund) or declines with a note, from the order audit or the review link.
 - **Provider-recoverable pay links.** The patient pay link can be recovered later from the
   provider's Orders list and the order audit view (both now render a copy control bound to the
   order's pay path), so a demo does not depend on copying the link at the moment the order is
@@ -311,7 +320,9 @@ From `docs/SPEC.md` "Out of scope"; none of these is a cut, they were never in s
 
 - **Partial (line-level) refunds** - the ledger supports them, but only whole-order refunds are
   wired. Next: a line-selection UI and a partial posting path.
-- **Refund policy enforcement** - only reason codes are recorded; no rules are applied.
+- **Refund policy beyond ADR-027** - patient requests enforce "unopened" and a 30-day window;
+  provider and admin direct refunds record a reason code only. Return shipping logistics are
+  out of scope.
 - **A real job scheduler** - the admin "run jobs" endpoints stand in for cron.
 - **A real baseline source** - CSV import is the interim mechanism; the real source for
   historical marketplace volume is undefined.
@@ -327,8 +338,8 @@ From the bottom of `docs/DECISIONS.md`:
   0.75%. If Cerbo absorbs processing fees, each order can lose money. The pricing model has
   to account for this; it is not solved in this slice (ADR assumption A-3).
 - **Post-fulfillment refunds cost Cerbo the full COGS** while the provider only loses the
-  fee (ADR-013). A refund policy would mitigate this; for now reason codes are recorded so
-  the exposure is measurable.
+  fee (ADR-013). ADR-027 limits patient requests to unopened products within 30 days, and
+  reason codes are recorded so the exposure is measurable (Evidence page).
 - **Migration measurement depends on a trustworthy baseline.** The migration-off-marketplaces
   metric is only as good as the baseline GMV it is measured against, and the real source for
   that baseline is not yet defined (ADR-018).

@@ -65,6 +65,7 @@ describe('ProfitSimulator', () => {
     const w = mount(ProfitSimulator, { props: { products, preview } })
     await vi.advanceTimersByTimeAsync(500)
     expect(preview).not.toHaveBeenCalled()
+    expect(w.find('[data-testid="profit-sim-demo"]').text()).toContain('Demo')
     expect(w.find('select').exists()).toBe(false)
     expect(w.find('[data-testid="sim-toggle"]').attributes('aria-expanded')).toBe('false')
   })

@@ -2,10 +2,14 @@
 // Copyable patient pay link (FR-4 AC4). The link is always visible and selectable; Copy
 // uses the Clipboard API and degrades to "select the field" text otherwise. In production
 // the patient is emailed or texted the link (Notifier seam), hence the demo marker.
+// Also reused for the provider's refund review link (ADR-027) via title/reason.
 import { ref, computed } from 'vue'
 import DemoBadge from '../DemoBadge.vue'
 
-const props = defineProps<{ payUrl: string; compact?: boolean }>()
+const props = withDefaults(defineProps<{ payUrl: string; compact?: boolean; title?: string; reason?: string }>(), {
+  title: 'Patient pay link',
+  reason: 'In production the patient is emailed or texted this link. It is shown here so you can open the pay page during the demo.'
+})
 
 // payUrl is a relative path like /pay/<token>; show the absolute URL the patient opens.
 const absoluteUrl = computed(() => {
@@ -29,13 +33,13 @@ async function copy(): Promise<void> {
 </script>
 
 <template>
-  <section class="copy-link" :class="{ compact }" aria-label="Patient pay link">
+  <section class="copy-link" :class="{ compact }" :aria-label="title">
     <div class="head">
-      <h3 class="title">Patient pay link</h3>
-      <DemoBadge reason="In production the patient is emailed or texted this link. It is shown here so you can open the pay page during the demo." />
+      <h3 class="title">{{ title }}</h3>
+      <DemoBadge :reason="reason" />
     </div>
     <div class="row">
-      <input :value="absoluteUrl" readonly data-test="pay-url" aria-label="Patient pay link URL" @focus="($event.target as HTMLInputElement).select()" />
+      <input :value="absoluteUrl" readonly data-test="pay-url" :aria-label="`${title} URL`" @focus="($event.target as HTMLInputElement).select()" />
       <button type="button" class="btn-primary" data-testid="copy-link" @click="copy">{{ copied ? 'Copied' : 'Copy link' }}</button>
     </div>
     <p v-if="copied" class="ok" role="status">Link copied.</p>
