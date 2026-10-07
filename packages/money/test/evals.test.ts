@@ -13,12 +13,12 @@
  *
  * The rules under review:
  *   ADR-001  platform fee = 0.75% (75 bps) of the patient-paid subtotal
- *   ADR-002  provider bears the fee; patient sees no fee line
+ *   ADR-002  patient sees no fee line (ADR-028: the fee is built into the price)
  *   ADR-003  integer cents; fee computed once per order, half-up; allocated to
  *            lines by largest remainder (never per-line rounding)
  *   ADR-004  line margin after allocated fee must be >= 0; zero margin allowed
- *   ADR-005  price is canonical; margin % is an input mode that derives price,
- *            margin % defined as (price - cogs) / price
+ *   ADR-028  price derives from the provider's per-unit dollar markup:
+ *            price = ceil((cogs + markup) * 10000 / (10000 - feeBps))
  *   ADR-012  refund returns 100% to patient; platform fee retained, charged to
  *            the provider
  *   ADR-014  whole-order refunds only
@@ -29,7 +29,7 @@ import {
   MoneyError,
   allocateFee,
   orderFee,
-  priceFromMarginBps,
+  priceFromMarkupCents,
   refund,
   split,
   type SplitLineInput,
@@ -133,10 +133,20 @@ describe("EVAL-04 - margin floor (margin after allocated fee must be >= 0)", () 
   });
 });
 
-describe("EVAL-04b - margin % input mode derives the price", () => {
-  // ADR-005: price is canonical; margin % derives it, margin % = (price - cogs) / price.
-  it("EVAL-04b: MAG-GLY-120 (cogs 1450) with marginBps 5000 -> unit price 2900", () => {
-    expect(priceFromMarginBps(COGS.MAG_GLY_120, 5000)).toBe(2900);
+describe("EVAL-04b - dollar markup derives the price (ADR-028)", () => {
+  // The patient pays COGS + markup + fee; the price is grossed up so the fee is covered.
+  it("EVAL-04b: MAG-GLY-120 (cogs 1450) + markup 1000 -> unit price 2469, fee 19, margin 1000", () => {
+    const price = priceFromMarkupCents(COGS.MAG_GLY_120, 1000, 75);
+    expect(price).toBe(2469);
+    const result = split([{ position: 0, qty: 1, unitPriceCents: price, unitCogsCents: COGS.MAG_GLY_120 }]);
+    expect(result.fee).toBe(19);
+    expect(result.margin).toBe(1000);
+  });
+
+  it("EVAL-04b: markup 0 sells at cost + fee with 1 cent of rounding headroom (1462, margin 1)", () => {
+    const price = priceFromMarkupCents(COGS.MAG_GLY_120, 0, 75);
+    expect(price).toBe(1462);
+    expect(split([{ position: 0, qty: 1, unitPriceCents: price, unitCogsCents: COGS.MAG_GLY_120 }]).margin).toBe(1);
   });
 });
 
@@ -215,8 +225,10 @@ describe("Input validation - safe positive integers only (RT-07 / AI-01)", () =>
     ["unsafe integer price", () => split([{ position: 0, qty: 1, unitPriceCents: Number.MAX_SAFE_INTEGER + 1, unitCogsCents: 1000 }])],
     ["empty order", () => split([])],
     ["fee on zero subtotal", () => orderFee(0)],
-    ["marginBps out of range (>9500)", () => priceFromMarginBps(1450, 9600)],
-    ["marginBps 10000 (div by zero)", () => priceFromMarginBps(1450, 10000)],
+    ["markup above $1,000", () => priceFromMarkupCents(1450, 100001, 75)],
+    ["negative markup", () => priceFromMarkupCents(1450, -1, 75)],
+    ["decimal markup", () => priceFromMarkupCents(1450, 10.5, 75)],
+    ["feeBps 10000 (div by zero)", () => priceFromMarkupCents(1450, 1000, 10000)],
   ];
 
   for (const [name, fn] of bad) {

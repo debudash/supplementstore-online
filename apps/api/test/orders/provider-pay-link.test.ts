@@ -18,6 +18,7 @@ import { db } from '../../src/db/knex'
 import { createApp } from '../../src/app'
 import { createKnexActorLoader } from '../../src/auth/loadActor'
 import { seedCore } from '../../src/db/seeds/01_core'
+import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
 function migrateViaCli(): void {
@@ -55,7 +56,7 @@ async function sendAnaOrder(): Promise<{ orderId: string; payToken: string }> {
   const draft = await asUser('prov-ana').post('/api/orders').send({ patientId: PAT_CARA })
   expect(draft.status).toBe(201)
   const orderId = draft.body.id as string
-  const line = await asUser('prov-ana').post(`/api/orders/${orderId}/lines`).send({ sku: SKU_MAG, qty: 1, unitPriceCents: 2999 })
+  const line = await asUser('prov-ana').post(`/api/orders/${orderId}/lines`).send({ sku: SKU_MAG, qty: 1, markupCents: markupFor(SKU_MAG, 2999) })
   expect(line.status).toBe(200)
   const sent = await asUser('prov-ana').post(`/api/orders/${orderId}/send`)
   expect(sent.status).toBe(200)

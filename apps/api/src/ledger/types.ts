@@ -45,6 +45,8 @@ export interface AuditLine {
   qty: number
   unitPriceCents: number
   unitCogsCents: number
+  /** The provider's per-unit markup (ADR-028); null on lines priced before it. */
+  unitMarkupCents: number | null
   lineTotalCents: number | null
   lineCogsCents: number | null
   lineFeeCents: number | null

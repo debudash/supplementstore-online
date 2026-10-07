@@ -13,6 +13,7 @@ import type {
   AuditLedgerEntry,
   InvariantCheck
 } from './types'
+import { priceFromMarkupCents } from '@cerbo/money'
 import { assertSafeInteger } from '../db/types'
 
 const iso = (d: Date | string | null): string | null =>
@@ -48,6 +49,7 @@ interface LineRow {
   qty: number
   unit_price_cents: number
   unit_cogs_cents: number
+  unit_markup_cents: number | null
   line_total_cents: number | null
   line_cogs_cents: number | null
   line_fee_cents: number | null
@@ -121,6 +123,7 @@ export async function loadAudit(db: Knex, orderId: string): Promise<AuditRespons
     qty: l.qty,
     unitPriceCents: l.unit_price_cents,
     unitCogsCents: l.unit_cogs_cents,
+    unitMarkupCents: l.unit_markup_cents,
     lineTotalCents: l.line_total_cents,
     lineCogsCents: l.line_cogs_cents,
     lineFeeCents: l.line_fee_cents,
@@ -273,6 +276,31 @@ function computeInvariants(
       pass: lineFeeSum === fee,
       detail: { lineFeeSum, orderFee: fee }
     })
+
+    // ADR-028: a line priced from a markup carries exactly the price that markup derives
+    // from its snapshot COGS, and the provider nets at least what they marked up.
+    // Lines priced before ADR-028 have no markup and are not checked here.
+    const tracked = priced.filter((l) => l.unit_markup_cents !== null)
+    const priceMismatch = tracked
+      .filter(
+        (l) =>
+          l.line_total_cents !== l.qty * l.unit_price_cents ||
+          l.unit_price_cents !== priceFromMarkupCents(l.unit_cogs_cents, l.unit_markup_cents as number, order.fee_bps)
+      )
+      .map((l) => l.position)
+    checks.push({
+      name: 'lines.price_matches_markup',
+      pass: priceMismatch.length === 0,
+      detail: { offendingPositions: priceMismatch, trackedLines: tracked.length }
+    })
+    if (tracked.length > 0 && tracked.length === priced.length) {
+      const markupTotal = tracked.reduce((a, l) => a + l.qty * (l.unit_markup_cents as number), 0)
+      checks.push({
+        name: 'order.margin_covers_markup',
+        pass: margin >= markupTotal,
+        detail: { margin, markupTotal }
+      })
+    }
   }
 
   // Every journal sums to zero (money rule 7). One check per journal.

@@ -8,6 +8,7 @@ import { db } from '../../src/db/knex'
 import { createApp } from '../../src/app'
 import { createKnexActorLoader } from '../../src/auth/loadActor'
 import { seedCore } from '../../src/db/seeds/01_core'
+import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
 const app = createApp({ db, loadActor: createKnexActorLoader(db) })
@@ -27,7 +28,7 @@ beforeAll(async () => {
   await db('products').where({ sku: 'MAG-GLY-120' }).update({ on_hand_qty: 50, reserved_qty: 0 })
   const patient = (await as(PROVIDER).get('/api/patients')).body.patients[0]
   const draft = await as(PROVIDER).post('/api/orders').send({ patientId: patient.id })
-  await as(PROVIDER).post(`/api/orders/${draft.body.id}/lines`).send({ sku: 'MAG-GLY-120', qty: 1, unitPriceCents: 2999 })
+  await as(PROVIDER).post(`/api/orders/${draft.body.id}/lines`).send({ sku: 'MAG-GLY-120', qty: 1, markupCents: markupFor('MAG-GLY-120', 2999) })
   const sent = await as(PROVIDER).post(`/api/orders/${draft.body.id}/send`)
   await request(app).post(`/api/pay/${String(sent.body.payUrl).split('/').pop()}`).send({ idempotencyKey: `ev-${draft.body.id}` })
   ourOrderId = draft.body.id
@@ -116,15 +117,5 @@ describe('POST /api/admin/demo/reset-story', () => {
     const realAfter = Number((await db('orders').where({ is_synthetic: false }).count<{ count: string }[]>('* as count'))[0].count)
     expect(realAfter).toBe(realBefore)
     expect((await as(PROVIDER).post('/api/admin/demo/reset-story')).status).toBe(403)
-  })
-})
-
-describe('profit simulator preview', () => {
-  it('returns the split for a quantity, at list price or a margin', async () => {
-    const list = (await as(PROVIDER).get('/api/products/MAG-GLY-120/price-preview?qty=10')).body
-    expect(list).toMatchObject({ marginBps: null, unitPriceCents: 2999, qty: 10, lineTotalCents: 29990, lineCogsCents: 14500, lineFeeCents: 225, lineMarginCents: 15265, coversFee: true })
-    const thin = (await as(PROVIDER).get('/api/products/MAG-GLY-120/price-preview?marginBps=0&qty=3')).body
-    expect(thin).toMatchObject({ coversFee: false, lineFeeCents: null, lineMarginCents: null, lineTotalCents: 4350 })
-    expect((await as(PROVIDER).get('/api/products/MAG-GLY-120/price-preview?qty=1001')).status).toBe(400)
   })
 })

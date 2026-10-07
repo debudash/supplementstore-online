@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// Provider order builder (FR-1..FR-4): pick a patient, add products (price from the
-// catalog, adjustable only via margin %), watch the live server quote, review and send,
-// then share the patient pay link.
+// Provider order builder (FR-1..FR-4): pick a patient, add products with a per-unit
+// dollar markup, watch the live server quote, review and send, then share the patient
+// pay link.
 //
 // The UI only DISPLAYS money; every figure comes from GET /api/orders/:id/quote
-// (AGENTS.md money rule 2). The server derives the canonical price (ADR-005).
+// (AGENTS.md money rule 2). The server derives the price from COGS + markup (ADR-028).
 //
 // Uses only useRoute().query and useRouter().replace from vue-router (its tests mock
 // exactly those), so links out of this view are plain anchors.
@@ -17,7 +17,6 @@ import AddLineForm from '../../components/order/AddLineForm.vue'
 import LineRow from '../../components/order/LineRow.vue'
 import QuoteSummary from '../../components/order/QuoteSummary.vue'
 import CopyLink from '../../components/order/CopyLink.vue'
-import ProfitSimulator from '../../components/order/ProfitSimulator.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Card from '../../components/ui/Card.vue'
 import UiAlert from '../../components/ui/UiAlert.vue'
@@ -85,9 +84,6 @@ function messageFor(err: unknown): string {
       const details = err.details as { available?: unknown; remaining?: unknown }
       const n = Number(details.remaining ?? details.available ?? 0)
       return insufficientStockMessage(n)
-    }
-    if (err.code === 'MARGIN_NEGATIVE') {
-      return "This line's margin after the platform fee would be negative. Raise the margin %."
     }
     return err.message
   }
@@ -207,7 +203,7 @@ async function resumeOrder(id: string): Promise<void> {
   }
 }
 
-async function addLine(payload: { sku: string; qty: number; unitPriceCents?: number; marginBps?: number }): Promise<void> {
+async function addLine(payload: { sku: string; qty: number; markupCents: number }): Promise<void> {
   if (!orderId.value) return
   addError.value = null
   busy.value = true
@@ -223,7 +219,7 @@ async function addLine(payload: { sku: string; qty: number; unitPriceCents?: num
   }
 }
 
-async function patchLine(lineId: string, body: { qty?: number; marginBps?: number }): Promise<void> {
+async function patchLine(lineId: string, body: { qty?: number; markupCents?: number }): Promise<void> {
   if (!orderId.value) return
   const next = { ...lineErrors.value }
   delete next[lineId]
@@ -232,7 +228,7 @@ async function patchLine(lineId: string, body: { qty?: number; marginBps?: numbe
   try {
     await apiRequest<OrderView>(`/orders/${orderId.value}/lines/${lineId}`, { method: 'PATCH', body })
     await refreshQuote()
-    toast(body.marginBps !== undefined ? 'Margin applied - price updated.' : 'Quantity updated.')
+    toast(body.markupCents !== undefined ? 'Markup applied - price updated.' : 'Quantity updated.')
   } catch (err) {
     const targetId = lineIdAtErrorPosition(err) ?? lineId
     lineErrors.value = { ...lineErrors.value, [targetId]: messageFor(err) }
@@ -293,17 +289,9 @@ function newOrder(): void {
   if (route.query.orderId) void router.replace({ name: 'order-new' })
 }
 
-/** Server-side price preview for a margin (ADR-025); the UI never computes a price. */
-function previewPrice(sku: string, marginBps: number): Promise<PricePreview> {
-  return apiRequest<PricePreview>(`/products/${encodeURIComponent(sku)}/price-preview?marginBps=${marginBps}`)
-}
-
-/** Server profit simulation for the Profit simulator: marginBps null means list price. */
-function simulate(sku: string, marginBps: number | null, qty: number): Promise<PricePreview> {
-  const params = new URLSearchParams()
-  if (marginBps !== null) params.set('marginBps', String(marginBps))
-  params.set('qty', String(qty))
-  return apiRequest<PricePreview>(`/products/${encodeURIComponent(sku)}/price-preview?${params.toString()}`)
+/** Server-side price preview for a markup (ADR-028); the UI never computes a price. */
+function previewPrice(sku: string, markupCents: number): Promise<PricePreview> {
+  return apiRequest<PricePreview>(`/products/${encodeURIComponent(sku)}/price-preview?markupCents=${markupCents}`)
 }
 
 function goOrders(e: Event): void {
@@ -359,9 +347,6 @@ function goOrders(e: Event): void {
         </template>
         <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
       </Card>
-
-      <!-- Explore margins before starting an order (nothing is saved) -->
-      <ProfitSimulator class="start-sim" :products="products" :preview="simulate" />
     </div>
 
     <!-- Steps 2-3: builder -->
@@ -417,15 +402,13 @@ function goOrders(e: Event): void {
                   :error="lineErrors[line.id] ?? null"
                   :preview-price="previewPrice"
                   @commit="(payload) => patchLine(line.id, payload)"
-                  @margin="(payload) => patchLine(line.id, payload)"
+                  @markup="(payload) => patchLine(line.id, payload)"
                   @remove="() => (removeTarget = { id: line.id, name: line.name })"
                 />
               </tbody>
             </table>
           </div>
         </section>
-
-        <ProfitSimulator :products="products" :preview="simulate" />
       </div>
 
       <aside class="side-col">
@@ -538,9 +521,6 @@ function goOrders(e: Event): void {
 }
 .start {
   max-width: 34rem;
-}
-.start-sim {
-  max-width: 52rem;
 }
 .start-form {
   display: flex;

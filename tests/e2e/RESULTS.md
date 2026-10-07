@@ -12,8 +12,8 @@ Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 | EVAL-01 | PASS | money | T1/T3 | MAG x2@2999 + VITD3 x1@2499 -> subtotal 8497, fee 64, line fees [45,19], margins [3053,1355] |
 | EVAL-02 | PASS | money | T1/T3 | OMEGA3 x1@4999 -> fee 37, margin 2682 |
 | EVAL-03 | PASS | money | T1/T3 | VITD3 x1@2200 half-up -> fee 17, margin 1058 |
-| EVAL-04 | PASS | money | T1/T3 | VITD3 margin floor: @1125 and @1132 rejected MARGIN_NEGATIVE; @1133 margin 0 |
-| EVAL-04b | PASS | money | T1/T3 | MAG marginBps 5000 -> unit price 2900 |
+| EVAL-04 | PASS | money | T1/T3 | VITD3 margin floor: markup 0 -> price 1135 (cost + fee + 1 cent headroom), margin 1 (split floor still rejects @1125/@1132) |
+| EVAL-04b | PASS | money | T1/T3 | MAG markup 1000 -> unit price 2469, fee 19, margin 1000 (ADR-028) |
 | EVAL-P1 | PASS | money | T1/T3 | Property: line fees sum to order fee; cogs+fee+margin=total; fee half-up; deterministic (API-driven) |
 | EVAL-05 | PASS | inventory | T3 | PROBIO x6 -> 409 INSUFFICIENT_STOCK available 5; x5 succeeds |
 | EVAL-05b | PASS | inventory | T3 | ZINC x1 -> 409 available 0 |
@@ -33,7 +33,7 @@ Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 | EVAL-11 | PASS | recurring | T9 | authorized cycle pays: recurring_cycle, fee 22, margin 1527, MAG on_hand -1; balanced PAYMENT journal via T4 path |
 | EVAL-11b | PASS | recurring | T9 | schedule PROBIO x6 -> cycle on_hold INSUFFICIENT_STOCK, no journal, stock untouched |
 | EVAL-11c | PASS | recurring | T9 | unauthorized schedule run -> cycle on_hold NOT_AUTHORIZED, no journal |
-| EVAL-11d | PASS | recurring | T9 | raise MAG cogs to 3000, run cycle -> on_hold MARGIN_NEGATIVE (ADR-017 surfaced, not absorbed) |
+| EVAL-11d | PASS | recurring | T9 | raise MAG cogs to 3000, run cycle -> pays at 4561, provider still nets the 1527 markup (ADR-028 pass-through) |
 | EVAL-12 | PASS | privacy | T4 | GET /api/pay/:token strict whitelist; no cogs/fee/margin/provider economics |
 | EVAL-13 | PASS | demo | T10 | synthetic baseline + migration generated via real split/posting: includeSynthetic=false metrics identical before/after; =true surfaces migration %; reset purges synthetic to 0 and leaves real ledger untouched |
 | EVAL-15 | PASS | demo | T10 | DEMO_MODE=false -> every /api/admin/demo/* returns 403 DEMO_DISABLED |
@@ -43,7 +43,7 @@ Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 | RT-04 | PASS | redteam | T4 | 10 parallel pays (mixed keys) -> exactly 1 payment, 1 journal, stock sold once |
 | RT-05 | PASS | redteam | T3 | two concurrent sends for last units -> exactly one wins; reserved <= on_hand |
 | RT-06 | PASS | redteam | T3 | edit lines after send -> 409 ORDER_NOT_EDITABLE |
-| RT-07 | PASS | redteam | T3 | negative/zero/decimal/string/huge qty & price -> 400 INVALID_INPUT; no float reaches money |
+| RT-07 | PASS | redteam | T3 | negative/zero/decimal/string/huge qty & markup, and retired price/margin fields -> 400 INVALID_INPUT; no float reaches money |
 | RT-08 | PASS | redteam | T5 | 10 parallel refunds -> exactly 1 refund, 1 REFUND journal, restock once |
 | RT-09 | PASS | redteam | T0/T11 | provider calls restock/metrics/demo -> 403 FORBIDDEN (role guard) |
 | RT-10 | PASS | redteam | T4 | patient routes and error bodies never leak COGS/margin/fee |

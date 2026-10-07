@@ -23,7 +23,6 @@ import { adminMetricsRouter } from './admin/metrics/router'
 import { adminPayablesRouter } from './admin/payables/router'
 import { adminOperationsRouter } from './admin/operations/router'
 import { adminDemoRouter } from './admin/demo/router'
-import { adminPricingRouter } from './admin/pricing/router'
 import { adminEvidenceRouter } from './admin/evidence/router'
 
 export interface AppDeps {
@@ -100,7 +99,6 @@ export function createApp(deps: AppDeps): Express {
   admin.use(adminPayablesRouter)
   admin.use(adminOperationsRouter)
   admin.use(adminDemoRouter)
-  admin.use(adminPricingRouter)
   admin.use(adminEvidenceRouter)
   app.use('/api/admin', auth, requireRole('cerbo_admin'), admin)
 

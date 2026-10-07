@@ -137,12 +137,19 @@ ever lost to rounding.
 - **The invariant that must always hold:** for every order and every line,
   `cogs + fee + margin = total`, and `margin >= 0`. A line whose margin after its fee
   would go negative is rejected with `MARGIN_NEGATIVE` before anything is saved. The
-  provider never unknowingly pays to sell.
-- **Price is the stored truth.** The provider can type a price or a margin percent; margin
-  percent just derives a price (`price = ceil(cogs * 10000 / (10000 - marginBps))`). Only
-  the price is stored.
-- **Snapshots, not live recomputation.** When an order is sent, the unit COGS and price
-  are snapshotted onto the lines. A paid order is immutable. If catalog costs change later,
+  provider never unknowingly pays to sell (and a markup-priced line can never reach that
+  floor - see the next point).
+- **The provider types a dollar markup per unit; the server derives the price (ADR-028).**
+  The patient pays COGS + markup + the 0.75% fee, so
+  `price = ceil((cogs + max(markup, 1)) * 10000 / (10000 - 75))`. Rounding up means the
+  provider keeps what they typed: across an order, net margin is always >= the sum of
+  qty x markup (one line can show a cent less after fee allocation). A $0 markup is priced
+  as 1 cent of headroom, so a $0 line nets 0 or 1 cent and never goes negative. The price
+  and the markup are both stored on the line; the markup is what the provider and the order
+  audit see.
+- **Snapshots, not live recomputation.** A draft re-derives its prices from the current
+  COGS + markup. When an order is sent, the unit COGS is snapshotted and the price is
+  re-derived from it and stored on the lines. A paid order is immutable. If catalog costs change later,
   the order's history does not move. Corrections are new ledger entries, never edits.
 
 All of this split math lives in one place, `packages/money`, as pure integer functions
@@ -172,16 +179,17 @@ The full decision log with options considered is `docs/DECISIONS.md`. The ones t
 the product:
 
 - **ADR-001 / 002 - Fee base and who bears it.** The platform fee is 0.75% of the
-  patient-paid subtotal, and the provider bears it (it comes out of their margin). The
-  patient never sees a fee line. This matches the owner's headline metric (GMV x 75 bps)
+  patient-paid subtotal. Since ADR-028 the fee is built into the patient's unit price (cost +
+  markup + fee), so the provider keeps their markup; in the ledger it is still carved out of
+  the line total before the provider's margin. The patient never sees a fee line. This matches the owner's headline metric (GMV x 75 bps)
   and keeps the patient experience clean.
 - **ADR-003 - Rounding and allocation.** Fee computed once per order, half-up, then
   allocated to lines by largest remainder. Per-line rounding would drift by a cent or two;
   this guarantees line fees sum exactly to the order fee.
 - **ADR-004 - Margin floor.** A line's margin after its allocated fee must be >= 0 (zero is
   allowed). This prevents a provider from unknowingly selling at a loss.
-- **ADR-005 - Price is canonical.** Margin percent is an input mode that derives the price;
-  only the price is stored, so there is one source of truth.
+- **ADR-005 - Price is canonical.** *Superseded by ADR-028:* providers no longer enter a price
+  or a margin percent; they enter a per-unit dollar markup and the server derives the price.
 - **ADR-006 - Snapshot at send; paid orders immutable.** History never changes when catalog
   costs change. Corrections are new journals.
 - **ADR-007 - Append-only double-entry ledger, posted per line, enforced by DB triggers.**
@@ -211,8 +219,10 @@ the product:
   with different margins misstates profit, so the report sums real cents and uses the formula to
   verify them.
 - **ADR-017 - Recurring is a schedule that generates one child order per cycle.** Each cycle
-  takes the schedule's locked prices but a fresh COGS snapshot, and if stock is short, the margin
-  would go negative, or the schedule is not authorized, the cycle is parked `on_hold` with a
+  takes a fresh COGS snapshot and (since ADR-028) prices each line from that cost + the
+  schedule's markup, so a cost rise passes through to the patient and the provider keeps the
+  markup. If stock is short, the margin would go negative (only possible for legacy lines priced
+  before ADR-028), or the schedule is not authorized, the cycle is parked `on_hold` with a
   reason rather than silently absorbing the problem.
 - **ADR-018 - Migration off marketplaces is measured against a CSV-imported baseline.** Migration
   percent is in-house GMV divided by the baseline monthly average. The real baseline source is
@@ -227,6 +237,12 @@ the product:
   for the owning provider). Accept refunds immediately through the standard refund. Shipped
   returns are always written off; unshipped orders restock (ADR-013). Return shipping is out
   of scope.
+- **ADR-028 - Providers price with a per-unit dollar markup.** Each order line and schedule
+  line carries `markupCents` ($0 to $1,000); the patient pays COGS + markup + fee. A dollar
+  amount is what providers think in, the fee never eats into it, and a cost rise passes through
+  to the patient instead of putting a recurring cycle on hold. Cerbo Admin no longer sets a list
+  price or sees a margin percent; it sees the provider's markup in the order audit ("Markup /
+  unit") and in Metrics. Supersedes ADR-005, ADR-025 and the price clause of ADR-024.
 
 ## What is stubbed
 
@@ -282,15 +298,16 @@ and it is a better one than the earlier draft told.
 These capabilities are implemented and merged, and each is covered by at least one eval
 (see `tests/e2e/RESULTS.md`):
 
-- **Recurring orders (FR-12, ADR-017).** A provider creates a schedule for a patient with
-  locked line prices and an interval. Each cycle creates a child order (`kind =
-  recurring_cycle`) with a fresh COGS snapshot, reusing the same payment and posting path as a
+- **Recurring orders (FR-12, ADR-017, ADR-028).** A provider creates a schedule for a patient
+  with lines (product, quantity, per-unit markup) and an interval. Each cycle creates a child
+  order (`kind = recurring_cycle`) with a fresh COGS snapshot and a price of that cost + the
+  markup + fee (the patient's authorization says the amount can change if costs change), reusing the same payment and posting path as a
   one-off order, so every cycle is a normal auditable order. If stock is short, the margin would
-  go negative, or the patient has not authorized the schedule, the cycle is parked `on_hold`
+  go negative (legacy pre-markup lines only), or the patient has not authorized the schedule, the cycle is parked `on_hold`
   with a reason instead of silently charging or absorbing a loss (EVAL-11 to 11d).
 - **Cerbo Admin metrics with a synthetic toggle (FR-13, ADR-015).** GMV, refunded GMV, settled
-  GMV, platform fee revenue, sunk fees, provider net margin, and the migration view, all summed
-  from ledger cents. Each figure carries the per-order reconciliation check, and an
+  GMV, platform fee revenue, sunk fees, provider net margin, provider markup (total and average
+  per unit, ADR-028), and the migration view, all summed from ledger cents. Each figure carries the per-order reconciliation check, and an
   `includeSynthetic` toggle (default off) decides whether demo rows are counted (EVAL-09, 13).
 - **CSV baseline import and the migration percentage (FR-14, ADR-018).** A Cerbo Admin uploads
   historical marketplace volume as CSV; rows are validated one by one and bad rows are reported

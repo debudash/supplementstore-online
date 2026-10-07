@@ -28,6 +28,7 @@ import {
   queryRefundedGmvCents,
   querySunkFeeCents,
   queryProviderNetMarginCents,
+  queryProviderMarkup,
   queryPaidOrderCount,
   querySettledOrderSplits,
   queryBaselineByProvider,
@@ -49,10 +50,9 @@ function intDiv(numerator: number, denominator: number): number {
 
 /**
  * The reconciliation check (ADR-015, docs/METRICS.md). For each settled order compute the
- * owner's formula from raw snapshots: subtotal x (margin% - 0.0075) = (subtotal - cogs)
- * - subtotal x 0.0075, whose integer realisation of the 0.75% term is orderFee(subtotal)
- * (half-up). Summed, it must match the recorded ledger figure (provider net margin from
- * settled sales) within 1 cent per order.
+ * owner's formula from raw snapshots: subtotal - cogs - orderFee(subtotal), where
+ * orderFee is the half-up 0.75% fee. Summed, it must match the recorded ledger figure
+ * (provider net margin from settled sales) within 1 cent per order.
  */
 function reconcile(
   settled: Array<{ subtotalCents: number; cogsCents: number }>,
@@ -80,7 +80,8 @@ async function computeBlock(
     providerNetMarginCents,
     recurringGmvCents,
     orderCount,
-    settled
+    settled,
+    markup
   ] = await Promise.all([
     queryGmvCents(db, scope),
     queryPlatformFeeCents(db, scope),
@@ -89,7 +90,8 @@ async function computeBlock(
     queryProviderNetMarginCents(db, scope),
     queryRecurringGmvCents(db, scope),
     queryPaidOrderCount(db, scope),
-    querySettledOrderSplits(db, scope)
+    querySettledOrderSplits(db, scope),
+    queryProviderMarkup(db, scope)
   ])
 
   const block: MetricsBlock = {
@@ -100,6 +102,9 @@ async function computeBlock(
     sunkFeeCents,
     providerNetMarginCents,
     providerNetAfterSunkFeesCents: providerNetMarginCents - sunkFeeCents,
+    providerMarkupCents: markup.markupCents,
+    markupUnits: markup.units,
+    avgMarkupPerUnitCents: intDiv(markup.markupCents, markup.units),
     orderCount,
     aovCents: intDiv(gmvCents, orderCount),
     recurringGmvCents,

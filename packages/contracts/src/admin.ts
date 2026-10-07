@@ -37,6 +37,13 @@ export interface MetricsBlock {
   providerNetMarginCents: number
   /** Provider net after sunk fees = providerNetMargin - sunkFees. */
   providerNetAfterSunkFeesCents: number
+  /** The providers' own markup on settled sales (ADR-028): sum(qty x unit markup) over
+   *  lines with a tracked markup. Net margin is always >= this; the gap is the round-up. */
+  providerMarkupCents: number
+  /** Units on those lines (lines priced before ADR-028 have no markup and are excluded). */
+  markupUnits: number
+  /** providerMarkupCents / markupUnits, integer division (display only; 0 when none). */
+  avgMarkupPerUnitCents: number
   /** Paid orders in the period. */
   orderCount: number
   /** Average order value = Total GMV / order count (integer division, display only). */

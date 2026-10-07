@@ -1,50 +1,49 @@
 <script setup lang="ts">
 // Add a product to the draft (FR-1, FR-2, FR-3).
 //
-// PRICE IS NOT EDITABLE IN AN ORDER (owner requirement). The provider sees the catalog
-// list price (read-only) and can only change it through Margin %. With margin blank we
-// send the list price as-is; with a margin we send marginBps and the SERVER derives the
-// price from Cerbo's cost (priceFromMarginBps, ADR-005). The UI never computes a price.
-// List prices themselves are maintained by Cerbo Admin.
+// PRICE IS NOT TYPED (owner requirement). The provider enters their per-unit dollar
+// markup (required, $0 to $1,000); we send markupCents and the SERVER derives the price:
+// Cerbo's cost + markup, grossed up so the 0.75% fee is covered (priceFromMarkupCents,
+// ADR-028). The live preview shows what the patient pays. The UI never computes a price.
 //
 // Availability: out-of-stock products stay listed but disabled (FR-3 AC3); the chosen
 // product shows an In stock / Low stock / Out of stock chip from the API's `available`.
 import { ref, computed, watch } from 'vue'
 import type { ProductView, PricePreview } from '@cerbo/contracts'
-import { formatCents, marginPercentToBps } from './format'
-import { formatBps } from '../../utils/money'
+import { formatCents, dollarsToCents } from './format'
 import DemoBadge from '../DemoBadge.vue'
 import QuantityStepper from '../ui/QuantityStepper.vue'
-import MarginPreview from './MarginPreview.vue'
+import MarkupPreview from './MarkupPreview.vue'
 
 const props = defineProps<{
   products: ProductView[]
   busy: boolean
-  /** Error from the last add attempt (INSUFFICIENT_STOCK / MARGIN_NEGATIVE / other). */
+  /** Error from the last add attempt (INSUFFICIENT_STOCK / other). */
   error: string | null
   /** Quantity already on this draft per SKU. A SKU already on the order is hidden here
    *  (change its quantity on the item row instead); removing the item brings it back. */
   onOrder?: Record<string, number>
-  /** Server price preview for a margin (ADR-025). Optional: without it no preview shows. */
-  previewPrice?: (sku: string, marginBps: number) => Promise<PricePreview>
+  /** Server price preview for a markup (ADR-028). Optional: without it no preview shows. */
+  previewPrice?: (sku: string, markupCents: number) => Promise<PricePreview>
 }>()
 
 const emit = defineEmits<{
-  (e: 'add', payload: { sku: string; qty: number; unitPriceCents?: number; marginBps?: number }): void
+  (e: 'add', payload: { sku: string; qty: number; markupCents: number }): void
 }>()
 
 const LOW_STOCK = 5
+/** Largest per-unit markup the server accepts: $1,000 (ADR-028). */
+const MAX_MARKUP_CENTS = 100000
 
 const sku = ref<string>('')
 const qty = ref<number | string>(1)
-const marginInput = ref<string>('')
+const markupInput = ref<string>('')
 const productError = ref<string | null>(null)
 const qtyError = ref<string | null>(null)
-const marginError = ref<string | null>(null)
+const markupError = ref<string | null>(null)
 
 const addableProducts = computed(() => props.products.filter((p) => (props.onOrder?.[p.sku] ?? 0) === 0))
 const selectedProduct = computed(() => addableProducts.value.find((p) => p.sku === sku.value) ?? null)
-const selectedListPrice = computed(() => selectedProduct.value?.listPriceCents ?? null)
 
 function stockLabel(available: number): string {
   if (available <= 0) return 'Out of stock'
@@ -60,14 +59,14 @@ function stockTone(available: number): string {
 watch(addableProducts, (list) => {
   if (sku.value && !list.some((p) => p.sku === sku.value)) {
     sku.value = ''
-    marginInput.value = ''
+    markupInput.value = ''
   }
 })
 
 function submit(): void {
   productError.value = null
   qtyError.value = null
-  marginError.value = null
+  markupError.value = null
   if (!sku.value) {
     productError.value = 'Choose a product.'
     return
@@ -77,20 +76,12 @@ function submit(): void {
     qtyError.value = 'Quantity must be a whole number from 1 to 100.'
     return
   }
-  if (marginInput.value.trim() !== '') {
-    const bps = marginPercentToBps(marginInput.value)
-    if (bps === null || bps > 9500) {
-      marginError.value = 'Enter a margin percent from 0 to 95.'
-      return
-    }
-    emit('add', { sku: sku.value, qty: qtyNum, marginBps: bps })
+  const markupCents = dollarsToCents(markupInput.value)
+  if (markupCents === null || markupCents > MAX_MARKUP_CENTS) {
+    markupError.value = 'Enter your markup per unit in dollars, from 0 to 1000 (e.g. 10 or 12.50).'
     return
   }
-  if (selectedListPrice.value === null) {
-    productError.value = 'Choose a product.'
-    return
-  }
-  emit('add', { sku: sku.value, qty: qtyNum, unitPriceCents: selectedListPrice.value })
+  emit('add', { sku: sku.value, qty: qtyNum, markupCents })
 }
 </script>
 
@@ -132,41 +123,29 @@ function submit(): void {
       </div>
 
       <div class="field">
-        <span id="add-price-label" class="label">List price <span class="tag">read-only</span></span>
-        <output class="price" aria-labelledby="add-price-label" data-test="unit-price">{{ selectedListPrice !== null ? formatCents(selectedListPrice) : '-' }}</output>
-        <span v-if="selectedProduct && typeof selectedProduct.listMarginBps === 'number'" class="list-margin" data-testid="list-margin">
-          Margin at list: <strong>{{ formatBps(selectedProduct.listMarginBps) }}</strong>
-        </span>
-      </div>
-
-      <div class="field">
         <span class="label" aria-hidden="true">Quantity</span>
         <QuantityStepper v-model="qty" label="Quantity" :disabled="busy" :invalid="!!qtyError" data-testid="add-qty" />
         <span v-if="qtyError" class="err">{{ qtyError }}</span>
       </div>
 
-      <div class="field margin">
-        <span class="label-row">
-          <label for="add-margin" class="label">Margin %</label>
-          <span class="tag">optional</span>
-          <DemoBadge reason="In production a Provider Admin sets margin in a separate login; it is editable on the doctor screen only to make the slice demonstrable." />
-        </span>
-        <span class="pct">
+      <div class="field markup">
+        <label for="add-markup" class="label">Your markup <span class="tag">$ per unit</span></label>
+        <span class="dollar">
+          <span aria-hidden="true">$</span>
           <input
-            id="add-margin"
-            v-model="marginInput"
+            id="add-markup"
+            v-model="markupInput"
             type="text"
             inputmode="decimal"
-            placeholder="e.g. 40"
+            placeholder="e.g. 10.00"
             :disabled="busy"
-            :aria-invalid="marginError ? 'true' : undefined"
-            aria-describedby="add-margin-hint"
-            data-test="margin-input"
+            :aria-invalid="markupError ? 'true' : undefined"
+            aria-describedby="add-markup-hint"
+            data-test="markup-input"
           />
-          <span aria-hidden="true">%</span>
         </span>
-        <span v-if="marginError" class="err">{{ marginError }}</span>
-        <MarginPreview v-else :sku="sku || null" :margin-input="marginInput" :preview="previewPrice" />
+        <span v-if="markupError" class="err">{{ markupError }}</span>
+        <MarkupPreview v-else :sku="sku || null" :markup-input="markupInput" :preview="previewPrice" />
       </div>
 
       <div class="submit">
@@ -174,10 +153,9 @@ function submit(): void {
       </div>
     </div>
 
-    <p id="add-margin-hint" class="hint">
-      Blank margin uses the list price. A margin sets the price from Cerbo's cost so that
-      your share of the price is that percent, before the platform fee - it can raise or
-      lower the price. You will see the resulting price as you type.
+    <p id="add-markup-hint" class="hint">
+      The patient pays Cerbo's cost plus your markup plus the 0.75% platform fee, so you
+      keep the markup you enter. You will see the patient's price as you type.
     </p>
     <p v-if="error" class="field-alert" role="alert" data-test="add-error">{{ error }}</p>
   </form>
@@ -243,27 +221,12 @@ function submit(): void {
 .cogs strong {
   color: var(--text);
 }
-.price {
-  display: flex;
-  align-items: center;
-  min-height: 2.5rem;
-  font-size: var(--text-lg);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.list-margin {
-  font-size: var(--text-sm);
-  color: var(--muted);
-}
-.list-margin strong {
-  color: var(--text);
-}
-.pct {
+.dollar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
-.pct input {
+.dollar input {
   width: 100%;
   min-width: 5rem;
 }

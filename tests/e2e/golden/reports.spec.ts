@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeEach, describe, expect } from 'vitest'
 import { anon, asUser, db, evalCase, resetState, ADMIN, SKU } from './_harness'
+import { markupFor } from './_harness'
 
 beforeEach(async () => {
   await resetState()
@@ -63,7 +64,7 @@ async function payNewOrder(world: World, lines: Line[]): Promise<string> {
   expect(draft.status).toBe(201)
   const orderId = draft.body.id as string
   for (const l of lines) {
-    const r = await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, unitPriceCents: l.price })
+    const r = await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, markupCents: markupFor(l.sku, l.price) })
     expect(r.status).toBe(200)
   }
   const send = await asUser(world.userId).post(`/api/orders/${orderId}/send`).send({})

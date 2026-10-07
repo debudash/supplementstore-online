@@ -17,6 +17,9 @@ import { db } from '../../../apps/api/src/db/knex'
 import { createApp } from '../../../apps/api/src/app'
 import { createKnexActorLoader } from '../../../apps/api/src/auth/loadActor'
 import { recordResult, type Status } from './reporter'
+import { markupFor } from '../../../apps/api/test/pricing'
+
+export { markupFor }
 
 export { db }
 export const app = createApp({ db, loadActor: createKnexActorLoader(db) })
@@ -60,7 +63,7 @@ export const CANONICAL_STOCK: Record<string, number> = {
 }
 
 /** Canonical unit COGS from the seed table. Restored each scenario because EVAL-11d
- *  mutates MAG's COGS to force a MARGIN_NEGATIVE cycle hold. */
+ *  mutates MAG's COGS to show a cost rise passing through to the cycle price. */
 export const CANONICAL_COGS: Record<string, number> = {
   [SKU.MAG]: 1450,
   [SKU.VITD]: 1125,
@@ -134,7 +137,7 @@ export async function sendOrderHttp(
   for (const l of lines) {
     const r = await asUser(user)
       .post(`/api/orders/${orderId}/lines`)
-      .send({ sku: l.sku, qty: l.qty, unitPriceCents: l.price })
+      .send({ sku: l.sku, qty: l.qty, markupCents: markupFor(l.sku, l.price) })
     expect(r.status).toBe(200)
   }
   const send = await asUser(user).post(`/api/orders/${orderId}/send`).send({})
@@ -186,7 +189,7 @@ export async function payNewOrderAs(world: ProviderWorld, lines: Line[]): Promis
   expect(draft.status).toBe(201)
   const orderId = draft.body.id as string
   for (const l of lines) {
-    const r = await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, unitPriceCents: l.price })
+    const r = await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, markupCents: markupFor(l.sku, l.price) })
     expect(r.status).toBe(200)
   }
   const send = await asUser(world.userId).post(`/api/orders/${orderId}/send`).send({})

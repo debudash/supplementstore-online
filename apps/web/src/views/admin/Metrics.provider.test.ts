@@ -21,7 +21,8 @@ const ANA = 'aaaaaaaa-0000-0000-0000-000000000001'
 const BEN = 'aaaaaaaa-0000-0000-0000-000000000002'
 const block = (gmv: number) => ({
   gmvCents: gmv, refundedGmvCents: 0, settledGmvCents: gmv, platformFeeCents: 66, sunkFeeCents: 0,
-  providerNetMarginCents: 3596, providerNetAfterSunkFeesCents: 3596, orderCount: 1, aovCents: gmv,
+  providerNetMarginCents: 3596, providerNetAfterSunkFeesCents: 3596, providerMarkupCents: 3595, markupUnits: 2,
+  avgMarkupPerUnitCents: 1797, orderCount: 1, aovCents: gmv,
   recurringGmvCents: 0, recurringShareBps: 0
 })
 const recon = { formulaCents: 3596, ledgerCents: 3596, diffCents: 0, toleranceCents: 1, pass: true }

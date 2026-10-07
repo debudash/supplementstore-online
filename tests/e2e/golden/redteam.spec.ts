@@ -24,6 +24,7 @@ import {
 import { createDraft, sendOrder } from '../../../apps/api/src/orders/service'
 import { createKnexActorLoader } from '../../../apps/api/src/auth/loadActor'
 import type { Actor } from '../../../apps/api/src/auth/types'
+import { markupFor } from './_harness'
 
 beforeEach(async () => {
   await resetState()
@@ -38,7 +39,7 @@ describe('red-team (golden)', () => {
     const q = await asUser(PROV_BEN).get(`/api/orders/${anaDraft}/quote`)
     expect(q.status).toBe(404)
     expect(q.body.error.code).toBe('NOT_FOUND')
-    const add = await asUser(PROV_BEN).post(`/api/orders/${anaDraft}/lines`).send({ sku: SKU.MAG, qty: 1, unitPriceCents: 2999 })
+    const add = await asUser(PROV_BEN).post(`/api/orders/${anaDraft}/lines`).send({ sku: SKU.MAG, qty: 1, markupCents: markupFor(SKU.MAG, 2999) })
     expect(add.status).toBe(404)
     // Audit of a paid order is also not visible cross-provider.
     const { orderId, token } = await sendOrderHttp(EVAL01_LINES)
@@ -106,8 +107,8 @@ describe('red-team (golden)', () => {
 
     const anaDraft = (await createDraft(db, ana, { patientId: PAT_CARA })).id
     const benDraft = (await createDraft(db, ben, { patientId: PAT_DEV })).id
-    await asUser(PROV_ANA).post(`/api/orders/${anaDraft}/lines`).send({ sku: SKU.PROBIO, qty: 5, unitPriceCents: 4000 })
-    await asUser(PROV_BEN).post(`/api/orders/${benDraft}/lines`).send({ sku: SKU.PROBIO, qty: 5, unitPriceCents: 4000 })
+    await asUser(PROV_ANA).post(`/api/orders/${anaDraft}/lines`).send({ sku: SKU.PROBIO, qty: 5, markupCents: markupFor(SKU.PROBIO, 4000) })
+    await asUser(PROV_BEN).post(`/api/orders/${benDraft}/lines`).send({ sku: SKU.PROBIO, qty: 5, markupCents: markupFor(SKU.PROBIO, 4000) })
 
     const results = await Promise.allSettled([sendOrder(db, ana, anaDraft), sendOrder(db, ben, benDraft)])
     const fulfilled = results.filter((r) => r.status === 'fulfilled')
@@ -123,11 +124,11 @@ describe('red-team (golden)', () => {
 
   evalCase('RT-06', 'edit lines after send -> 409 ORDER_NOT_EDITABLE', async () => {
     const id = await newDraft()
-    const addRes = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.MAG, qty: 1, unitPriceCents: 2999 })
+    const addRes = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.MAG, qty: 1, markupCents: markupFor(SKU.MAG, 2999) })
     const lineId = addRes.body.lines[0].id
     await asUser(PROV_ANA).post(`/api/orders/${id}/send`).send({})
 
-    const add = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.VITD, qty: 1, unitPriceCents: 2499 })
+    const add = await asUser(PROV_ANA).post(`/api/orders/${id}/lines`).send({ sku: SKU.VITD, qty: 1, markupCents: markupFor(SKU.VITD, 2499) })
     expect(add.status).toBe(409)
     expect(add.body.error.code).toBe('ORDER_NOT_EDITABLE')
     const patch = await asUser(PROV_ANA).patch(`/api/orders/${id}/lines/${lineId}`).send({ qty: 2 })
@@ -136,17 +137,19 @@ describe('red-team (golden)', () => {
     expect(del.status).toBe(409)
   })
 
-  evalCase('RT-07', 'bad qty/price inputs -> 400 INVALID_INPUT (no float reaches money)', async () => {
+  evalCase('RT-07', 'bad qty/markup inputs -> 400 INVALID_INPUT (no float reaches money)', async () => {
     const cases: Array<unknown> = [
-      { sku: SKU.MAG, qty: 0, unitPriceCents: 2999 },
-      { sku: SKU.MAG, qty: 1.5, unitPriceCents: 2999 },
-      { sku: SKU.MAG, qty: '5', unitPriceCents: 2999 },
-      { sku: SKU.MAG, qty: 101, unitPriceCents: 2999 },
-      { sku: SKU.MAG, qty: 1, unitPriceCents: '29.99' },
-      { sku: SKU.MAG, qty: 1, unitPriceCents: -5 },
-      { sku: SKU.MAG, qty: 1, unitPriceCents: 29.99 },
-      { sku: SKU.MAG, qty: 1, unitPriceCents: Number.MAX_SAFE_INTEGER + 2 },
-      { sku: SKU.MAG, qty: 1, marginBps: 9600 },
+      { sku: SKU.MAG, qty: 0, markupCents: markupFor(SKU.MAG, 2999) },
+      { sku: SKU.MAG, qty: 1.5, markupCents: 1000 },
+      { sku: SKU.MAG, qty: '5', markupCents: 1000 },
+      { sku: SKU.MAG, qty: 101, markupCents: markupFor(SKU.MAG, 2999) },
+      { sku: SKU.MAG, qty: 1, markupCents: '10.00' },
+      { sku: SKU.MAG, qty: 1, markupCents: -5 },
+      { sku: SKU.MAG, qty: 1, markupCents: 10.5 },
+      { sku: SKU.MAG, qty: 1, markupCents: 100001 },
+      { sku: SKU.MAG, qty: 1, markupCents: Number.MAX_SAFE_INTEGER + 2 },
+      { sku: SKU.MAG, qty: 1, unitPriceCents: 2999 },
+      { sku: SKU.MAG, qty: 1, marginBps: 4000 },
       { sku: SKU.MAG, qty: 1 }
     ]
     for (const body of cases) {

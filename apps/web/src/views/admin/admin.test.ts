@@ -22,6 +22,7 @@ vi.mock('../../api/client', () => {
 const block = {
   gmvCents: 100000, refundedGmvCents: 0, settledGmvCents: 100000, platformFeeCents: 750,
   sunkFeeCents: 0, providerNetMarginCents: 40000, providerNetAfterSunkFeesCents: 40000,
+  providerMarkupCents: 39000, markupUnits: 26, avgMarkupPerUnitCents: 1500,
   orderCount: 4, aovCents: 25000, recurringGmvCents: 0, recurringShareBps: 0
 }
 const recon = { formulaCents: 40000, ledgerCents: 40000, diffCents: 0, toleranceCents: 4, pass: true }

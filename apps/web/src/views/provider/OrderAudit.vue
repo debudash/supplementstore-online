@@ -270,6 +270,7 @@ function signed(n: number): string {
                   <th scope="col">Item</th>
                   <th scope="col" class="num">Qty</th>
                   <th scope="col" class="num">Unit price</th>
+                  <th scope="col" class="num">Markup / unit</th>
                   <th scope="col" class="num">Line total</th>
                   <th scope="col" class="num">COGS</th>
                   <th scope="col" class="num">Fee</th>
@@ -281,6 +282,10 @@ function signed(n: number): string {
                   <td data-label="Item"><span class="item-name">{{ l.name }}</span> <span class="subtle">{{ l.sku }}</span></td>
                   <td data-label="Qty" class="num">{{ l.qty }}</td>
                   <td data-label="Unit price" class="num"><Money :cents="l.unitPriceCents" /></td>
+                  <td data-label="Markup / unit" class="num" data-test="audit-markup">
+                    <Money v-if="l.unitMarkupCents !== null" :cents="l.unitMarkupCents" />
+                    <span v-else class="subtle">-</span>
+                  </td>
                   <td data-label="Line total" class="num"><Money :cents="l.lineTotalCents" /></td>
                   <td data-label="COGS" class="num"><Money :cents="l.lineCogsCents" /></td>
                   <td data-label="Fee" class="num"><Money :cents="l.lineFeeCents" /></td>
@@ -289,7 +294,7 @@ function signed(n: number): string {
               </tbody>
               <tfoot>
                 <tr>
-                  <td colspan="3">Order totals</td>
+                  <td colspan="4">Order totals</td>
                   <td data-label="Line total" class="num"><Money :cents="audit.order.subtotalCents" /></td>
                   <td data-label="COGS" class="num"><Money :cents="audit.order.cogsCents" /></td>
                   <td data-label="Fee" class="num"><Money :cents="audit.order.feeCents" /></td>

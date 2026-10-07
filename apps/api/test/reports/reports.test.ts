@@ -21,6 +21,7 @@ import { db } from '../../src/db/knex'
 import { createApp } from '../../src/app'
 import { createKnexActorLoader } from '../../src/auth/loadActor'
 import { seedCore } from '../../src/db/seeds/01_core'
+import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
 function migrateViaCli(): void {
@@ -107,7 +108,7 @@ async function payNewOrder(world: ProviderWorld, lines: Line[]): Promise<string>
   for (const l of lines) {
     const r = await asUser(world.userId)
       .post(`/api/orders/${orderId}/lines`)
-      .send({ sku: l.sku, qty: l.qty, unitPriceCents: l.price })
+      .send({ sku: l.sku, qty: l.qty, markupCents: markupFor(l.sku, l.price) })
     expect(r.status).toBe(200)
   }
   const send = await asUser(world.userId).post(`/api/orders/${orderId}/send`).send({})
