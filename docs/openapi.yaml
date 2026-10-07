@@ -1,0 +1,1594 @@
+openapi: 3.1.0
+info:
+  title: Cerbo Supplement Store API
+  version: "1.0.0"
+  description: |
+    REST API for the Cerbo supplement-store vertical slice. This document is generated
+    from the merged implementation (apps/api/src and packages/contracts), not from the
+    pre-implementation summary in docs/ARCHITECTURE.md section 8 - so it reflects what the
+    deployed app actually does, including the patient "My Orders" listing, the pay-link
+    fields on order summaries and audit, and the T10/T11 admin routes.
+
+    MONEY: every `*Cents` field is an INTEGER number of cents (e.g. 2999 means $29.99).
+    There are never floats or decimal strings for money anywhere in this API.
+
+    AUTH (demo): most routes identify the caller with the `X-Demo-User` header (a DEMO
+    stub, not real authentication - see the DemoUser security scheme). The patient payment
+    routes under `/api/pay/{token}` take NO `X-Demo-User`; the unguessable token in the URL
+    path authenticates them instead.
+
+    OWNERSHIP: a resource the caller does not own returns 404 (not 403), so existence is
+    not leaked. A wrong ROLE returns 403 FORBIDDEN.
+
+    SEED DATA for immediate use after import (from docs/EVALS.md):
+      - X-Demo-User values: `prov-ana` (provider, Riverside), `pat-cara` (patient),
+        `admin-cerbo` (Cerbo Admin). Other seed users: `prov-ben`, `pat-dev`.
+      - Patient id for pat-cara: `cccccccc-0000-0000-0000-000000000001`.
+      - SKUs: `MAG-GLY-120` (unit COGS 1450), `VITD3-K2` (unit COGS 1125),
+        `OMEGA3-1000`, `PROBIO-50B`, `ZINC-30`.
+      - EVAL-01 order: MAG-GLY-120 x2 @ 2999 and VITD3-K2 x1 @ 2499.
+      - The patient pay token is NOT guessable: get it from the `send` response
+        (`order.payToken` / `payUrl`) or from `GET /api/orders` (`payToken`/`payPath`).
+
+servers:
+  - url: https://cerbo-api-production.up.railway.app
+    description: Live Railway deployment
+  - url: http://localhost:3000
+    description: Local dev (docker compose up -d db && npm run dev)
+
+tags:
+  - name: Health
+  - name: Provider - catalog & patients
+  - name: Provider - orders
+  - name: Provider - recurring
+  - name: Provider - reports
+  - name: Patient - listing
+  - name: Patient - pay (token)
+  - name: Cerbo Admin - inventory
+  - name: Cerbo Admin - operations
+  - name: Cerbo Admin - metrics & payables
+  - name: Cerbo Admin - demo data
+
+security:
+  - DemoUser: []
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check (DB connectivity)
+      description: 200 when the DB is reachable, 503 otherwise. No auth.
+      security: []
+      responses:
+        "200":
+          description: Service healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+              example: { status: ok, db: { connected: true } }
+        "503":
+          description: Database unreachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+              example: { status: error, db: { connected: false, error: "connection refused" } }
+
+  /api/products:
+    get:
+      tags: [Provider - catalog & patients]
+      summary: List the shared product catalog
+      description: |
+        The single shared inventory pool (ADR-009). `available` = on_hand - reserved.
+        `unitCogsCents` is integer cents.
+      responses:
+        "200":
+          description: Catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  products:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProductView" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/patients:
+    get:
+      tags: [Provider - catalog & patients]
+      summary: List the provider's own-practice patients
+      description: Ownership-scoped to the provider's practice; never the full table.
+      responses:
+        "200":
+          description: Patient roster
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  patients:
+                    type: array
+                    items: { $ref: "#/components/schemas/PatientRosterItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/orders:
+    post:
+      tags: [Provider - orders]
+      summary: Open a draft order for one of the provider's patients
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateOrderRequest" }
+            example: { patientId: "cccccccc-0000-0000-0000-000000000001" }
+      responses:
+        "201":
+          description: Draft order created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderView" }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Patient not found or not in the provider's practice (ownership miss)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [Provider - orders]
+      summary: List the provider's own orders
+      description: |
+        Each row carries `payToken`/`payPath` so the pay link can be recovered after send
+        (null for drafts). Provider-scoped - never another provider's orders.
+      parameters:
+        - { name: status, in: query, required: false, schema: { $ref: "#/components/schemas/OrderStatus" } }
+        - { name: from, in: query, required: false, description: "ISO timestamp lower bound on created_at", schema: { type: string } }
+        - { name: to, in: query, required: false, description: "ISO timestamp upper bound on created_at", schema: { type: string } }
+      responses:
+        "200":
+          description: Order summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrderSummary" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/orders/{id}/lines:
+    post:
+      tags: [Provider - orders]
+      summary: Add a line to a draft order
+      description: |
+        Provide exactly one of `unitPriceCents` (integer cents) or `marginBps` (basis
+        points, 1% = 100). A repeated SKU merges into the existing line.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddLineRequest" }
+            examples:
+              byPrice: { summary: EVAL-01 line 1, value: { sku: "MAG-GLY-120", qty: 2, unitPriceCents: 2999 } }
+              byMargin: { summary: Price from margin %, value: { sku: "VITD3-K2", qty: 1, marginBps: 5000 } }
+      responses:
+        "200":
+          description: Updated order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderView" }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/OrderNotEditable" }
+        "422": { $ref: "#/components/responses/MarginNegative" }
+
+  /api/orders/{id}/lines/{lineId}:
+    patch:
+      tags: [Provider - orders]
+      summary: Edit a line's quantity and/or price while the order is a draft
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+        - { $ref: "#/components/parameters/LineId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateLineRequest" }
+            example: { qty: 3 }
+      responses:
+        "200":
+          description: Updated order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderView" }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/OrderNotEditable" }
+        "422": { $ref: "#/components/responses/MarginNegative" }
+    delete:
+      tags: [Provider - orders]
+      summary: Remove a line from a draft order
+      parameters:
+        - { $ref: "#/components/parameters/OrderId" }
+        - { $ref: "#/components/parameters/LineId" }
+      responses:
+        "200":
+          description: Updated order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderView" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/OrderNotEditable" }
+
+  /api/orders/{id}/quote:
+    get:
+      tags: [Provider - orders]
+      summary: Live split preview for a draft (fee, COGS, margin)
+      description: All amounts integer cents; computed by packages/money, not stored yet.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Quote
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuoteResponse" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/MarginNegative" }
+
+  /api/orders/{id}/send:
+    post:
+      tags: [Provider - orders]
+      summary: Snapshot, reserve stock, and issue the patient pay link
+      description: |
+        Moves draft -> sent, snapshots the split, reserves stock (7-day expiry), and
+        returns the copyable pay URL. The returned `order.payToken` is what the patient
+        uses at `/api/pay/{token}`.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Sent order plus pay link
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SendResponse" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Order not editable (not a draft) or insufficient stock to reserve
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422": { $ref: "#/components/responses/MarginNegative" }
+
+  /api/orders/{id}/cancel:
+    post:
+      tags: [Provider - orders]
+      summary: Cancel a draft or sent order (releases any reservation)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Cancelled order
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderView" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Order cannot be cancelled from its current status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/orders/{id}/refund:
+    post:
+      tags: [Provider - orders]
+      summary: Refund a paid order (provider's own)
+      description: |
+        Whole-order refund (ADR-014). The patient receives 100% of the subtotal; the
+        platform fee is retained and charged to the provider (ADR-012). All amounts
+        integer cents.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefundRequest" }
+            example: { reasonCode: patient_request }
+      responses:
+        "200":
+          description: Refund result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RefundResult" }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: ALREADY_REFUNDED or NOT_REFUNDABLE (order is not in a refundable state)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/orders/{id}/audit:
+    get:
+      tags: [Provider - orders]
+      summary: Full money record for an order (provider's own)
+      description: |
+        Snapshot, lines, status history, payments, refunds, journals with ledger entries,
+        inventory movements, and an invariants block. Provider surface - carries full
+        economics (all integer cents). Includes `payToken`/`payPath` on the order.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200":
+          description: Audit record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditResponse" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/schedules:
+    post:
+      tags: [Provider - recurring]
+      summary: Create a recurring schedule for a patient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateScheduleRequest" }
+            example:
+              patientId: "cccccccc-0000-0000-0000-000000000001"
+              intervalDays: 30
+              lines:
+                - { sku: "MAG-GLY-120", qty: 2, unitPriceCents: 2999 }
+      responses:
+        "201":
+          description: Schedule created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScheduleView" }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/MarginNegative" }
+    get:
+      tags: [Provider - recurring]
+      summary: List the provider's recurring schedules
+      responses:
+        "200":
+          description: Schedules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schedules:
+                    type: array
+                    items: { $ref: "#/components/schemas/ScheduleView" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/schedules/{id}/pause:
+    post:
+      tags: [Provider - recurring]
+      summary: Pause a schedule
+      parameters: [{ $ref: "#/components/parameters/ScheduleId" }]
+      responses:
+        "200": { description: Updated schedule, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleView" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Schedule not in a pausable state", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/schedules/{id}/resume:
+    post:
+      tags: [Provider - recurring]
+      summary: Resume a paused schedule
+      parameters: [{ $ref: "#/components/parameters/ScheduleId" }]
+      responses:
+        "200": { description: Updated schedule, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleView" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Schedule not in a resumable state", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/schedules/{id}/cancel:
+    post:
+      tags: [Provider - recurring]
+      summary: Cancel a schedule
+      parameters: [{ $ref: "#/components/parameters/ScheduleId" }]
+      responses:
+        "200": { description: Updated schedule, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleView" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "Schedule already cancelled", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/schedules/{id}/run:
+    post:
+      tags: [Provider - recurring]
+      summary: Run the schedule's due cycle now (demo convenience)
+      description: Creates the next cycle order if due, or retries an on_hold cycle.
+      parameters: [{ $ref: "#/components/parameters/ScheduleId" }]
+      responses:
+        "200": { description: Run result, content: { application/json: { schema: { $ref: "#/components/schemas/RunCycleResult" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/reports/sales:
+    get:
+      tags: [Provider - reports]
+      summary: Provider sales dashboard (from the ledger)
+      description: All figures integer cents, read from ledger entries for THIS provider.
+      parameters:
+        - { $ref: "#/components/parameters/From" }
+        - { $ref: "#/components/parameters/To" }
+        - { $ref: "#/components/parameters/IncludeSynthetic" }
+      responses:
+        "200": { description: Sales report, content: { application/json: { schema: { $ref: "#/components/schemas/SalesReport" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/reports/payables:
+    get:
+      tags: [Provider - reports]
+      summary: Provider payable report (balance owed, from the ledger)
+      parameters:
+        - { $ref: "#/components/parameters/From" }
+        - { $ref: "#/components/parameters/To" }
+        - { $ref: "#/components/parameters/IncludeSynthetic" }
+      responses:
+        "200": { description: Payable report, content: { application/json: { schema: { $ref: "#/components/schemas/PayableReport" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/patient/orders:
+    get:
+      tags: [Patient - listing]
+      summary: The calling patient's own orders, with their pay links
+      description: |
+        Role = patient, ownership-scoped to the caller (actor.patientId). Returns only the
+        caller's SENT orders (drafts excluded), most recent first. Built through the same
+        whitelist serializer as the pay page, so no COGS/fee/margin. `amountCents` is the
+        subtotal (integer cents). This does NOT replace the token model - payment still
+        happens at `/api/pay/{token}`; this only lets a patient find their own link.
+      responses:
+        "200":
+          description: The patient's orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items: { $ref: "#/components/schemas/PatientOrderListItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/pay/{token}:
+    get:
+      tags: [Patient - pay (token)]
+      summary: Patient-safe view of an order (whitelisted fields only)
+      description: |
+        NO X-Demo-User - the unguessable `token` in the path authenticates this request.
+        The response is a strict whitelist: items, totalCents, status, patientFirstName.
+        Never COGS, fee, margin, or provider identity. `totalCents` is integer cents.
+      security: []
+      parameters: [{ $ref: "#/components/parameters/PayToken" }]
+      responses:
+        "200": { description: Patient view, content: { application/json: { schema: { $ref: "#/components/schemas/PatientPayView" } } } }
+        "404":
+          description: No order for this pay link (also the response for a bad/guessed token)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      tags: [Patient - pay (token)]
+      summary: Pay the order (idempotent; server ignores any client-sent amount)
+      description: |
+        NO X-Demo-User. Provide a fresh `idempotencyKey`; re-submitting the same key
+        returns the original result. The server charges the snapshot subtotal and ignores
+        any price/total in the body. The stub gateway DECLINES when the amount is exactly
+        1313 cents (demo trigger).
+      security: []
+      parameters: [{ $ref: "#/components/parameters/PayToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PayRequest" }
+            example: { idempotencyKey: "11111111-1111-1111-1111-111111111111" }
+      responses:
+        "200": { description: Paid, content: { application/json: { schema: { $ref: "#/components/schemas/PayResult" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "402":
+          description: PAYMENT_DECLINED (stub gateway declined)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: ALREADY_PAID, ORDER_EXPIRED, ORDER_NOT_PAYABLE, or IDEMPOTENCY_CONFLICT
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/pay/schedule/{token}:
+    get:
+      tags: [Patient - pay (token)]
+      summary: Patient-safe recurring-schedule authorization view
+      description: NO X-Demo-User. Whitelisted fields only; `perCycleTotalCents` integer cents.
+      security: []
+      parameters: [{ $ref: "#/components/parameters/PayToken" }]
+      responses:
+        "200": { description: Schedule view, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleAuthorizeView" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/pay/schedule/{token}/authorize:
+    post:
+      tags: [Patient - pay (token)]
+      summary: Authorize a recurring schedule (once); idempotent
+      security: []
+      parameters: [{ $ref: "#/components/parameters/PayToken" }]
+      responses:
+        "200": { description: Authorized, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleAuthorizeResult" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/admin/inventory:
+    get:
+      tags: [Cerbo Admin - inventory]
+      summary: List the shared inventory pool (admin view)
+      description: on_hand / reserved / available / unit COGS (integer cents) per SKU.
+      responses:
+        "200":
+          description: Inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminInventoryItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/inventory/{sku}/restock:
+    post:
+      tags: [Cerbo Admin - inventory]
+      summary: Restock a SKU (DEMO ONLY, ADR-009)
+      description: |
+        Adds units to on_hand and records a 'restock' inventory movement attributed to the
+        admin. Demo convenience only - in production stock arrives via real receiving.
+      parameters:
+        - { name: sku, in: path, required: true, schema: { type: string }, example: "ZINC-30" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RestockRequest" }
+            example: { qty: 25 }
+      responses:
+        "200": { description: Restock result, content: { application/json: { schema: { $ref: "#/components/schemas/RestockResult" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such SKU
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/admin/orders/{id}/fulfill:
+    post:
+      tags: [Cerbo Admin - operations]
+      summary: Mark a paid order fulfilled (stub fulfillment)
+      description: Idempotent; the order stays `paid` and gains a `fulfilledAt` timestamp.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Fulfillment result, content: { application/json: { schema: { $ref: "#/components/schemas/FulfillResult" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Order is not fulfillable (not paid, or refunded)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/admin/orders/{id}/refund:
+    post:
+      tags: [Cerbo Admin - operations]
+      summary: Refund any order (Cerbo Admin)
+      description: Same whole-order refund as the provider route; admin can refund any order.
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefundRequest" }
+            example: { reasonCode: damaged }
+      responses:
+        "200": { description: Refund result, content: { application/json: { schema: { $ref: "#/components/schemas/RefundResult" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: ALREADY_REFUNDED or NOT_REFUNDABLE
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/admin/orders/{id}/audit:
+    get:
+      tags: [Cerbo Admin - operations]
+      summary: Full money record for ANY order (Cerbo Admin)
+      parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      responses:
+        "200": { description: Audit record, content: { application/json: { schema: { $ref: "#/components/schemas/AuditResponse" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/admin/jobs/expire-reservations:
+    post:
+      tags: [Cerbo Admin - operations]
+      summary: Run the reservation-expiry sweep on demand (demo)
+      description: Expires sent orders whose 7-day reservation lapsed and releases stock.
+      responses:
+        "200":
+          description: Ids expired this run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expired:
+                    type: array
+                    items: { type: string, format: uuid }
+              example: { expired: [] }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/jobs/run-due-schedules:
+    post:
+      tags: [Cerbo Admin - operations]
+      summary: Run due recurring schedules (NOT IMPLEMENTED - stub)
+      description: |
+        The one remaining stub. This endpoint is the admin hook into the recurring-order
+        engine's run-due job; it currently returns 501 NOT_IMPLEMENTED. (The recurring
+        engine itself IS live via /api/schedules and /api/pay/schedule/{token}; only this
+        on-demand admin trigger is unwired.)
+      responses:
+        "501":
+          description: Not implemented
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: { code: NOT_IMPLEMENTED, message: "Not implemented yet: POST /api/admin/jobs/run-due-schedules", details: { route: "POST /api/admin/jobs/run-due-schedules" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/metrics:
+    get:
+      tags: [Cerbo Admin - metrics & payables]
+      summary: Global metrics across all providers (from the ledger)
+      description: All figures integer cents; percentages are integer basis points.
+      parameters:
+        - { $ref: "#/components/parameters/From" }
+        - { $ref: "#/components/parameters/To" }
+        - { name: groupBy, in: query, required: false, schema: { type: string, enum: [none, month, provider] } }
+        - { $ref: "#/components/parameters/IncludeSynthetic" }
+      responses:
+        "200": { description: Metrics, content: { application/json: { schema: { $ref: "#/components/schemas/AdminMetricsResponse" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/payables:
+    get:
+      tags: [Cerbo Admin - metrics & payables]
+      summary: View a month's payable statements (stored if closed, else a live preview)
+      parameters:
+        - { name: month, in: query, required: true, description: "UTC month, YYYY-MM", schema: { type: string }, example: "2026-10" }
+      responses:
+        "200": { description: Payables, content: { application/json: { schema: { $ref: "#/components/schemas/AdminPayablesResponse" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/payables/close:
+    post:
+      tags: [Cerbo Admin - metrics & payables]
+      summary: Close a month into immutable payable statements
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClosePayablesRequest" }
+            example: { month: "2026-10" }
+      responses:
+        "201": { description: Statements created, content: { application/json: { schema: { $ref: "#/components/schemas/ClosePayablesResult" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Month already closed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/admin/baseline/import:
+    post:
+      tags: [Cerbo Admin - demo data]
+      summary: Import historical baseline orders from CSV (real interim mechanism)
+      description: |
+        CSV text (header `provider_email,order_date,gmv_cents,source`) in the `csv` field,
+        validated row by row; valid rows inserted, bad rows reported. NOT demo-gated.
+        `gmv_cents` is integer cents.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [csv]
+              properties:
+                csv: { type: string, description: "Raw CSV text including the header row" }
+            example: { csv: "provider_email,order_date,gmv_cents,source\nana@riverside.example,2026-04-15,125000,csv\n" }
+      responses:
+        "201": { description: Import result, content: { application/json: { schema: { $ref: "#/components/schemas/BaselineImportResult" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/admin/demo/baseline/regenerate:
+    post:
+      tags: [Cerbo Admin - demo data]
+      summary: Regenerate the synthetic baseline (DEMO_MODE only)
+      description: Returns 403 DEMO_DISABLED unless the server runs with DEMO_MODE=true.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DemoSeedMonthsRequest" }
+            example: { seed: 1337, months: 6 }
+      responses:
+        "201": { description: Regenerate result, content: { application/json: { schema: { $ref: "#/components/schemas/BaselineRegenerateResult" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ForbiddenOrDemoDisabled" }
+
+  /api/admin/demo/migration/generate:
+    post:
+      tags: [Cerbo Admin - demo data]
+      summary: Generate synthetic in-house migration activity (DEMO_MODE only)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DemoSeedMonthsRequest" }
+            example: { seed: 4242, months: 3 }
+      responses:
+        "201": { description: Generate result, content: { application/json: { schema: { $ref: "#/components/schemas/MigrationGenerateResult" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ForbiddenOrDemoDisabled" }
+
+  /api/admin/demo/reset:
+    post:
+      tags: [Cerbo Admin - demo data]
+      summary: Purge all synthetic rows (DEMO_MODE only, ADR-019)
+      description: Removes only is_synthetic rows through the single guarded path.
+      responses:
+        "200": { description: Purge counts, content: { application/json: { schema: { $ref: "#/components/schemas/DemoResetResult" } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ForbiddenOrDemoDisabled" }
+
+components:
+  securitySchemes:
+    DemoUser:
+      type: apiKey
+      in: header
+      name: X-Demo-User
+      description: |
+        DEMO AUTH STUB - NOT real authentication (AGENTS.md section 7). The value is a seed
+        user id and the server trusts it as the caller's identity. Seed values:
+        `prov-ana` / `prov-ben` (provider), `pat-cara` / `pat-dev` (patient),
+        `admin-cerbo` (Cerbo Admin). The `/api/pay/{token}` and `/api/pay/schedule/{token}`
+        routes take NO X-Demo-User - the unguessable path token authenticates those.
+
+  parameters:
+    OrderId:
+      name: id
+      in: path
+      required: true
+      description: Order id (uuid)
+      schema: { type: string, format: uuid }
+    LineId:
+      name: lineId
+      in: path
+      required: true
+      description: Order line id (uuid)
+      schema: { type: string, format: uuid }
+    ScheduleId:
+      name: id
+      in: path
+      required: true
+      description: Recurring schedule id (uuid)
+      schema: { type: string, format: uuid }
+    PayToken:
+      name: token
+      in: path
+      required: true
+      description: Unguessable pay token (from the send response or the Orders list). Authenticates the patient route.
+      schema: { type: string }
+    From:
+      name: from
+      in: query
+      required: false
+      description: Inclusive start date, YYYY-MM-DD (UTC)
+      schema: { type: string }
+    To:
+      name: to
+      in: query
+      required: false
+      description: Inclusive end date, YYYY-MM-DD (UTC)
+      schema: { type: string }
+    IncludeSynthetic:
+      name: includeSynthetic
+      in: query
+      required: false
+      description: Include synthetic demo rows (default false)
+      schema: { type: boolean }
+
+  responses:
+    Unauthenticated:
+      description: No/unknown X-Demo-User (UNAUTHENTICATED)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: UNAUTHENTICATED, message: "Not authenticated", details: {} } }
+    Forbidden:
+      description: Wrong role for this resource (FORBIDDEN)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: FORBIDDEN, message: "Your role may not access this resource", details: { requiredRoles: ["provider"] } } }
+    ForbiddenOrDemoDisabled:
+      description: Wrong role (FORBIDDEN), or demo instrumentation disabled (DEMO_DISABLED, when DEMO_MODE is off)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: DEMO_DISABLED, message: "Demo mode is disabled", details: {} } }
+    NotFound:
+      description: Resource not found, OR owned by someone else (ownership misses return 404 so existence is not leaked)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: NOT_FOUND, message: "No such order", details: {} } }
+    InvalidInput:
+      description: Request failed validation (INVALID_INPUT)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: INVALID_INPUT, message: "qty must be an integer number of units", details: {} } }
+    OrderNotEditable:
+      description: The order is not a draft (ORDER_NOT_EDITABLE)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: ORDER_NOT_EDITABLE, message: "Order can only be edited while it is a draft", details: { status: "sent" } } }
+    MarginNegative:
+      description: A line's margin after the allocated fee would be negative (MARGIN_NEGATIVE)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: MARGIN_NEGATIVE, message: "Line margin cannot be negative", details: { position: 1 } } }
+
+  schemas:
+    Error:
+      type: object
+      description: The standard error envelope for every non-2xx response (AGENTS.md section 8).
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: "#/components/schemas/ErrorCode" }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+    ErrorCode:
+      type: string
+      description: Canonical API error codes (docs/ARCHITECTURE.md section 9).
+      enum:
+        - INVALID_INPUT
+        - UNAUTHENTICATED
+        - FORBIDDEN
+        - DEMO_DISABLED
+        - NOT_FOUND
+        - INSUFFICIENT_STOCK
+        - ORDER_NOT_EDITABLE
+        - ORDER_NOT_PAYABLE
+        - ORDER_EXPIRED
+        - ALREADY_PAID
+        - IDEMPOTENCY_CONFLICT
+        - ALREADY_REFUNDED
+        - NOT_REFUNDABLE
+        - MARGIN_NEGATIVE
+        - PAYMENT_DECLINED
+        - NOT_IMPLEMENTED
+        - INTERNAL
+
+    OrderStatus:
+      type: string
+      enum: [draft, sent, paid, cancelled, expired, refunded, on_hold]
+
+    HealthResponse:
+      type: object
+      properties:
+        status: { type: string }
+        db:
+          type: object
+          properties:
+            connected: { type: boolean }
+            error: { type: string }
+
+    ProductView:
+      type: object
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        unitCogsCents: { type: integer, description: 'Unit cost of goods, INTEGER CENTS' }
+        available: { type: integer, description: on_hand - reserved for the shared pool }
+        active: { type: boolean }
+
+    PatientRosterItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+
+    CreateOrderRequest:
+      type: object
+      required: [patientId]
+      properties:
+        patientId: { type: string, format: uuid, description: A patient in the provider's own practice }
+
+    AddLineRequest:
+      type: object
+      required: [sku, qty]
+      description: Provide exactly one of unitPriceCents or marginBps (unitPriceCents wins if both present).
+      properties:
+        sku: { type: string }
+        qty: { type: integer, minimum: 1, maximum: 100 }
+        unitPriceCents: { type: integer, description: 'Unit price, INTEGER CENTS' }
+        marginBps: { type: integer, description: "Target margin in basis points (1% = 100 bps), 0..9500" }
+
+    UpdateLineRequest:
+      type: object
+      description: Any subset; provide at most one of unitPriceCents or marginBps.
+      properties:
+        qty: { type: integer, minimum: 1, maximum: 100 }
+        unitPriceCents: { type: integer, description: INTEGER CENTS }
+        marginBps: { type: integer }
+
+    OrderLineView:
+      type: object
+      description: One line with full provider-facing economics; all *Cents are INTEGER CENTS.
+      properties:
+        id: { type: string, format: uuid }
+        position: { type: integer }
+        sku: { type: string }
+        name: { type: string }
+        qty: { type: integer }
+        unitPriceCents: { type: integer }
+        unitCogsCents: { type: integer }
+        lineTotalCents: { type: integer }
+        lineCogsCents: { type: integer }
+        lineFeeCents: { type: integer }
+        lineMarginCents: { type: integer }
+
+    OrderTotals:
+      type: object
+      description: Order-level split; all *Cents INTEGER CENTS.
+      properties:
+        feeBps: { type: integer, description: 'Platform fee rate in basis points (snapshotted, default 75)' }
+        subtotalCents: { type: integer }
+        cogsCents: { type: integer }
+        feeCents: { type: integer }
+        marginCents: { type: integer }
+
+    OrderView:
+      type: object
+      description: A full order (create/add/update/delete/cancel/get). Totals are null until sent.
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        providerId: { type: string, format: uuid }
+        practiceId: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        feeBps: { type: integer }
+        totals:
+          oneOf:
+            - { $ref: "#/components/schemas/OrderTotals" }
+            - { type: "null" }
+        lines: { type: array, items: { $ref: "#/components/schemas/OrderLineView" } }
+        payToken: { type: [string, "null"], description: Patient pay token; null until sent }
+        reservationExpiresAt: { type: [string, "null"] }
+        sentAt: { type: [string, "null"] }
+        createdAt: { type: string }
+
+    QuoteResponse:
+      type: object
+      properties:
+        orderId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        totals: { $ref: "#/components/schemas/OrderTotals" }
+        lines: { type: array, items: { $ref: "#/components/schemas/OrderLineView" } }
+
+    SendResponse:
+      type: object
+      properties:
+        order: { $ref: "#/components/schemas/OrderView" }
+        payUrl: { type: string, description: 'Relative patient pay URL built from the token, e.g. /pay/<token>' }
+
+    OrderSummary:
+      type: object
+      description: Compact row in GET /api/orders. subtotalCents is INTEGER CENTS (null for drafts).
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        patientId: { type: string, format: uuid }
+        subtotalCents: { type: [integer, "null"] }
+        createdAt: { type: string }
+        sentAt: { type: [string, "null"] }
+        payToken: { type: [string, "null"], description: Pay token so the provider can recover the link after send (null for drafts) }
+        payPath: { type: [string, "null"], description: 'Ready-made pay path, e.g. /pay/<token>' }
+
+    RefundRequest:
+      type: object
+      required: [reasonCode]
+      properties:
+        reasonCode: { $ref: "#/components/schemas/RefundReasonCode" }
+
+    RefundReasonCode:
+      type: string
+      enum: [damaged, wrong_item, patient_request, provider_error, other]
+
+    RefundResult:
+      type: object
+      description: Whole-order refund result; all *Cents INTEGER CENTS.
+      properties:
+        refundId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        status: { type: string, enum: [refunded] }
+        reasonCode: { $ref: "#/components/schemas/RefundReasonCode" }
+        amountCents: { type: integer, description: Cash returned to the patient = order subtotal }
+        feeRetainedCents: { type: integer, description: Platform fee retained by Cerbo and charged to the provider }
+        restocked: { type: boolean, description: True if units were returned to stock (refund before fulfillment) }
+        writeoffCogsCents: { type: integer, description: COGS written off when refunding a fulfilled order (0 when restocked) }
+
+    FulfillResult:
+      type: object
+      properties:
+        orderId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        fulfilledAt: { type: string }
+
+    AuditResponse:
+      type: object
+      description: Full money record (provider/admin surface; full economics, INTEGER CENTS).
+      properties:
+        order: { $ref: "#/components/schemas/AuditOrder" }
+        lines: { type: array, items: { $ref: "#/components/schemas/AuditLine" } }
+        statusHistory: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
+        payments: { type: array, items: { $ref: "#/components/schemas/AuditPayment" } }
+        refunds: { type: array, items: { $ref: "#/components/schemas/AuditRefund" } }
+        journals: { type: array, items: { $ref: "#/components/schemas/AuditJournal" } }
+        inventoryMovements: { type: array, items: { $ref: "#/components/schemas/AuditMovement" } }
+        invariants: { $ref: "#/components/schemas/AuditInvariants" }
+
+    AuditOrder:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        kind: { type: string }
+        providerId: { type: string, format: uuid }
+        practiceId: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        feeBps: { type: integer }
+        subtotalCents: { type: [integer, "null"] }
+        cogsCents: { type: [integer, "null"] }
+        feeCents: { type: [integer, "null"] }
+        marginCents: { type: [integer, "null"] }
+        isSynthetic: { type: boolean }
+        createdAt: { type: string }
+        sentAt: { type: [string, "null"] }
+        paidAt: { type: [string, "null"] }
+        fulfilledAt: { type: [string, "null"] }
+        cancelledAt: { type: [string, "null"] }
+        expiredAt: { type: [string, "null"] }
+        refundedAt: { type: [string, "null"] }
+        payToken: { type: [string, "null"] }
+        payPath: { type: [string, "null"] }
+
+    AuditLine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        position: { type: integer }
+        sku: { type: string }
+        name: { type: string }
+        qty: { type: integer }
+        unitPriceCents: { type: integer }
+        unitCogsCents: { type: integer }
+        lineTotalCents: { type: [integer, "null"] }
+        lineCogsCents: { type: [integer, "null"] }
+        lineFeeCents: { type: [integer, "null"] }
+        lineMarginCents: { type: [integer, "null"] }
+
+    AuditEvent:
+      type: object
+      properties:
+        fromStatus: { type: [string, "null"] }
+        toStatus: { type: string }
+        actorUserId: { type: [string, "null"] }
+        at: { type: string }
+        note: { type: [string, "null"] }
+
+    AuditPayment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        idempotencyKey: { type: string }
+        gatewayRef: { type: [string, "null"] }
+        amountCents: { type: integer }
+        isSynthetic: { type: boolean }
+        createdAt: { type: string }
+
+    AuditRefund:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reasonCode: { type: string }
+        amountCents: { type: integer }
+        feeRetainedCents: { type: integer }
+        restocked: { type: boolean }
+        writeoffCogsCents: { type: integer }
+        gatewayRef: { type: [string, "null"] }
+        actorUserId: { type: [string, "null"] }
+        isSynthetic: { type: boolean }
+        createdAt: { type: string }
+
+    AuditJournal:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [PAYMENT, REFUND] }
+        refId: { type: [string, "null"] }
+        isSynthetic: { type: boolean }
+        postedAt: { type: string }
+        entries: { type: array, items: { $ref: "#/components/schemas/AuditLedgerEntry" } }
+        entrySumCents: { type: integer }
+        sumsToZero: { type: boolean }
+
+    AuditLedgerEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        account: { type: string, enum: [CASH_CLEARING, COGS_RECOVERY, PROVIDER_PAYABLE, PLATFORM_FEE_REVENUE] }
+        lineId: { type: [string, "null"] }
+        amountCents: { type: integer, description: Signed; debit positive }
+        memo: { type: [string, "null"] }
+
+    AuditMovement:
+      type: object
+      properties:
+        id: { type: integer }
+        sku: { type: string }
+        deltaOnHand: { type: integer }
+        deltaReserved: { type: integer }
+        reason: { type: string }
+        createdAt: { type: string }
+
+    AuditInvariants:
+      type: object
+      properties:
+        ok: { type: boolean }
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              pass: { type: boolean }
+              detail: { type: object, additionalProperties: true }
+
+    PatientPayItem:
+      type: object
+      properties:
+        name: { type: string }
+        qty: { type: integer }
+        unitPriceCents: { type: integer, description: INTEGER CENTS }
+        lineTotalCents: { type: integer, description: INTEGER CENTS }
+
+    PatientPayView:
+      type: object
+      description: Patient-safe whitelist - no COGS/fee/margin.
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/PatientPayItem" } }
+        totalCents: { type: integer, description: 'What the patient pays = order subtotal, INTEGER CENTS' }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        patientFirstName: { type: string }
+
+    PayRequest:
+      type: object
+      required: [idempotencyKey]
+      properties:
+        idempotencyKey: { type: string, description: Any price/total in the body is ignored; the server charges the snapshot }
+
+    PayResult:
+      type: object
+      properties:
+        paymentId: { type: string, format: uuid }
+        status: { type: string, enum: [paid] }
+        totalCents: { type: integer, description: 'Total charged, INTEGER CENTS' }
+
+    PatientOrderListItem:
+      type: object
+      description: One of the patient's own orders. amountCents is INTEGER CENTS.
+      properties:
+        orderId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/OrderStatus" }
+        sentAt: { type: [string, "null"] }
+        paidAt: { type: [string, "null"] }
+        amountCents: { type: integer, description: Amount the patient pays / paid = subtotal }
+        payToken: { type: [string, "null"] }
+        payPath: { type: [string, "null"], description: e.g. /pay/<token> }
+        isPayable: { type: boolean, description: True only when status is 'sent' }
+        items: { type: array, items: { $ref: "#/components/schemas/PatientPayItem" } }
+
+    ScheduleLineView:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        position: { type: integer }
+        sku: { type: string }
+        name: { type: string }
+        qty: { type: integer }
+        unitPriceCents: { type: integer, description: 'Locked unit price, INTEGER CENTS' }
+
+    ScheduleCycleView:
+      type: object
+      properties:
+        orderId: { type: string, format: uuid }
+        cycleNumber: { type: integer }
+        status: { type: string, enum: [paid, on_hold, cancelled] }
+        holdReason: { type: [string, "null"], enum: [INSUFFICIENT_STOCK, MARGIN_NEGATIVE, NOT_AUTHORIZED, PAYMENT_DECLINED, null] }
+        subtotalCents: { type: [integer, "null"] }
+        createdAt: { type: string }
+
+    ScheduleView:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        status: { type: string, enum: [active, paused, cancelled] }
+        intervalDays: { type: integer, description: "Cadence in days, 7..90" }
+        nextRunAt: { type: [string, "null"] }
+        authorized: { type: boolean }
+        authorizedAt: { type: [string, "null"] }
+        payUrl: { type: string, description: Patient authorization link (unguessable token) }
+        perCycleSubtotalCents: { type: integer, description: INTEGER CENTS }
+        lines: { type: array, items: { $ref: "#/components/schemas/ScheduleLineView" } }
+        cycles: { type: array, items: { $ref: "#/components/schemas/ScheduleCycleView" } }
+        createdAt: { type: string }
+
+    CreateScheduleRequest:
+      type: object
+      required: [patientId, lines]
+      properties:
+        patientId: { type: string, format: uuid }
+        intervalDays: { type: integer, description: "7..90, default 30" }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [sku, qty]
+            properties:
+              sku: { type: string }
+              qty: { type: integer, minimum: 1, maximum: 100 }
+              unitPriceCents: { type: integer, description: INTEGER CENTS (exactly one of this or marginBps) }
+              marginBps: { type: integer }
+
+    RunCycleResult:
+      type: object
+      properties:
+        scheduleId: { type: string, format: uuid }
+        cycle:
+          oneOf:
+            - { $ref: "#/components/schemas/ScheduleCycleView" }
+            - { type: "null" }
+        created: { type: boolean }
+        note: { type: string }
+
+    ScheduleAuthorizeItem:
+      type: object
+      properties:
+        name: { type: string }
+        qty: { type: integer }
+        unitPriceCents: { type: integer, description: INTEGER CENTS }
+
+    ScheduleAuthorizeView:
+      type: object
+      description: Patient-safe whitelist for schedule authorization.
+      properties:
+        patientFirstName: { type: string }
+        intervalDays: { type: integer }
+        items: { type: array, items: { $ref: "#/components/schemas/ScheduleAuthorizeItem" } }
+        perCycleTotalCents: { type: integer, description: INTEGER CENTS }
+        authorized: { type: boolean }
+
+    ScheduleAuthorizeResult:
+      type: object
+      properties:
+        authorized: { type: boolean }
+
+    ReportPeriod:
+      type: object
+      properties:
+        from: { type: string, description: 'Inclusive start date, YYYY-MM-DD (UTC)' }
+        to: { type: string, description: 'Inclusive end date, YYYY-MM-DD (UTC)' }
+
+    SalesReport:
+      type: object
+      description: Provider sales dashboard; all *Cents INTEGER CENTS, from the ledger.
+      properties:
+        period: { $ref: "#/components/schemas/ReportPeriod" }
+        providerId: { type: string, format: uuid }
+        ordersByStatus:
+          type: array
+          items:
+            type: object
+            properties: { status: { type: string }, count: { type: integer } }
+        unitsBySku:
+          type: array
+          items:
+            type: object
+            properties: { sku: { type: string }, name: { type: string }, units: { type: integer } }
+        gmvCents: { type: integer }
+        refundedGmvCents: { type: integer }
+        settledGmvCents: { type: integer }
+        platformFeeCents: { type: integer }
+        providerNetMarginCents: { type: integer }
+        includeSynthetic: { type: boolean }
+
+    PayableReport:
+      type: object
+      description: Provider payable report; all *Cents INTEGER CENTS, from the ledger.
+      properties:
+        period: { $ref: "#/components/schemas/ReportPeriod" }
+        providerId: { type: string, format: uuid }
+        openingCents: { type: integer }
+        creditsCents: { type: integer }
+        debitsCents: { type: integer }
+        closingCents: { type: integer }
+        contributingOrders:
+          type: array
+          items:
+            type: object
+            properties:
+              orderId: { type: string, format: uuid }
+              creditsCents: { type: integer }
+              debitsCents: { type: integer }
+              netCents: { type: integer }
+        includeSynthetic: { type: boolean }
+
+    PayableStatement:
+      type: object
+      description: Immutable payable statement; all *Cents INTEGER CENTS.
+      properties:
+        id: { type: string, format: uuid }
+        providerId: { type: string, format: uuid }
+        practiceId: { type: string, format: uuid }
+        periodStart: { type: string }
+        periodEnd: { type: string }
+        openingCents: { type: integer }
+        creditsCents: { type: integer }
+        debitsCents: { type: integer }
+        closingCents: { type: integer }
+        closedAt: { type: string }
+        closedBy: { type: [string, "null"] }
+
+    ClosePayablesRequest:
+      type: object
+      required: [month]
+      properties:
+        month: { type: string, description: "UTC month, YYYY-MM" }
+
+    ClosePayablesResult:
+      type: object
+      properties:
+        month: { type: string }
+        periodStart: { type: string }
+        periodEnd: { type: string }
+        statements: { type: array, items: { $ref: "#/components/schemas/PayableStatement" } }
+
+    AdminPayablesResponse:
+      type: object
+      properties:
+        month: { type: string }
+        periodStart: { type: string }
+        periodEnd: { type: string }
+        closed: { type: boolean }
+        statements: { type: array, items: { $ref: "#/components/schemas/PayableStatement" } }
+
+    AdminInventoryItem:
+      type: object
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        unitCogsCents: { type: integer, description: INTEGER CENTS }
+        onHandQty: { type: integer }
+        reservedQty: { type: integer }
+        available: { type: integer, description: on_hand - reserved }
+        active: { type: boolean }
+
+    RestockRequest:
+      type: object
+      required: [qty]
+      properties:
+        qty: { type: integer, minimum: 1, maximum: 10000, description: Units to add to on_hand }
+
+    RestockResult:
+      type: object
+      properties:
+        sku: { type: string }
+        qtyAdded: { type: integer }
+        onHandQty: { type: integer }
+        reservedQty: { type: integer }
+        available: { type: integer }
+        movementId: { type: integer }
+
+    MetricsBlock:
+      type: object
+      description: Headline + provider-economics block; all *Cents INTEGER CENTS, *Bps basis points.
+      properties:
+        gmvCents: { type: integer }
+        refundedGmvCents: { type: integer }
+        settledGmvCents: { type: integer }
+        platformFeeCents: { type: integer }
+        sunkFeeCents: { type: integer }
+        providerNetMarginCents: { type: integer }
+        providerNetAfterSunkFeesCents: { type: integer }
+        orderCount: { type: integer }
+        aovCents: { type: integer, description: 'Average order value, INTEGER CENTS' }
+        recurringGmvCents: { type: integer }
+        recurringShareBps: { type: integer, description: Basis points }
+
+    ReconciliationLine:
+      type: object
+      properties:
+        formulaCents: { type: integer }
+        ledgerCents: { type: integer }
+        diffCents: { type: integer }
+        toleranceCents: { type: integer }
+        pass: { type: boolean }
+
+    MigrationProviderRow:
+      type: object
+      properties:
+        providerId: { type: string, format: uuid }
+        baselineMonthlyGmvCents: { type: integer }
+        inHouseGmvCents: { type: integer }
+        migrationBps: { type: [integer, "null"], description: Migration % in basis points; null when no baseline }
+        adopted: { type: boolean }
+
+    MigrationReport:
+      type: object
+      properties:
+        providers: { type: array, items: { $ref: "#/components/schemas/MigrationProviderRow" } }
+        overallInHouseGmvCents: { type: integer }
+        overallBaselineMonthlyGmvCents: { type: integer }
+        overallMigrationBps: { type: [integer, "null"] }
+        adoptionBps: { type: [integer, "null"] }
+        noBaselineProviderIds: { type: array, items: { type: string } }
+
+    MetricsGroup:
+      type: object
+      properties:
+        key: { type: string, description: '"YYYY-MM" or provider id' }
+        block: { $ref: "#/components/schemas/MetricsBlock" }
+        reconciliation: { $ref: "#/components/schemas/ReconciliationLine" }
+
+    AdminMetricsResponse:
+      type: object
+      properties:
+        period: { $ref: "#/components/schemas/ReportPeriod" }
+        includeSynthetic: { type: boolean }
+        groupBy: { type: string, enum: [none, month, provider] }
+        headline: { $ref: "#/components/schemas/MetricsBlock" }
+        reconciliation: { $ref: "#/components/schemas/ReconciliationLine" }
+        migration: { $ref: "#/components/schemas/MigrationReport" }
+        groups: { type: array, items: { $ref: "#/components/schemas/MetricsGroup" } }
+
+    DemoSeedMonthsRequest:
+      type: object
+      properties:
+        seed: { type: integer, description: "0..2000000000" }
+        months: { type: integer, description: "1..60" }
+
+    BaselineImportRejectedRow:
+      type: object
+      properties:
+        row: { type: integer }
+        raw: { type: string }
+        reason: { type: string }
+
+    BaselineImportResult:
+      type: object
+      properties:
+        importBatchId: { type: string, format: uuid }
+        insertedCount: { type: integer }
+        rejected: { type: array, items: { $ref: "#/components/schemas/BaselineImportRejectedRow" } }
+
+    BaselineRegenerateResult:
+      type: object
+      properties:
+        importBatchId: { type: string, format: uuid }
+        seed: { type: integer }
+        months: { type: integer }
+        insertedCount: { type: integer }
+        replacedCount: { type: integer }
+
+    MigrationGenerateResult:
+      type: object
+      properties:
+        seed: { type: integer }
+        months: { type: integer }
+        orderCount: { type: integer }
+        gmvCents: { type: integer, description: INTEGER CENTS }
+
+    DemoResetResult:
+      type: object
+      properties:
+        purged:
+          type: object
+          properties:
+            ledgerEntries: { type: integer }
+            journals: { type: integer }
+            payments: { type: integer }
+            refunds: { type: integer }
+            orderEvents: { type: integer }
+            orderLines: { type: integer }
+            orders: { type: integer }
+            baselineOrders: { type: integer }
+            baselineImports: { type: integer }
+            inventoryMovements: { type: integer }
