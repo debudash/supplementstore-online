@@ -109,7 +109,8 @@ paths:
         is exactly what the order line will get. All amounts are integer cents.
       parameters:
         - { name: sku, in: path, required: true, schema: { type: string }, example: "MAG-GLY-120" }
-        - { name: marginBps, in: query, required: true, schema: { type: integer, minimum: 0, maximum: 9500 }, example: 4000 }
+        - { name: marginBps, in: query, required: false, description: "Omit to preview the list price (profit simulator baseline)", schema: { type: integer, minimum: 0, maximum: 9500 }, example: 4000 }
+        - { name: qty, in: query, required: false, description: "Units to simulate (default 1); the response includes that line's split", schema: { type: integer, minimum: 1, maximum: 1000 }, example: 10 }
       responses:
         "200":
           description: Preview
@@ -841,6 +842,25 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/admin/evidence:
+    get:
+      tags: [Cerbo Admin - metrics & payables]
+      summary: Live integrity proof, unit economics and refund exposure (read-only)
+      description: |
+        Integrity: unbalanced journals, per-order audit invariants (latest 500 paid/refunded),
+        stock consistency, append-only guards present, reconciliation. Unit economics: platform
+        fee vs ESTIMATED card processing (default 2.9% + 30c) and the break-even fee. Refund
+        exposure: refund rate, fees kept, COGS written off, by reason.
+      parameters:
+        - { $ref: "#/components/parameters/IncludeSynthetic" }
+        - { name: processingRateBps, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 2000 }, example: 290 }
+        - { name: processingFixedCents, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1000 }, example: 30 }
+      responses:
+        "200": { description: Evidence, content: { application/json: { schema: { type: object } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /api/admin/providers:
     get:
       tags: [Cerbo Admin - metrics & payables]
@@ -954,6 +974,16 @@ paths:
         "400": { $ref: "#/components/responses/InvalidInput" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/ForbiddenOrDemoDisabled" }
+
+  /api/admin/demo/reset-story:
+    post:
+      tags: [Cerbo Admin - demo data]
+      summary: One click - purge synthetic data and regenerate the standard demo story (DEMO ONLY)
+      description: Fixed seeds (baseline 1337 x 6 months, migration 4242 x 3 months), so every reset produces the same numbers. Real orders are never touched. 403 DEMO_DISABLED unless DEMO_MODE=true.
+      responses:
+        "201": { description: Reset and regenerated, content: { application/json: { schema: { type: object } } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/admin/demo/reset:
     post:

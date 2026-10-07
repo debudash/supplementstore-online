@@ -23,6 +23,7 @@ const DESTS: Record<string, Dest[]> = {
   ],
   patient: [{ to: '/my-orders', title: 'My orders', text: 'Review and pay for supplements your provider sent you.' }],
   cerbo_admin: [
+    { to: '/admin/evidence', title: 'Evidence', text: 'Live proof the money is right, plus unit economics and refund exposure.' },
     { to: '/admin/metrics', title: 'Metrics', text: 'Platform volume, fees and migration progress.' },
     { to: '/admin/operations', title: 'Operations', text: 'Fulfill orders, issue refunds and run jobs.' },
     { to: '/admin/inventory', title: 'Inventory', text: 'Stock levels and demo restock.' },

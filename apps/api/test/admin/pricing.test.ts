@@ -176,14 +176,21 @@ describe('provider catalog: listMarginBps and price preview', () => {
     const res = await as(PROVIDER).get(`/api/products/${SKU}/price-preview?marginBps=4000`)
     expect(res.status).toBe(200)
     // ceil(1450 * 10000 / 6000) = 2417
-    expect(res.body).toEqual({ sku: SKU, marginBps: 4000, unitPriceCents: 2417, listPriceCents: 2999, listMarginBps: 5165, differenceFromListCents: -582 })
+    expect(res.body).toEqual({
+      sku: SKU, marginBps: 4000, unitPriceCents: 2417, listPriceCents: 2999, listMarginBps: 5165, differenceFromListCents: -582,
+      // one unit through split(): fee half-up(2417 x 0.75%) = 18, margin 2417 - 1450 - 18 = 949
+      qty: 1, lineTotalCents: 2417, lineCogsCents: 1450, lineFeeCents: 18, lineMarginCents: 949, coversFee: true
+    })
   })
 
   it('rejects bad margins and unknown SKUs', async () => {
-    for (const q of ['marginBps=9501', 'marginBps=-1', 'marginBps=40.5', 'marginBps=abc', '']) {
+    for (const q of ['marginBps=9501', 'marginBps=-1', 'marginBps=40.5', 'marginBps=abc', 'qty=0']) {
       const res = await as(PROVIDER).get(`/api/products/${SKU}/price-preview?${q}`)
       expect(res.status, q).toBe(400)
     }
+    // No marginBps previews the list price (the profit simulator's baseline).
+    const list = await as(PROVIDER).get(`/api/products/${SKU}/price-preview`)
+    expect(list.body).toMatchObject({ marginBps: null, unitPriceCents: 2999, differenceFromListCents: 0 })
     expect((await as(PROVIDER).get('/api/products/NOPE/price-preview?marginBps=4000')).status).toBe(404)
   })
 })

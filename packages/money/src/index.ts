@@ -20,5 +20,13 @@ export type { SplitLineInput, SplitLine, OrderSplit } from "./split";
 
 export { priceFromMarginBps, marginBpsFromPrice, MAX_MARGIN_BPS, MAX_PRICE_FOR_MARGIN_CENTS } from "./pricing";
 
+export {
+  processingCostCents,
+  breakevenFeeBps,
+  averageCents,
+  DEFAULT_PROCESSING_RATE_BPS,
+  DEFAULT_PROCESSING_FIXED_CENTS,
+} from "./economics";
+
 export { refund } from "./refund";
 export type { RefundAmounts } from "./refund";

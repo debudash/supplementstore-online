@@ -129,6 +129,49 @@ export interface AdminMetricsResponse {
   providerNames: Record<string, { providerName: string | null; practiceName: string | null }>
 }
 
+/** POST /api/admin/demo/reset-story: one-click reset to the standard demo story. */
+export interface DemoStoryResetResult {
+  story: { baselineSeed: number; baselineMonths: number; migrationSeed: number; migrationMonths: number }
+  reset: DemoResetResult
+  baseline: BaselineRegenerateResult
+  migration: MigrationGenerateResult
+}
+
+/** GET /api/admin/evidence: live integrity proof, unit economics and refund exposure. */
+export interface EvidenceResponse {
+  generatedAt: string
+  includeSynthetic: boolean
+  integrity: {
+    journals: { total: number; unbalanced: number }
+    orders: { checked: number; passing: number; failing: number; capped: boolean; failures: Array<{ orderId: string; failedChecks: string[] }> }
+    stock: { issues: Array<{ sku: string; onHandQty: number; reservedQty: number }> }
+    guards: { expected: number; present: number; missing: string[] }
+    reconciliation: ReconciliationLine
+  }
+  unitEconomics: {
+    assumptions: { processingRateBps: number; processingFixedCents: number; platformFeeBps: number }
+    orderCount: number
+    gmvCents: number
+    platformFeeCents: number
+    processingCostCents: number
+    cerboNetCents: number
+    perOrder: { aovCents: number; platformFeeCents: number; processingCostCents: number; cerboNetCents: number }
+    breakevenFeeBps: number | null
+  }
+  refundExposure: {
+    refundCount: number
+    paidOrderCount: number
+    refundRateBps: number | null
+    refundedCents: number
+    feeRetainedCents: number
+    cogsWrittenOffCents: number
+    restockedCount: number
+    writtenOffCount: number
+    byReason: Array<{ reasonCode: string; count: number; amountCents: number }>
+    cerboNetAfterWriteoffsCents: number
+  }
+}
+
 /** GET /api/admin/providers: every provider with its practice (metrics filter). */
 export interface AdminProviderListItem {
   id: string

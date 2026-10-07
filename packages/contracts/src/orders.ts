@@ -61,13 +61,22 @@ export interface ProductView {
 /** GET /api/products/:sku/price-preview?marginBps= (ADR-025). All server-computed. */
 export interface PricePreview {
   sku: string
-  marginBps: number
+  /** The margin asked for, or null when previewing the list price. */
+  marginBps: number | null
   /** The unit price an order line would get at this margin. */
   unitPriceCents: number
   listPriceCents: number
   listMarginBps: number
   /** unitPriceCents minus listPriceCents; negative means cheaper than list. */
   differenceFromListCents: number
+  /** Quantity simulated (default 1) and that line's split, from the server. */
+  qty: number
+  lineTotalCents: number
+  lineCogsCents: number
+  /** Null when the margin cannot cover the platform fee (coversFee false). */
+  lineFeeCents: number | null
+  lineMarginCents: number | null
+  coversFee: boolean
 }
 
 /** One line in a quote/order response, with the full provider-facing economics. */

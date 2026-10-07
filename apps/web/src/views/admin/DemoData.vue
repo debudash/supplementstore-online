@@ -14,8 +14,10 @@ import type {
   BaselineImportResult,
   BaselineRegenerateResult,
   MigrationGenerateResult,
-  DemoResetResult
+  DemoResetResult,
+  DemoStoryResetResult
 } from '@cerbo/contracts'
+import { toast } from '../../components/ui/toast'
 import DemoBadge from '../../components/DemoBadge.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Card from '../../components/ui/Card.vue'
@@ -31,7 +33,7 @@ const SAMPLE_CSV = 'provider_email,order_date,gmv_cents,source\nana@riverside.ex
 const SEED_MAX = 2_000_000_000
 const MONTHS_MAX = 60
 
-type Action = 'import' | 'regenerate' | 'migration' | 'reset'
+type Action = 'import' | 'regenerate' | 'migration' | 'reset' | 'story'
 
 const csv = ref(SAMPLE_CSV)
 const seed = ref<number | string>(7)
@@ -39,13 +41,14 @@ const baselineMonths = ref<number | string>(6)
 const migrationMonths = ref<number | string>(3)
 
 const busy = ref<Action | null>(null)
-const confirming = ref<'regenerate' | 'reset' | null>(null)
+const confirming = ref<'regenerate' | 'reset' | 'story' | null>(null)
 const error = ref<string | null>(null)
 
 const importResult = ref<BaselineImportResult | null>(null)
 const regenerateResult = ref<BaselineRegenerateResult | null>(null)
 const migrationResult = ref<MigrationGenerateResult | null>(null)
 const resetResult = ref<DemoResetResult | null>(null)
+const storyResult = ref<DemoStoryResetResult | null>(null)
 
 function intError(value: number | string, label: string, min: number, max: number): string | null {
   const s = String(value).trim()
@@ -79,6 +82,7 @@ function clearResults(): void {
   regenerateResult.value = null
   migrationResult.value = null
   resetResult.value = null
+  storyResult.value = null
 }
 
 async function run(action: Action, fn: () => Promise<void>): Promise<void> {
@@ -130,9 +134,16 @@ const reset = () =>
     resetResult.value = await apiRequest<DemoResetResult>('/admin/demo/reset', { method: 'POST', body: {} })
   })
 
+const resetStory = () =>
+  run('story', async () => {
+    storyResult.value = await apiRequest<DemoStoryResetResult>('/admin/demo/reset-story', { method: 'POST' })
+    toast('Demo story reset')
+  })
+
 function onConfirm(): void {
   if (confirming.value === 'regenerate') void regenerate()
   else if (confirming.value === 'reset') void reset()
+  else if (confirming.value === 'story') void resetStory()
 }
 </script>
 
@@ -144,6 +155,23 @@ function onConfirm(): void {
       </template>
     </PageHeader>
 
+    <Card title="Reset to the standard demo story" tone="demo" class="story">
+      <p class="story-copy">
+        Clears all synthetic demo data and regenerates the standard story: 6 months of marketplace
+        baseline and 3 months of ramping in-house orders. Real orders are never touched.
+      </p>
+      <UiButton
+        variant="primary"
+        :busy="busy === 'story'"
+        busy-label="Resetting..."
+        :disabled="busy !== null"
+        data-testid="demo-story-reset"
+        @click="confirming = 'story'"
+      >
+        Reset demo story
+      </UiButton>
+    </Card>
+
     <p class="demo-notice" role="note">
       <strong>Demo only.</strong> These controls generate and remove synthetic demonstration
       data. Reset purges only rows flagged synthetic; it can never touch real orders, payments
@@ -151,7 +179,17 @@ function onConfirm(): void {
     </p>
 
     <div class="results" aria-live="polite">
-      <p v-if="error" class="page-error" role="alert" data-testid="demo-error">{{ error }}</p>
+      <UiAlert v-if="error" tone="danger" title="Request failed" data-testid="demo-error">{{ error }}</UiAlert>
+
+      <UiAlert v-if="storyResult" tone="success" title="Demo story reset" data-testid="demo-story-result">
+        Synthetic data was purged and the standard story regenerated. Real data untouched.
+        <dl class="counts">
+          <div><dt>Purged orders</dt><dd data-testid="story-purged-orders">{{ storyResult.reset.purged.orders }}</dd></div>
+          <div><dt>Baseline rows</dt><dd data-testid="story-baseline-rows">{{ storyResult.baseline.insertedCount }}</dd></div>
+          <div><dt>Demo orders generated</dt><dd data-testid="story-orders">{{ storyResult.migration.orderCount }}</dd></div>
+          <div><dt>Demo GMV</dt><dd data-testid="story-gmv"><Money :cents="storyResult.migration.gmvCents" /></dd></div>
+        </dl>
+      </UiAlert>
 
       <UiAlert v-if="importResult" :tone="importResult.insertedCount > 0 ? 'success' : 'warning'" title="Baseline import finished" data-testid="demo-result">
         Imported {{ importResult.insertedCount }} row(s); {{ importResult.rejected.length }} rejected.
@@ -271,6 +309,23 @@ function onConfirm(): void {
     </div>
 
     <ConfirmDialog
+      :open="confirming === 'story'"
+      title="Reset to the standard demo story?"
+      confirm-label="Reset demo story"
+      tone="danger"
+      require-text="RESET"
+      :busy="busy === 'story'"
+      @confirm="onConfirm"
+      @cancel="confirming = null"
+    >
+      <p>
+        This purges every row flagged synthetic, then regenerates the standard demo story:
+        6 months of synthetic marketplace baseline and 3 months of ramping synthetic in-house orders.
+      </p>
+      <p>Real orders, payments, ledger entries and closed payable statements are never touched. This cannot be undone.</p>
+    </ConfirmDialog>
+
+    <ConfirmDialog
       :open="confirming === 'regenerate'"
       title="Replace the synthetic baseline?"
       confirm-label="Regenerate"
@@ -309,6 +364,12 @@ function onConfirm(): void {
 <style scoped>
 .demo-data {
   max-width: 920px;
+}
+.story {
+  margin-bottom: var(--space-4);
+}
+.story-copy {
+  margin-top: 0;
 }
 .demo-notice {
   color: var(--demo);
