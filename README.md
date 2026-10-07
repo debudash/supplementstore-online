@@ -63,7 +63,19 @@ npm run build               # build packages, apps/web (Vite), apps/api (tsc)
 
 Copy `.env.example` to `.env` for local overrides. The defaults match
 `docker-compose.yml` (`DATABASE_URL=postgres://postgres:postgres@localhost:5432/cerbo`,
-`PORT=3000`, `DEMO_MODE=true`).
+`PORT=3000`, `DEMO_MODE=true`). The db scripts and the api dev server load `.env`
+from `apps/api`, so copy it there too (`apps/api/.env`).
+
+Before pushing, run the whole CI gate locally in one command (Windows PowerShell):
+
+```
+powershell -ExecutionPolicy Bypass -File scripts/local-check.ps1
+```
+
+It runs lint, typecheck, build, `npm test` and `npm run test:e2e`, giving the test and
+e2e suites their own fresh databases (`cerbo_test`, `cerbo_e2e`) the way CI gives each
+job a fresh Postgres. Running `npm test` then `npm run test:e2e` against the same
+database can fail EVAL-13 on leftover data even when the code is fine.
 
 Notes:
 - The api test suites run serially against the shared Postgres (they mutate global
