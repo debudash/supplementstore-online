@@ -5,8 +5,19 @@ import { Router, type Request, type Response } from 'express'
 import { db } from '../db/knex'
 import { handleError } from '../orders/errors'
 import { listPatientOrders } from './service'
+import { createRefundRequest } from '../refund-requests/service'
 
 export const patientOrdersRouter: Router = Router()
+
+// POST /api/patient/orders/:id/refund-request - ask the provider for a refund on one of
+// the caller's own paid orders (no return; ADR-023). { reasonCode, note? }
+patientOrdersRouter.post('/orders/:id/refund-request', async (req: Request, res: Response) => {
+  try {
+    res.status(201).json(await createRefundRequest(db, req.actor!, req.params.id, req.body))
+  } catch (err) {
+    handleError(res, err)
+  }
+})
 
 // GET /api/patient/orders - the calling patient's own orders, with their pay links.
 patientOrdersRouter.get('/orders', async (req: Request, res: Response) => {

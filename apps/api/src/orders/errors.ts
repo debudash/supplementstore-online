@@ -17,6 +17,11 @@ const STATUS_BY_CODE: Record<string, number> = {
   // ADR-025 admin list-price edits: a stale edit (someone changed it first) and a price
   // at or below Cerbo's cost.
   PRICE_CONFLICT: 409,
+  // Refund requests: only paid (real) orders, one open request at a time, and a decision
+  // needs a pending request.
+  NOT_REFUNDABLE: 409,
+  REFUND_REQUEST_EXISTS: 409,
+  NO_PENDING_REQUEST: 409,
   MARGIN_NEGATIVE: 422,
   PRICE_BELOW_COST: 422
 }

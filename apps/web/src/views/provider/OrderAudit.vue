@@ -14,6 +14,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
 import type { AuditResponse, AuditJournal, AuditLedgerEntry, InvariantCheck, PatientView } from '@cerbo/contracts'
 import CopyLink from '../../components/order/CopyLink.vue'
+import RefundPanel from '../../components/order/RefundPanel.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Card from '../../components/ui/Card.vue'
 import Money from '../../components/ui/Money.vue'
@@ -244,6 +245,16 @@ function signed(n: number): string {
           <div><dt>Net margin</dt><dd><Money :cents="audit.order.marginCents" strong /></dd></div>
         </dl>
       </div>
+
+      <RefundPanel
+        v-if="audit.order.status === 'paid' || audit.order.status === 'refunded'"
+        :order-id="audit.order.id"
+        :status="audit.order.status"
+        :subtotal-cents="audit.order.subtotalCents"
+        :fulfilled="!!audit.order.fulfilledAt"
+        class="refund-panel"
+        @changed="load"
+      />
 
       <CopyLink v-if="audit.order.payPath" :payUrl="audit.order.payPath" class="pay-link" />
 
@@ -527,7 +538,8 @@ function signed(n: number): string {
   margin: 0;
   font-size: var(--text-lg);
 }
-.pay-link {
+.pay-link,
+.refund-panel {
   margin-bottom: var(--space-4);
 }
 .help {

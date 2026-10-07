@@ -11,6 +11,7 @@ import type { Seams } from '../seams/types'
 import { createSeams } from '../seams'
 import { invalidInput, notFound, orderNotEditable, ApiError } from './errors'
 import { releaseLines, reserveLines, availableOf } from '../inventory/service'
+import { latestRequestsByOrder } from '../refund-requests/service'
 import {
   requireString,
   requireInt,
@@ -641,6 +642,7 @@ export async function listOrders(
   sentAt: string | null
   payToken: string | null
   payPath: string | null
+  refundRequestStatus: 'pending' | 'approved' | 'declined' | null
 }>> {
   let q = db<OrderRow>('orders')
     .where('provider_id', actor.providerId as string)
@@ -655,11 +657,16 @@ export async function listOrders(
     else q = q.andWhere('created_at', '<=', filters.to)
   }
   const rows = await q
+  const requests = await latestRequestsByOrder(
+    db,
+    rows.filter((o) => o.status === 'paid' || o.status === 'refunded').map((o) => o.id)
+  )
   // Surface the pay link so the provider can recover it after send (the token is stored
   // on the order but was previously only returned by create/add/send). This is the
   // provider's OWN order (the query is scoped to actor.providerId above), so returning
   // their token leaks nothing they are not already entitled to. Null for drafts.
   return rows.map((o) => ({
+    refundRequestStatus: requests.get(o.id)?.status ?? null,
     id: o.id,
     status: o.status,
     patientId: o.patient_id,

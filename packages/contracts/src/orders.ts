@@ -149,4 +149,26 @@ export interface OrderSummary {
   payToken: string | null
   /** Ready-made pay path, e.g. "/pay/<token>", or null when there is no token. */
   payPath: string | null
+  /** The latest patient refund request on this order, or null (paid/refunded only). */
+  refundRequestStatus: RefundRequestStatus | null
+}
+
+export type RefundRequestStatus = 'pending' | 'approved' | 'declined'
+/** Reasons a patient may give (a subset of the refund reason codes). */
+export type PatientRefundReason = 'damaged' | 'wrong_item' | 'patient_request' | 'other'
+
+/**
+ * A patient refund request (no return: the patient keeps or safely disposes of the
+ * product, ADR-023). The provider approves (the standard refund runs) or declines with a
+ * note the patient sees. Carries no economics.
+ */
+export interface RefundRequestView {
+  id: string
+  orderId: string
+  reasonCode: PatientRefundReason
+  note: string | null
+  status: RefundRequestStatus
+  decisionNote: string | null
+  decidedAt: string | null
+  createdAt: string
 }
