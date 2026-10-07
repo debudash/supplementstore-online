@@ -88,7 +88,7 @@ describe('OrderBuilder - resume an existing draft', () => {
 
   it('degrades cleanly when the order is not found (404 = ownership check)', async () => {
     routeQuery.orderId = 'missing'
-    baseRoutes(new ApiError(404))
+    baseRoutes(new ApiError(404, 'NOT_FOUND', 'not found', {}))
     const wrapper = mount(OrderBuilder)
     await flushPromises()
 
