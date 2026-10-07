@@ -47,6 +47,9 @@ export interface ProductView {
   sku: string
   name: string
   unitCogsCents: number
+  /** Seeded catalog list price in integer cents; the price the New Order screen shows
+   *  and the provider does not type (owner decision). Always set for catalog rows. */
+  listPriceCents: number
   /** on_hand - reserved for the single shared pool (ADR-009). */
   available: number
   active: boolean

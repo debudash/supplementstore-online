@@ -23,6 +23,9 @@ export interface ProductView {
   sku: string
   name: string
   unitCogsCents: number
+  /** Seeded catalog list price in integer cents (the price shown on the New Order
+   *  screen; the provider does not type it). Always set for catalog rows. */
+  listPriceCents: number
   available: number
   active: boolean
 }
@@ -31,6 +34,7 @@ interface ProductRow {
   sku: string
   name: string
   unit_cogs_cents: number
+  list_price_cents: number
   on_hand_qty: number
   reserved_qty: number
   active: boolean
@@ -43,6 +47,7 @@ export async function listProducts(db: Knex): Promise<ProductView[]> {
     sku: r.sku,
     name: r.name,
     unitCogsCents: r.unit_cogs_cents,
+    listPriceCents: r.list_price_cents,
     available: r.on_hand_qty - r.reserved_qty,
     active: r.active
   }))
