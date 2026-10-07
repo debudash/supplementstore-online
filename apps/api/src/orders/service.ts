@@ -592,6 +592,28 @@ export async function cancelOrder(db: Knex, actor: Actor, orderId: string): Prom
   return buildView(db, cancelled)
 }
 
+/**
+ * DELETE /api/orders/:id - permanently remove a DRAFT order (lines, events, order row).
+ *
+ * Inventory: a draft never reserves stock (reservation happens at send, ADR-009), so
+ * everything on it is already counted as available for the next order and there is
+ * nothing to release. Only drafts can be deleted: once sent, an order holds a
+ * reservation and a pay link and must be cancelled instead (which releases stock).
+ * The order row is locked and its status re-checked inside the transaction so a
+ * concurrent send cannot reserve stock for an order that is then deleted.
+ */
+export async function deleteDraft(db: Knex, actor: Actor, orderId: string): Promise<void> {
+  await loadOwnedOrder(db, actor, orderId)
+  await db.transaction(async (trx) => {
+    const locked = await trx<OrderRow>('orders').where({ id: orderId }).forUpdate().first()
+    if (!locked) throw notFound('No such order', { orderId })
+    if (locked.status !== 'draft') throw orderNotEditable(locked.status)
+    await trx('order_lines').where({ order_id: orderId }).del()
+    await trx('order_events').where({ order_id: orderId }).del()
+    await trx('orders').where({ id: orderId }).del()
+  })
+}
+
 /** GET /api/orders?status=&from=&to= - the provider's own orders (FR). */
 export async function listOrders(
   db: Knex,
