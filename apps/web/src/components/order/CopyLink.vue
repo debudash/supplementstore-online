@@ -1,13 +1,11 @@
 <script setup lang="ts">
-// Copyable patient pay link shown after send (FR-4 AC4). The link is always visible
-// and selectable; the Copy button uses the Clipboard API when available and degrades
-// to "select the field" text otherwise. The link itself is a demo affordance: in
-// production the patient would be emailed or texted the link (Notifier seam), not shown
-// it on the provider's screen - hence the demo marker.
+// Copyable patient pay link (FR-4 AC4). The link is always visible and selectable; Copy
+// uses the Clipboard API and degrades to "select the field" text otherwise. In production
+// the patient is emailed or texted the link (Notifier seam), hence the demo marker.
 import { ref, computed } from 'vue'
 import DemoBadge from '../DemoBadge.vue'
 
-const props = defineProps<{ payUrl: string }>()
+const props = defineProps<{ payUrl: string; compact?: boolean }>()
 
 // payUrl is a relative path like /pay/<token>; show the absolute URL the patient opens.
 const absoluteUrl = computed(() => {
@@ -31,15 +29,14 @@ async function copy(): Promise<void> {
 </script>
 
 <template>
-  <section class="copy-link" aria-label="Patient pay link">
+  <section class="copy-link" :class="{ compact }" aria-label="Patient pay link">
     <div class="head">
-      <h3>Patient pay link</h3>
-      <DemoBadge reason="Demo affordance - in production the patient is emailed or texted this link (Notifier seam). It is surfaced here so you can open the pay page during the demo." />
+      <h3 class="title">Patient pay link</h3>
+      <DemoBadge reason="In production the patient is emailed or texted this link. It is shown here so you can open the pay page during the demo." />
     </div>
-    <p class="hint">Send this link to the patient so they can pay.</p>
     <div class="row">
       <input :value="absoluteUrl" readonly data-test="pay-url" aria-label="Patient pay link URL" @focus="($event.target as HTMLInputElement).select()" />
-      <button type="button" class="btn-primary" @click="copy">Copy link</button>
+      <button type="button" class="btn-primary" data-testid="copy-link" @click="copy">{{ copied ? 'Copied' : 'Copy link' }}</button>
     </div>
     <p v-if="copied" class="ok" role="status">Link copied.</p>
     <p v-if="copyFailed" class="warn" role="status">Copy is unavailable - select the field and copy manually.</p>
@@ -48,40 +45,45 @@ async function copy(): Promise<void> {
 
 <style scoped>
 .copy-link {
-  border: 1px solid var(--success);
-  background: var(--success-tint);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 0.85rem 1rem;
-  margin-top: 1rem;
+  padding: var(--space-4);
+}
+.copy-link.compact {
+  border: none;
+  padding: var(--space-2) 0;
+  background: none;
 }
 .head {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
-.head h3 {
+.title {
   margin: 0;
-}
-.hint {
-  color: var(--muted);
-  margin: 0.35rem 0 0.6rem;
+  font-size: var(--text-md);
 }
 .row {
   display: flex;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 .row input {
-  flex: 1;
+  flex: 1 1 16rem;
+  min-width: 0;
   font-family: var(--font-mono);
-  background: var(--surface);
+  font-size: var(--text-sm);
+  background: var(--surface-2);
 }
 .ok {
   color: var(--success);
   font-weight: 600;
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0 0;
 }
 .warn {
   color: var(--warning);
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0 0;
 }
 </style>

@@ -1,4 +1,4 @@
-﻿// Display-only money formatting for the patient pay pages (T7).
+// Display-only money formatting for the patient pay pages (T7).
 //
 // The patient UI DISPLAYS money, it never CALCULATES it (AGENTS.md money rules 1-2):
 // every amount is an integer-cents snapshot from the server. This helper only formats

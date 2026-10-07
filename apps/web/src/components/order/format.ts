@@ -1,4 +1,4 @@
-﻿// Display-only helpers for the provider order UI (T6).
+// Display-only helpers for the provider order UI (T6).
 //
 // The UI DISPLAYS, it never CALCULATES money (AGENTS.md money rule 2): every fee,
 // allocation, and margin figure comes from the server quote endpoint. These helpers
