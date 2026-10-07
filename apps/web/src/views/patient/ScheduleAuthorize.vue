@@ -154,7 +154,7 @@ onMounted(load)
 
       <template v-else-if="phase === 'review' && schedule">
         <p class="summary" data-testid="schedule-summary">
-          We will charge <Money :cents="schedule.perCycleTotalCents" strong /> every {{ schedule.intervalDays }} days for:
+          Each order is currently <Money :cents="schedule.perCycleTotalCents" strong />, charged every {{ schedule.intervalDays }} days, for:
         </p>
 
         <table class="table items">
@@ -175,13 +175,14 @@ onMounted(load)
           </tbody>
         </table>
 
+        <p class="cancel-note" data-testid="price-change-note">The price of each order can change if product costs change.</p>
         <p class="cancel-note">How to cancel: contact your provider. You authorize once; there is nothing to do each cycle.</p>
 
         <label class="consent">
           <input v-model="consent" type="checkbox" data-testid="consent" />
           <span>
-            I authorize recurring charges of {{ formatCents(schedule.perCycleTotalCents) }} every
-            {{ schedule.intervalDays }} days for the items above until I cancel.
+            I authorize recurring charges every {{ schedule.intervalDays }} days for the items above,
+            currently {{ formatCents(schedule.perCycleTotalCents) }} per order, until I cancel.
           </span>
         </label>
 

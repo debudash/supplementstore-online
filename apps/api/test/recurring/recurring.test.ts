@@ -23,6 +23,7 @@ import { seedCore } from '../../src/db/seeds/01_core'
 import { createSeams } from '../../src/seams'
 import { runOneSchedule } from '../../src/recurring/service'
 import { runDueSchedules } from '../../src/jobs/recurring'
+import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
 function migrateViaCli(): void {
@@ -48,12 +49,12 @@ const SKU_MAG = 'MAG-GLY-120'
 const SKU_PROBIO = 'PROBIO-50B'
 const SKU_VITD = 'VITD3-K2'
 
-// cogs + on_hand are the protected EVALS seed facts; listPrice is the seeded catalog price
-// (migration 6). A cycle derives BOTH price and COGS from these at run time (ADR-024).
-const CANONICAL: Record<string, { onHand: number; cogs: number; listPrice: number }> = {
-  [SKU_MAG]: { onHand: 50, cogs: 1450, listPrice: 2999 },
-  [SKU_PROBIO]: { onHand: 5, cogs: 2675, listPrice: 4299 },
-  [SKU_VITD]: { onHand: 40, cogs: 1125, listPrice: 2499 }
+// cogs + on_hand are the protected EVALS seed facts. A cycle prices each line from the
+// CURRENT cogs + the schedule line's markup at run time (ADR-028).
+const CANONICAL: Record<string, { onHand: number; cogs: number }> = {
+  [SKU_MAG]: { onHand: 50, cogs: 1450 },
+  [SKU_PROBIO]: { onHand: 5, cogs: 2675 },
+  [SKU_VITD]: { onHand: 40, cogs: 1125 }
 }
 
 async function setupFixtures(): Promise<void> {
@@ -74,10 +75,10 @@ async function setupFixtures(): Promise<void> {
 }
 
 async function resetStock(): Promise<void> {
-  for (const [sku, { onHand, cogs, listPrice }] of Object.entries(CANONICAL)) {
+  for (const [sku, { onHand, cogs }] of Object.entries(CANONICAL)) {
     await db('products')
       .where({ sku })
-      .update({ on_hand_qty: onHand, reserved_qty: 0, unit_cogs_cents: cogs, list_price_cents: listPrice })
+      .update({ on_hand_qty: onHand, reserved_qty: 0, unit_cogs_cents: cogs })
   }
 }
 
@@ -92,13 +93,12 @@ afterAll(async () => {
   await db.destroy()
 })
 
-// A schedule carries product + quantity only (ADR-024); unitPriceCents is accepted but
-// IGNORED by the server (it derives price from the catalog). Kept optional here so some
-// cases still send it, proving the server ignores it - as the protected e2e spec does.
+// A schedule line carries product + quantity + the provider's per-unit markup (ADR-028).
+// markupFor(sku, price) picks the markup that prices the line at the EVALS price at seed COGS.
 interface Line {
   sku: string
   qty: number
-  unitPriceCents?: number
+  markupCents: number
 }
 
 /** Create a schedule for the T9 patient; return its id + authorize token. */
@@ -116,9 +116,9 @@ async function authorize(token: string): Promise<void> {
   expect(res.body.authorized).toBe(true)
 }
 
-const MAG_SCHEDULE: Line[] = [{ sku: SKU_MAG, qty: 1, unitPriceCents: 2999 }]
+const MAG_SCHEDULE: Line[] = [{ sku: SKU_MAG, qty: 1, markupCents: markupFor(SKU_MAG, 2999) }]
 
-describe('EVAL-11 happy path: authorized cycle pays, catalog-derived price + fresh COGS', () => {
+describe('EVAL-11 happy path: authorized cycle pays, price from fresh COGS + markup', () => {
   it('produces a recurring_cycle child order, paid, fee 22, margin 1527, MAG on_hand -1', async () => {
     const { id, token } = await createSchedule(MAG_SCHEDULE)
     await authorize(token)
@@ -171,28 +171,30 @@ describe('EVAL-11 happy path: authorized cycle pays, catalog-derived price + fre
   })
 })
 
-describe('ADR-024: a cycle derives price from the CURRENT catalog at run time', () => {
-  it('a catalog price change before the run flows into the cycle (not the creation price)', async () => {
-    const { id, token } = await createSchedule(MAG_SCHEDULE) // catalog 2999 at creation
+describe('ADR-028: a cycle prices from the CURRENT COGS + the schedule markup at run time', () => {
+  it('a COGS change before the run flows into the price; the provider keeps the markup', async () => {
+    const { id, token } = await createSchedule(MAG_SCHEDULE) // 2999 at creation (markup 1526)
     await authorize(token)
-    // The catalog price rises AFTER creation; the cycle must use the current value.
-    await db('products').where({ sku: SKU_MAG }).update({ list_price_cents: 3999 })
+    // COGS rises AFTER creation; the cycle must price from the current value.
+    await db('products').where({ sku: SKU_MAG }).update({ unit_cogs_cents: 1550 })
 
     const run = await asUser(PROV_USER).post(`/api/schedules/${id}/run`).send({})
     expect(run.body.cycle.status).toBe('paid')
     const order = await db('orders').where({ schedule_id: id }).first()
-    // Derived from the current catalog: subtotal 3999, fee floor((3999*75+5000)/10000)=30,
-    // margin 3999-1450-30=2519 (fresh COGS 1450).
-    expect(order.subtotal_cents).toBe(3999)
-    expect(order.fee_cents).toBe(30)
-    expect(order.margin_cents).toBe(2519)
-    expect(order.cogs_cents).toBe(1450)
+    // (1550 + 1526) * 10000 / 9925 = 3099.24 -> 3100; fee floor((3100*75+5000)/10000) = 23;
+    // margin 3100 - 1550 - 23 = 1527 (the markup, unchanged by the cost rise).
+    expect(order.subtotal_cents).toBe(3100)
+    expect(order.fee_cents).toBe(23)
+    expect(order.margin_cents).toBe(1527)
+    expect(order.cogs_cents).toBe(1550)
+    const line = await db('order_lines').where({ order_id: order.id }).first()
+    expect(line.unit_markup_cents).toBe(1526)
   })
 })
 
 describe('EVAL-11b: insufficient stock parks the cycle on_hold with no money moved', () => {
   it('PROBIO x6 (only 5 on hand) -> on_hold INSUFFICIENT_STOCK, no journal, no payment, stock untouched', async () => {
-    const { id, token } = await createSchedule([{ sku: SKU_PROBIO, qty: 6, unitPriceCents: 4000 }])
+    const { id, token } = await createSchedule([{ sku: SKU_PROBIO, qty: 6, markupCents: markupFor(SKU_PROBIO, 4000) }])
     await authorize(token)
 
     const run = await asUser(PROV_USER).post(`/api/schedules/${id}/run`).send({})
@@ -225,43 +227,29 @@ describe('EVAL-11c: an unauthorized schedule parks the cycle on_hold', () => {
   })
 })
 
-describe('EVAL-11d: a COGS increase that would go negative is SURFACED, not absorbed (ADR-017)', () => {
-  it('raise MAG cogs to 3000 -> on_hold MARGIN_NEGATIVE; after fixing cogs, retry pays', async () => {
+describe('EVAL-11d: a COGS increase passes through to the patient, never into a loss (ADR-028)', () => {
+  it('raise MAG cogs to 3000 -> the cycle pays at 4561 and the provider still nets the 1527 markup', async () => {
     const { id, token } = await createSchedule(MAG_SCHEDULE)
     await authorize(token)
 
-    // Fresh COGS per cycle: a cost bump above the locked price turns margin negative.
+    // Fresh COGS per cycle: the price is re-derived from COGS + markup, so the margin holds.
     await db('products').where({ sku: SKU_MAG }).update({ unit_cogs_cents: 3000 })
-    const run1 = await asUser(PROV_USER).post(`/api/schedules/${id}/run`).send({})
-    expect(run1.body.cycle.status).toBe('on_hold')
-    expect(run1.body.cycle.holdReason).toBe('MARGIN_NEGATIVE')
+    const run = await asUser(PROV_USER).post(`/api/schedules/${id}/run`).send({})
+    expect(run.body.cycle.status).toBe('paid')
 
-    const held = await db('orders').where({ schedule_id: id }).first()
-    expect(held.status).toBe('on_hold')
-    expect(held.hold_reason).toBe('MARGIN_NEGATIVE')
-    expect(await db('journals').where({ order_id: held.id }).then((r) => r.length)).toBe(0)
-    expect(await db('payments').where({ order_id: held.id }).then((r) => r.length)).toBe(0)
-
-    // Retry after the cause is fixed: cogs restored -> the SAME cycle order flips to paid.
-    await db('products').where({ sku: SKU_MAG }).update({ unit_cogs_cents: 1450 })
-    const run2 = await asUser(PROV_USER).post(`/api/schedules/${id}/run`).send({})
-    expect(run2.body.created).toBe(false) // retry, not a new cycle
-    expect(run2.body.cycle.status).toBe('paid')
-
-    const orders = await db('orders').where({ schedule_id: id })
-    expect(orders).toHaveLength(1) // retry reused the same child order
-    expect(orders[0].status).toBe('paid')
-    expect(orders[0].margin_cents).toBe(1527)
-    expect(await db('journals').where({ order_id: held.id, type: 'PAYMENT' }).then((r) => r.length)).toBe(1)
+    const order = await db('orders').where({ schedule_id: id }).first()
+    // (3000 + 1526) * 10000 / 9925 = 4560.20 -> 4561; fee 34; margin 4561 - 3000 - 34 = 1527.
+    expect(order.subtotal_cents).toBe(4561)
+    expect(order.fee_cents).toBe(34)
+    expect(order.margin_cents).toBe(1527)
+    expect(await db('journals').where({ order_id: order.id, type: 'PAYMENT' }).then((r) => r.length)).toBe(1)
   })
 })
 
 describe('a declined saved method parks the cycle on_hold (not a silent failure)', () => {
   it('derived subtotal 1313 (stub decline) -> on_hold PAYMENT_DECLINED, no journal', async () => {
-    // The cycle derives price from the catalog (ADR-024); set VITD's catalog price to the
-    // stub gateway's decline trigger (1313) so the derived subtotal declines.
-    await db('products').where({ sku: SKU_VITD }).update({ list_price_cents: 1313 })
-    const { id, token } = await createSchedule([{ sku: SKU_VITD, qty: 1 }])
+    // Pick the markup that prices VITD at the stub gateway's decline trigger (1313).
+    const { id, token } = await createSchedule([{ sku: SKU_VITD, qty: 1, markupCents: markupFor(SKU_VITD, 1313) }])
     await authorize(token)
     const run = await asUser(PROV_USER).post(`/api/schedules/${id}/run`).send({})
     expect(run.body.cycle.status).toBe('on_hold')
@@ -384,14 +372,13 @@ describe('FR-12 AC5 lifecycle + ownership', () => {
     expect(res.body.error.code).toBe('NOT_FOUND')
   })
 
-  it('rejects a schedule whose catalog price cannot cover COGS + fee at creation (MARGIN_NEGATIVE)', async () => {
-    // Creation fail-fast derives from the current catalog (ADR-024): push MAG's COGS above
-    // its catalog price (2999) so the derived margin is negative at creation time.
-    await db('products').where({ sku: SKU_MAG }).update({ unit_cogs_cents: 3000 })
-    const res = await asUser(PROV_USER)
-      .post('/api/schedules')
-      .send({ patientId: PATIENT, lines: [{ sku: SKU_MAG, qty: 1 }] })
-    expect(res.status).toBe(422)
-    expect(res.body.error.code).toBe('MARGIN_NEGATIVE')
+  it.each([
+    ['no markup', { sku: SKU_MAG, qty: 1 }],
+    ['markup over $1,000', { sku: SKU_MAG, qty: 1, markupCents: 100001 }],
+    ['negative markup', { sku: SKU_MAG, qty: 1, markupCents: -1 }]
+  ])('rejects a schedule line with %s (400, ADR-028)', async (_label, line) => {
+    const res = await asUser(PROV_USER).post('/api/schedules').send({ patientId: PATIENT, lines: [line] })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe('INVALID_INPUT')
   })
 })

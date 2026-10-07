@@ -19,7 +19,7 @@
 // migration %) grows toward the present - the "ramping share of baseline" of FR-14 AC3.
 import { randomUUID } from 'node:crypto'
 import type { Knex } from 'knex'
-import { split, priceFromMarginBps, type SplitLineInput } from '@cerbo/money'
+import { split, priceFromMarkupCents, DEFAULT_FEE_BPS, type SplitLineInput } from '@cerbo/money'
 import { postPaymentJournal } from '../../ledger'
 import type { Clock } from '../../seams/types'
 import { SystemClock } from '../../seams'
@@ -38,24 +38,24 @@ interface GenProvider {
   patientId: string
 }
 
-/** Pick 1-3 distinct SKUs for a synthetic order, priced above COGS so margin >= 0. */
+/** Pick 1-3 distinct SKUs for a synthetic order, priced from a per-unit markup (ADR-028). */
 function buildLines(
   products: ProductRow[],
   rng: { int: (a: number, b: number) => number; pick: <T>(x: T[]) => T }
-): Array<SplitLineInput & { sku: string; unitCogsCents: number }> {
+): Array<SplitLineInput & { sku: string; unitCogsCents: number; markupCents: number }> {
   const count = Math.min(rng.int(1, 3), products.length)
   const chosen = new Set<string>()
-  const lines: Array<SplitLineInput & { sku: string; unitCogsCents: number }> = []
+  const lines: Array<SplitLineInput & { sku: string; unitCogsCents: number; markupCents: number }> = []
   let position = 1
   while (lines.length < count) {
     const product = rng.pick(products)
     if (chosen.has(product.sku)) continue
     chosen.add(product.sku)
     const qty = rng.int(1, 4)
-    // 25%-40% target margin -> integer price strictly above COGS (ADR-005).
-    const marginBps = rng.int(2500, 4000)
-    const unitPriceCents = priceFromMarginBps(product.unit_cogs_cents, marginBps)
-    lines.push({ position: position++, sku: product.sku, qty, unitPriceCents, unitCogsCents: product.unit_cogs_cents })
+    // A $4-$15 per-unit markup, priced the same way a provider's line is (ADR-028).
+    const markupCents = rng.int(400, 1500)
+    const unitPriceCents = priceFromMarkupCents(product.unit_cogs_cents, markupCents, DEFAULT_FEE_BPS)
+    lines.push({ position: position++, sku: product.sku, qty, unitPriceCents, unitCogsCents: product.unit_cogs_cents, markupCents })
   }
   return lines
 }
@@ -126,8 +126,8 @@ async function generateOneOrder(
   rng: ReturnType<typeof makeRng>
 ): Promise<{ subtotalCents: number }> {
   const lineInputs = buildLines(products, rng)
-  // REAL split math (money rule 2). Margin is guaranteed >= 0 by the price-from-margin
-  // construction, so this never throws MARGIN_NEGATIVE for synthetic data.
+  // REAL split math (money rule 2). Every line is priced from a markup (ADR-028), which
+  // always covers the fee, so this never throws MARGIN_NEGATIVE for synthetic data.
   const result = split(lineInputs, 75)
   const bySplitPosition = new Map(result.lines.map((l) => [l.position, l]))
 
@@ -165,6 +165,7 @@ async function generateOneOrder(
         qty: input.qty,
         unit_price_cents: input.unitPriceCents,
         unit_cogs_cents: input.unitCogsCents,
+        unit_markup_cents: input.markupCents,
         line_total_cents: s.total,
         line_cogs_cents: s.cogs,
         line_fee_cents: s.fee,

@@ -13,6 +13,7 @@ import { createApp } from '../../src/app'
 import { createKnexActorLoader } from '../../src/auth/loadActor'
 import { seedCore } from '../../src/db/seeds/01_core'
 import { resetDemoData } from '../../src/admin/demo/reset'
+import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
 function migrateViaCli(): void {
@@ -60,7 +61,7 @@ async function payNewOrder(world: ProviderWorld, lines: Array<{ sku: string; qty
   const draft = await asUser(world.userId).post('/api/orders').send({ patientId: world.patientId })
   const orderId = draft.body.id as string
   for (const l of lines) {
-    await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, unitPriceCents: l.price })
+    await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, markupCents: markupFor(l.sku, l.price) })
   }
   const send = await asUser(world.userId).post(`/api/orders/${orderId}/send`).send({})
   const token = send.body.order.payToken as string

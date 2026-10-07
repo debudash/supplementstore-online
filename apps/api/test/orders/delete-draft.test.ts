@@ -44,7 +44,7 @@ async function draftWithAllStock(w: World): Promise<string> {
   const draft = await asUser(w.userId).post('/api/orders').send({ patientId: w.patientId })
   expect(draft.status).toBe(201)
   const orderId = draft.body.id as string
-  const line = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 5, marginBps: 3000 })
+  const line = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 5, markupCents: 1000 })
   expect(line.status).toBe(200)
   return orderId
 }

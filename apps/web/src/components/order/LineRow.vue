@@ -3,17 +3,17 @@
 // COGS, fee, net margin) and never computes money.
 //
 // Editable on an existing item: QUANTITY (stepper + "Update Item") and, on request,
-// MARGIN % ("Change margin" opens an inline editor; the server re-derives the price).
-// The price itself is never typed (owner requirement). Remove asks the parent, which
-// confirms before deleting. Errors (MARGIN_NEGATIVE / INSUFFICIENT_STOCK) render inline
-// in a row beneath this one and are linked to the quantity field.
+// the per-unit MARKUP ("Change markup" opens an inline editor; the server re-derives the
+// price, ADR-028). The price itself is never typed (owner requirement). Remove asks the
+// parent, which confirms before deleting. Errors (INSUFFICIENT_STOCK) render inline in a
+// row beneath this one and are linked to the quantity field.
 import { ref, watch } from 'vue'
 import type { OrderLineView, PricePreview } from '@cerbo/contracts'
-import { formatCents, marginPercentToBps } from './format'
+import { formatCents, centsToPlain, dollarsToCents } from './format'
 import DemoBadge from '../DemoBadge.vue'
 import QuantityStepper from '../ui/QuantityStepper.vue'
 import Money from '../ui/Money.vue'
-import MarginPreview from './MarginPreview.vue'
+import MarkupPreview from './MarkupPreview.vue'
 
 const props = defineProps<{
   line: OrderLineView
@@ -21,20 +21,20 @@ const props = defineProps<{
   error: string | null
   /** True while a request for this line is in flight. */
   busy: boolean
-  /** Server price preview for "Change margin" (ADR-025). Optional. */
-  previewPrice?: (sku: string, marginBps: number) => Promise<PricePreview>
+  /** Server price preview for "Change markup" (ADR-028). Optional. */
+  previewPrice?: (sku: string, markupCents: number) => Promise<PricePreview>
 }>()
 
 const emit = defineEmits<{
   (e: 'commit', payload: { qty: number }): void
-  (e: 'margin', payload: { marginBps: number }): void
+  (e: 'markup', payload: { markupCents: number }): void
   (e: 'remove'): void
 }>()
 
 const qty = ref<number | string>(props.line.qty)
 const inputError = ref<string | null>(null)
-const editingMargin = ref(false)
-const marginInput = ref('')
+const editingMarkup = ref(false)
+const markupInput = ref('')
 const errId = `line-err-${props.line.id}`
 
 watch(
@@ -44,9 +44,9 @@ watch(
   }
 )
 watch(
-  () => props.line.unitPriceCents,
+  () => props.line.unitMarkupCents,
   () => {
-    editingMargin.value = false
+    editingMarkup.value = false
   }
 )
 
@@ -60,20 +60,20 @@ function commit(): void {
   emit('commit', { qty: qtyNum })
 }
 
-function applyMargin(): void {
+function applyMarkup(): void {
   inputError.value = null
-  const bps = marginPercentToBps(marginInput.value)
-  if (bps === null || bps > 9500) {
-    inputError.value = 'Enter a margin percent from 0 to 95.'
+  const markupCents = dollarsToCents(markupInput.value)
+  if (markupCents === null || markupCents > 100000) {
+    inputError.value = 'Enter your markup per unit in dollars, from 0 to 1000.'
     return
   }
-  emit('margin', { marginBps: bps })
+  emit('markup', { markupCents })
 }
 
-function openMargin(): void {
-  marginInput.value = ''
+function openMarkup(): void {
+  markupInput.value = props.line.unitMarkupCents === null ? '' : centsToPlain(props.line.unitMarkupCents)
   inputError.value = null
-  editingMargin.value = true
+  editingMarkup.value = true
 }
 </script>
 
@@ -106,7 +106,8 @@ function openMargin(): void {
     </td>
     <td data-label="Unit price" class="num">
       <span class="money">{{ formatCents(line.unitPriceCents) }}</span>
-      <button v-if="!editingMargin" type="button" class="btn-link change" :disabled="busy" :aria-label="`Change margin for ${line.name}`" data-testid="change-margin" @click="openMargin">Change margin</button>
+      <span v-if="line.unitMarkupCents !== null" class="markup" data-test="line-markup">incl. your {{ formatCents(line.unitMarkupCents) }}</span>
+      <button v-if="!editingMarkup" type="button" class="btn-link change" :disabled="busy" :aria-label="`Change markup for ${line.name}`" data-testid="change-markup" @click="openMarkup">Change markup</button>
     </td>
     <td data-label="Line total" class="num"><span class="money" data-test="line-total">{{ formatCents(line.lineTotalCents) }}</span></td>
     <td data-label="COGS" class="num">
@@ -116,17 +117,17 @@ function openMargin(): void {
     <td data-label="Fee" class="num"><span class="money">{{ formatCents(line.lineFeeCents) }}</span></td>
     <td data-label="Net margin" class="num"><Money :cents="line.lineMarginCents" strong data-test="line-margin" /></td>
   </tr>
-  <tr v-if="editingMargin" class="margin-row">
+  <tr v-if="editingMarkup" class="markup-row">
     <td colspan="7">
-      <form class="margin-form" @submit.prevent="applyMargin">
-        <label :for="`m-${line.id}`">New margin % for {{ line.name }}</label>
-        <span class="pct">
-          <input :id="`m-${line.id}`" v-model="marginInput" type="text" inputmode="decimal" placeholder="e.g. 40" :disabled="busy" data-testid="line-margin-input" />
-          <span aria-hidden="true">%</span>
+      <form class="markup-form" @submit.prevent="applyMarkup">
+        <label :for="`m-${line.id}`">Your markup per unit for {{ line.name }}</label>
+        <span class="dollar">
+          <span aria-hidden="true">$</span>
+          <input :id="`m-${line.id}`" v-model="markupInput" type="text" inputmode="decimal" placeholder="e.g. 10.00" :disabled="busy" data-testid="line-markup-input" />
         </span>
-        <button type="submit" class="btn-primary btn-sm" :disabled="busy" data-testid="line-margin-apply">Apply margin</button>
-        <button type="button" class="btn-sm" :disabled="busy" @click="editingMargin = false">Cancel</button>
-        <MarginPreview :sku="line.sku" :margin-input="marginInput" :preview="previewPrice" />
+        <button type="submit" class="btn-primary btn-sm" :disabled="busy" data-testid="line-markup-apply">Apply markup</button>
+        <button type="button" class="btn-sm" :disabled="busy" @click="editingMarkup = false">Cancel</button>
+        <MarkupPreview :sku="line.sku" :markup-input="markupInput" :preview="previewPrice" />
       </form>
     </td>
   </tr>
@@ -160,6 +161,11 @@ function openMargin(): void {
   gap: var(--space-2);
   align-items: center;
 }
+.markup {
+  display: block;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
 .change {
   display: block;
   margin-left: auto;
@@ -177,25 +183,25 @@ function openMargin(): void {
 .remove:hover:not(:disabled) {
   color: var(--danger-strong);
 }
-.margin-row td {
+.markup-row td {
   background: var(--brand-tint);
 }
-.margin-form {
+.markup-form {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-3);
   font-size: var(--text-sm);
 }
-.margin-form label {
+.markup-form label {
   font-weight: 600;
 }
-.pct {
+.dollar {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
 }
-.pct input {
+.dollar input {
   width: 6rem;
 }
 .error-row td {

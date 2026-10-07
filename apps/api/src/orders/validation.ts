@@ -48,9 +48,6 @@ export function requireString(value: unknown, field: string): string {
 /** Quantity is an integer 1..100 (FR-1 AC3, schema check). */
 export const QTY_MIN = 1
 export const QTY_MAX = 100
-/** Unit price is a positive integer in cents (schema check unit_price_cents > 0). */
-export const PRICE_MIN = 1
-export const PRICE_MAX = Number.MAX_SAFE_INTEGER
-/** Margin percent in basis points, 0..9500 (FR-2 AC1). */
-export const MARGIN_BPS_MIN = 0
-export const MARGIN_BPS_MAX = 9500
+/** Per-unit dollar markup in cents, $0..$1,000 (ADR-028). The price is derived from it. */
+export const MARKUP_MIN = 0
+export const MARKUP_MAX = 100000

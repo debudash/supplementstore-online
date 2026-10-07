@@ -7,12 +7,11 @@
 // never restocks. The banner and per-action copy say so. Money (unit COGS) is
 // DISPLAY-only here (AGENTS.md money rule 2) - formatted, never computed with.
 //
-// Catalog pricing (ADR-025) is a REAL admin capability, kept in its own section: edit a
-// product's list price through PriceEditDialog (edit -> server review -> save) and see
-// its append-only price history. Restock stays separate and labelled Demo only.
+// There is no catalog list price: providers price each order line with their own
+// per-unit markup (ADR-028), so Cerbo Admin manages cost and stock only.
 import { onMounted, ref } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
-import type { AdminInventoryItem, AdminInventoryResponse, RestockResult, PriceHistoryResponse, PriceChange, UpdateListPriceResult } from '@cerbo/contracts'
+import type { AdminInventoryItem, AdminInventoryResponse, RestockResult } from '@cerbo/contracts'
 import DemoBadge from '../../components/DemoBadge.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Money from '../../components/ui/Money.vue'
@@ -20,9 +19,7 @@ import UiButton from '../../components/ui/UiButton.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
 import EmptyState from '../../components/ui/EmptyState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
-import PriceEditDialog from '../../components/admin/PriceEditDialog.vue'
 import { toast } from '../../components/ui/toast'
-import { formatMoney, formatBps } from '../../utils/money'
 
 const LOW_STOCK = 5
 const RESTOCK_REASON = 'Demo affordance - refills the shared pool between demo scenarios. In production stock arrives through real receiving; a provider never restocks.'
@@ -96,130 +93,14 @@ async function confirmRestock(): Promise<void> {
   }
 }
 
-// ---- Catalog pricing ----
-const editing = ref<AdminInventoryItem | null>(null)
-const historyOpen = ref<string | null>(null)
-const history = ref<Record<string, PriceChange[]>>({})
-const historyLoading = ref<string | null>(null)
-const historyError = ref<string | null>(null)
-
-function shortDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
-}
-
-async function loadHistory(sku: string): Promise<void> {
-  historyLoading.value = sku
-  historyError.value = null
-  try {
-    const res = await apiRequest<PriceHistoryResponse>(`/admin/products/${encodeURIComponent(sku)}/price-history`)
-    history.value = { ...history.value, [sku]: res.changes }
-  } catch (err) {
-    historyError.value = err instanceof ApiError ? err.message : 'Could not load the price history.'
-  } finally {
-    historyLoading.value = null
-  }
-}
-
-async function toggleHistory(sku: string): Promise<void> {
-  if (historyOpen.value === sku) {
-    historyOpen.value = null
-    return
-  }
-  historyOpen.value = sku
-  await loadHistory(sku)
-}
-
-async function onPriceSaved(result: UpdateListPriceResult): Promise<void> {
-  editing.value = null
-  toast(`${result.name}: list price ${formatMoney(result.previousPriceCents)} to ${formatMoney(result.listPriceCents)}.`, 'success')
-  await load()
-  if (historyOpen.value === result.sku) await loadHistory(result.sku)
-}
-
 onMounted(load)
 </script>
 
 <template>
   <section class="admin-inventory">
-    <PageHeader title="Inventory and pricing" subtitle="Cerbo's catalog prices and the shared stock pool used by every practice." />
+    <PageHeader title="Inventory" subtitle="Cerbo's unit cost and the shared stock pool used by every practice." />
 
     <p v-if="error" class="page-error" role="alert">{{ error }}</p>
-
-    <section class="section" aria-labelledby="pricing-title">
-      <div class="section-head">
-        <h2 id="pricing-title">Catalog pricing</h2>
-        <p class="subtle">
-          The list price is where every new order starts. Only Cerbo Admin changes it; providers
-          can only move an order's price through margin %. Every change is reviewed first and kept in the price history.
-        </p>
-      </div>
-      <Skeleton v-if="loading && items.length === 0" :lines="5" height="2.25rem" label="Loading catalog" />
-      <div v-else-if="items.length > 0" class="table-wrap">
-        <table class="table table-stack" data-testid="pricing-table">
-          <thead>
-            <tr>
-              <th scope="col">Product</th>
-              <th scope="col" class="num">Cerbo cost</th>
-              <th scope="col" class="num">List price</th>
-              <th scope="col" class="num">Margin at list</th>
-              <th scope="col">Recurring</th>
-              <th scope="col"><span class="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="it in items" :key="`p-${it.sku}`">
-              <tr :data-testid="`pricing-row-${it.sku}`">
-                <td data-label="Product">
-                  <span class="product">
-                    <span class="product-name">{{ it.name }}</span>
-                    <code>{{ it.sku }}</code>
-                  </span>
-                </td>
-                <td data-label="Cerbo cost" class="num"><Money :cents="it.unitCogsCents" /></td>
-                <td data-label="List price" class="num"><Money :cents="it.listPriceCents" strong /></td>
-                <td data-label="Margin at list" class="num">{{ formatBps(it.listMarginBps) }}</td>
-                <td data-label="Recurring">
-                  <span v-if="it.activeScheduleCount > 0" class="badge badge-info">{{ it.activeScheduleCount }} active</span>
-                  <span v-else class="subtle">None</span>
-                </td>
-                <td data-label="" class="price-actions">
-                  <div class="row-center">
-                    <UiButton size="sm" variant="primary" :data-testid="`edit-price-${it.sku}`" @click="editing = it">Change price</UiButton>
-                    <button
-                      type="button"
-                      class="btn-link"
-                      :aria-expanded="historyOpen === it.sku"
-                      :aria-controls="`history-${it.sku}`"
-                      :data-testid="`history-${it.sku}`"
-                      @click="toggleHistory(it.sku)"
-                    >{{ historyOpen === it.sku ? 'Hide history' : 'History' }}</button>
-                  </div>
-                </td>
-              </tr>
-              <tr v-if="historyOpen === it.sku" :id="`history-${it.sku}`" class="history-row">
-                <td colspan="6">
-                  <Skeleton v-if="historyLoading === it.sku" :lines="2" label="Loading price history" />
-                  <p v-else-if="historyError" class="row-error" role="alert">{{ historyError }}</p>
-                  <p v-else-if="!(history[it.sku]?.length)" class="subtle">No price changes yet. The current price is the seeded catalog price.</p>
-                  <ol v-else class="history" :aria-label="`Price history for ${it.name}`">
-                    <li v-for="c in history[it.sku]" :key="c.id" data-testid="history-entry">
-                      <span class="h-change">
-                        <span class="money">{{ formatMoney(c.oldPriceCents) }}</span>
-                        <span aria-hidden="true">→</span>
-                        <span class="sr-only">to</span>
-                        <strong class="money">{{ formatMoney(c.newPriceCents) }}</strong>
-                      </span>
-                      <span class="h-reason">{{ c.reason }}</span>
-                      <span class="h-meta subtle">{{ c.actorName ?? c.actorUserId }} · {{ shortDateTime(c.changedAt) }}</span>
-                    </li>
-                  </ol>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-    </section>
 
     <section class="section" aria-labelledby="stock-title">
       <div class="section-head">
@@ -240,6 +121,7 @@ onMounted(load)
         <thead>
           <tr>
             <th scope="col">Product</th>
+            <th scope="col" class="num">Cerbo cost</th>
             <th scope="col">Availability</th>
             <th scope="col" class="num">On hand</th>
             <th scope="col" class="num">Reserved</th>
@@ -256,6 +138,7 @@ onMounted(load)
                 <code>{{ it.sku }}</code>
               </span>
             </td>
+            <td data-label="Cerbo cost" class="num"><Money :cents="it.unitCogsCents" /></td>
             <td data-label="Availability">
               <span class="badge" :class="`badge-${availability(it.available).tone}`" data-testid="availability-chip">
                 {{ availability(it.available).label }}
@@ -296,8 +179,6 @@ onMounted(load)
     </div>
     </section>
 
-    <PriceEditDialog :item="editing" @saved="onPriceSaved" @close="editing = null" @conflict="load" />
-
     <ConfirmDialog
       :open="pending !== null"
       :title="pending ? `Add ${pending.qty} units of ${pending.name}?` : ''"
@@ -336,47 +217,6 @@ onMounted(load)
   font-size: var(--text-sm);
   font-weight: 650;
   color: var(--demo);
-}
-.price-actions {
-  text-align: right;
-}
-.price-actions .row-center {
-  justify-content: flex-end;
-}
-.history-row > td {
-  background: var(--surface-2);
-}
-.history {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.history li {
-  display: grid;
-  grid-template-columns: minmax(10rem, auto) 1fr auto;
-  gap: var(--space-1) var(--space-4);
-  align-items: baseline;
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border);
-}
-.history li:last-child {
-  border-bottom: none;
-}
-.h-change {
-  display: inline-flex;
-  gap: var(--space-2);
-  white-space: nowrap;
-}
-.h-reason {
-  min-width: 0;
-}
-@media (max-width: 640px) {
-  .history li {
-    grid-template-columns: 1fr;
-  }
-  .price-actions .row-center {
-    justify-content: flex-start;
-  }
 }
 .demo-banner {
   background: var(--demo-tint);

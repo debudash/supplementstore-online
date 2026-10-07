@@ -226,6 +226,12 @@ onMounted(() => {
           <div class="kpi-grid">
             <KpiCard label="Net margin (settled)" :cents="data?.headline.providerNetMarginCents" :loading="loading && !data" />
             <KpiCard label="Net after sunk fees" :cents="data?.headline.providerNetAfterSunkFeesCents" :loading="loading && !data" />
+            <KpiCard
+              label="Provider markup (settled)"
+              :cents="data?.headline.providerMarkupCents"
+              :hint="data ? `Set by providers, not Cerbo. Avg ${formatMoney(data.headline.avgMarkupPerUnitCents)} per unit over ${data.headline.markupUnits} units.` : undefined"
+              :loading="loading && !data"
+            />
           </div>
         </Card>
       </div>

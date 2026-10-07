@@ -4,6 +4,7 @@
 // docs/EVALS.md and must never be edited to make a test pass (AGENTS.md section 4).
 import { afterAll, beforeEach, describe, expect } from 'vitest'
 import { asUser, db, evalCase, newDraft, resetState, PROV_ANA, SKU } from './_harness'
+import { markupFor } from './_harness'
 
 /** The order-level fee, half-up, from docs/ARCHITECTURE.md section 4. */
 function orderFee(subtotal: number, feeBps = 75): number {
@@ -27,8 +28,8 @@ afterAll(async () => {
 describe('money core (golden)', () => {
   evalCase('EVAL-01', 'MAG x2@2999 + VITD3 x1@2499 split', async () => {
     const id = await newDraft()
-    expect((await addLine(id, { sku: SKU.MAG, qty: 2, unitPriceCents: 2999 })).status).toBe(200)
-    expect((await addLine(id, { sku: SKU.VITD, qty: 1, unitPriceCents: 2499 })).status).toBe(200)
+    expect((await addLine(id, { sku: SKU.MAG, qty: 2, markupCents: markupFor(SKU.MAG, 2999) })).status).toBe(200)
+    expect((await addLine(id, { sku: SKU.VITD, qty: 1, markupCents: markupFor(SKU.VITD, 2499) })).status).toBe(200)
 
     const q = await quote(id)
     expect(q.status).toBe(200)
@@ -48,7 +49,7 @@ describe('money core (golden)', () => {
 
   evalCase('EVAL-02', 'OMEGA3 x1@4999 -> fee 37, margin 2682', async () => {
     const id = await newDraft()
-    expect((await addLine(id, { sku: SKU.OMEGA, qty: 1, unitPriceCents: 4999 })).status).toBe(200)
+    expect((await addLine(id, { sku: SKU.OMEGA, qty: 1, markupCents: markupFor(SKU.OMEGA, 4999) })).status).toBe(200)
     const q = await quote(id)
     expect(q.body.totals.feeCents).toBe(37)
     expect(q.body.totals.marginCents).toBe(2682)
@@ -57,36 +58,31 @@ describe('money core (golden)', () => {
 
   evalCase('EVAL-03', 'VITD3 x1@2200 half-up -> fee 17, margin 1058', async () => {
     const id = await newDraft()
-    expect((await addLine(id, { sku: SKU.VITD, qty: 1, unitPriceCents: 2200 })).status).toBe(200)
+    expect((await addLine(id, { sku: SKU.VITD, qty: 1, markupCents: markupFor(SKU.VITD, 2200) })).status).toBe(200)
     const q = await quote(id)
     // 16.5 rounds UP to 17 (half-up).
     expect(q.body.totals.feeCents).toBe(17)
     expect(q.body.totals.marginCents).toBe(1058)
   })
 
-  evalCase('EVAL-04', 'VITD3 margin floor: @1125 and @1132 rejected, @1133 margin 0', async () => {
-    const d1 = await newDraft()
-    const r1 = await addLine(d1, { sku: SKU.VITD, qty: 1, unitPriceCents: 1125 })
-    expect(r1.status).toBe(422)
-    expect(r1.body.error.code).toBe('MARGIN_NEGATIVE')
-
-    const d2 = await newDraft()
-    const r2 = await addLine(d2, { sku: SKU.VITD, qty: 1, unitPriceCents: 1132 })
-    expect(r2.status).toBe(422)
-    expect(r2.body.error.code).toBe('MARGIN_NEGATIVE')
-
-    const d3 = await newDraft()
-    const r3 = await addLine(d3, { sku: SKU.VITD, qty: 1, unitPriceCents: 1133 })
-    expect(r3.status).toBe(200)
-    const q = await quote(d3)
-    expect(q.body.lines[0].lineMarginCents).toBe(0)
+  // ADR-028: the split still enforces the floor (packages/money EVAL-04 @1125/@1132/@1133);
+  // a markup price covers the fee and a $0 markup carries 1 cent of rounding headroom.
+  evalCase('EVAL-04', 'VITD3 margin floor: markup 0 -> price 1135 (cost + fee + 1 cent headroom), margin 1', async () => {
+    const id = await newDraft()
+    const r = await addLine(id, { sku: SKU.VITD, qty: 1, markupCents: 0 })
+    expect(r.status).toBe(200)
+    expect(r.body.lines[0].unitPriceCents).toBe(1135)
+    const q = await quote(id)
+    expect(q.body.lines[0]).toMatchObject({ lineFeeCents: 9, lineMarginCents: 1 })
   })
 
-  evalCase('EVAL-04b', 'MAG marginBps 5000 -> unit price 2900', async () => {
+  evalCase('EVAL-04b', 'MAG markup 1000 -> unit price 2469, fee 19, margin 1000', async () => {
     const id = await newDraft()
-    const r = await addLine(id, { sku: SKU.MAG, qty: 1, marginBps: 5000 })
+    const r = await addLine(id, { sku: SKU.MAG, qty: 1, markupCents: 1000 })
     expect(r.status).toBe(200)
-    expect(r.body.lines[0].unitPriceCents).toBe(2900)
+    expect(r.body.lines[0]).toMatchObject({ unitPriceCents: 2469, unitMarkupCents: 1000 })
+    const q = await quote(id)
+    expect(q.body.lines[0]).toMatchObject({ lineFeeCents: 19, lineMarginCents: 1000 })
   })
 
   // EVAL-P1: property check driven through the API. fast-check is a packages/money dev
@@ -126,7 +122,7 @@ describe('money core (golden)', () => {
       const build = async () => {
         const id = await newDraft()
         for (const b of basket) {
-          const r = await addLine(id, { sku: b.sku, qty: b.qty, unitPriceCents: b.price })
+          const r = await addLine(id, { sku: b.sku, qty: b.qty, markupCents: markupFor(b.sku, b.price) })
           expect(r.status, `add ${b.sku} case ${c}`).toBe(200)
         }
         return (await quote(id)).body

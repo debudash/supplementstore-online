@@ -18,7 +18,7 @@ export type { AllocationLine } from "./allocate";
 export { split } from "./split";
 export type { SplitLineInput, SplitLine, OrderSplit } from "./split";
 
-export { priceFromMarginBps, marginBpsFromPrice, MAX_MARGIN_BPS, MAX_PRICE_FOR_MARGIN_CENTS } from "./pricing";
+export { priceFromMarkupCents, MAX_MARKUP_CENTS } from "./pricing";
 
 export {
   processingCostCents,

@@ -4,7 +4,7 @@
 //  - Send goes through a confirmation that summarises the order, then shows a success
 //    state with the copyable patient link.
 //  - Remove asks for confirmation before deleting the line.
-//  - "Change margin" on an item sends marginBps only (never a typed price).
+//  - "Change markup" on an item sends markupCents only (never a typed price).
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -27,7 +27,7 @@ vi.mock('../../api/client', () => {
 const line = {
   id: 'l1', position: 1, sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', qty: 2,
   unitPriceCents: 2999, unitCogsCents: 1450, lineTotalCents: 5998, lineCogsCents: 2900,
-  lineFeeCents: 45, lineMarginCents: 3053
+  lineFeeCents: 45, lineMarginCents: 3053, unitMarkupCents: 1526
 }
 const draftQuote = {
   orderId: 'o1',
@@ -104,13 +104,13 @@ describe('OrderBuilder - item actions', () => {
     expect(apiRequest).toHaveBeenCalledWith('/orders/o1/lines/l1', { method: 'DELETE' })
   })
 
-  it('changes margin by sending marginBps only', async () => {
+  it('changes markup by sending markupCents only', async () => {
     const w = mount(OrderBuilder)
     await flushPromises()
-    await w.find('[data-testid="change-margin"]').trigger('click')
-    await w.find('[data-testid="line-margin-input"]').setValue('40')
-    await w.find('[data-testid="line-margin-apply"]').trigger('submit')
+    await w.find('[data-testid="change-markup"]').trigger('click')
+    await w.find('[data-testid="line-markup-input"]').setValue('12.5')
+    await w.find('[data-testid="line-markup-apply"]').trigger('submit')
     await flushPromises()
-    expect(apiRequest).toHaveBeenCalledWith('/orders/o1/lines/l1', { method: 'PATCH', body: { marginBps: 4000 } })
+    expect(apiRequest).toHaveBeenCalledWith('/orders/o1/lines/l1', { method: 'PATCH', body: { markupCents: 1250 } })
   })
 })

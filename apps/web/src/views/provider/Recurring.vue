@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// Provider recurring schedules (FR-12, ADR-017, ADR-024). Create a schedule for a patient
-// (products, quantities, interval), share the patient authorize link, then run a cycle on
-// demand and watch each cycle land as a child order - Paid, or On hold with a reason the
-// provider can act on. A schedule stores product + quantity only; each cycle prices from
-// the current catalog, so the catalog price shown here is indicative.
+// Provider recurring schedules (FR-12, ADR-017, ADR-028). Create a schedule for a patient
+// (products, quantities, a per-unit markup, interval), share the patient authorize link,
+// then run a cycle on demand and watch each cycle land as a child order - Paid, or On hold
+// with a reason the provider can act on. Each cycle charges Cerbo's CURRENT cost + the
+// markup + the platform fee, so the per-cycle price shown here is indicative.
 //
 // The UI only DISPLAYS money; every figure comes from the server (AGENTS.md money rule 2).
 import { onMounted, ref, reactive, computed } from 'vue'
@@ -24,6 +24,7 @@ import EmptyState from '../../components/ui/EmptyState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
 import { toast } from '../../components/ui/toast'
 import { formatMoney } from '../../utils/money'
+import { dollarsToCents } from '../../components/order/format'
 
 const COGS_REASON =
   "COGS is Cerbo's wholesale cost, shown in this list only to make the economics demonstrable. A prescribing doctor would not normally see it."
@@ -36,7 +37,7 @@ const HOLD_REASONS: Record<HoldReason, { label: string; fix: string }> = {
   },
   MARGIN_NEGATIVE: {
     label: 'Margin would be negative',
-    fix: "Cerbo's cost rose above the catalog price, so the cycle was held instead of charging at a loss. Check the products with Cerbo, then run the cycle again."
+    fix: "This cycle's price no longer covers Cerbo's cost plus the platform fee. Run the cycle again; if it is still held, contact Cerbo."
   },
   NOT_AUTHORIZED: {
     label: 'Patient has not authorized',
@@ -73,12 +74,14 @@ const origin = typeof location !== 'undefined' ? location.origin : ''
 interface DraftLine {
   sku: string
   qty: number | string
+  /** Per-unit markup in dollars as typed, e.g. "10" or "12.50" (ADR-028). */
+  markup: string
 }
 
 const form = reactive<{ patientId: string; intervalDays: number | string; lines: DraftLine[] }>({
   patientId: '',
   intervalDays: 30,
-  lines: [{ sku: '', qty: 1 }]
+  lines: [{ sku: '', qty: 1, markup: '' }]
 })
 
 const intervalError = computed(() => {
@@ -90,13 +93,6 @@ function productOf(sku: string): ProductView | null {
   return products.value.find((p) => p.sku === sku) ?? null
 }
 
-/** The catalog list price in cents for a SKU, or null when the field is not present. */
-function catalogPriceCents(sku: string): number | null {
-  const p = productOf(sku)
-  if (!p) return null
-  const v = (p as unknown as Record<string, unknown>).listPriceCents
-  return typeof v === 'number' && Number.isSafeInteger(v) ? v : null
-}
 
 function patientName(id: string): string {
   return patients.value.find((p) => p.id === id)?.name ?? 'Patient'
@@ -145,7 +141,7 @@ async function initialLoad(): Promise<void> {
 onMounted(initialLoad)
 
 function addDraftLine(): void {
-  form.lines.push({ sku: '', qty: 1 })
+  form.lines.push({ sku: '', qty: 1, markup: '' })
 }
 function removeDraftLine(i: number): void {
   form.lines.splice(i, 1)
@@ -172,9 +168,18 @@ async function createSchedule(): Promise<void> {
       formError.value = 'Quantity must be a whole number from 1 to 100.'
       return
     }
+    const markupCents = dollarsToCents(l.markup)
+    if (markupCents === null || markupCents > 100000) {
+      formError.value = 'Enter your markup per unit in dollars, from 0 to 1000, for every product.'
+      return
+    }
   }
-  // A schedule carries product + quantity only (ADR-024): no price or margin is sent.
-  const lines = draftLines.map((l) => ({ sku: l.sku, qty: Math.trunc(Number(l.qty)) }))
+  // Each line carries the provider's markup; the server derives every cycle's price (ADR-028).
+  const lines = draftLines.map((l) => ({
+    sku: l.sku,
+    qty: Math.trunc(Number(l.qty)),
+    markupCents: dollarsToCents(l.markup) as number
+  }))
   busy.value = true
   try {
     await apiRequest<ScheduleView>('/schedules', {
@@ -184,7 +189,7 @@ async function createSchedule(): Promise<void> {
     const name = patientName(form.patientId)
     form.patientId = ''
     form.intervalDays = 30
-    form.lines = [{ sku: '', qty: 1 }]
+    form.lines = [{ sku: '', qty: 1, markup: '' }]
     await loadAll()
     toast(`Schedule created for ${name}.`)
   } catch (err) {
@@ -255,7 +260,7 @@ const heldCycles = (s: ScheduleView): ScheduleCycleView[] => s.cycles.filter((c)
 
     <div v-else class="stack">
       <!-- Create a schedule -->
-      <Card title="New schedule" subtitle="Each cycle prices from the current catalog and is held if the margin would go negative.">
+      <Card title="New schedule" subtitle="Each cycle charges Cerbo's current cost + your markup + the 0.75% platform fee, so you keep your markup.">
         <UiAlert v-if="patientsUnavailable" tone="info">The patient list is not available yet.</UiAlert>
         <form v-else class="create" novalidate @submit.prevent="createSchedule">
           <div class="grid-2">
@@ -302,10 +307,20 @@ const heldCycles = (s: ScheduleView): ScheduleCycleView[] => s.cycles.filter((c)
                 <QuantityStepper v-model="line.qty" :label="`Quantity for line ${i + 1}`" :disabled="busy" :input-test-id="`line-qty-${i}`" />
               </div>
               <div class="line-field">
-                <span class="field-label">Catalog price <span class="subtle">(indicative)</span></span>
-                <output class="price money" :data-test="`unit-price-${i}`">
-                  {{ line.sku && catalogPriceCents(line.sku) !== null ? formatMoney(catalogPriceCents(line.sku)) : line.sku ? 'Price pending' : '-' }}
-                </output>
+                <label :for="`line-markup-${i}`" class="field-label">Your markup <span class="subtle">($ per unit)</span></label>
+                <span class="dollar">
+                  <span aria-hidden="true">$</span>
+                  <input
+                    :id="`line-markup-${i}`"
+                    v-model="line.markup"
+                    type="text"
+                    inputmode="decimal"
+                    placeholder="e.g. 10.00"
+                    class="markup-input"
+                    :disabled="busy"
+                    :data-testid="`line-markup-${i}`"
+                  />
+                </span>
               </div>
               <button
                 type="button"
@@ -350,7 +365,10 @@ const heldCycles = (s: ScheduleView): ScheduleCycleView[] => s.cycles.filter((c)
           </dl>
 
           <ul class="items">
-            <li v-for="l in s.lines" :key="l.id">{{ l.qty }} × {{ l.name }}</li>
+            <li v-for="l in s.lines" :key="l.id">
+              {{ l.qty }} × {{ l.name }}
+              <span class="subtle">- {{ formatMoney(l.unitPriceCents) }} each, incl. your {{ formatMoney(l.unitMarkupCents) }}</span>
+            </li>
           </ul>
 
           <!-- On-hold cycles: what happened and how to fix it -->
@@ -496,10 +514,13 @@ const heldCycles = (s: ScheduleView): ScheduleCycleView[] => s.cycles.filter((c)
   align-items: center;
   margin: 0;
 }
-.price {
-  display: inline-block;
-  padding: 0.45rem 0;
-  min-height: 2.5rem;
+.dollar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.markup-input {
+  width: 7rem;
 }
 .remove {
   min-height: 2.5rem;

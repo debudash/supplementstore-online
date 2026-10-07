@@ -57,8 +57,10 @@ patients         id uuid pk, practice_id fk, name, email, ship_to text
 users            id text pk, role check (provider|patient|cerbo_admin), provider_id null fk, patient_id null fk, display_name
 
 products         sku text pk, name, unit_cogs_cents int > 0,
+                 list_price_cents int null (unused since ADR-028; kept for history),
                  on_hand_qty int >= 0, reserved_qty int >= 0, check (reserved_qty <= on_hand_qty),
                  active bool, updated_at
+product_price_changes  append-only list-price history (ADR-025); kept, no longer written since ADR-028
 inventory_movements  id bigserial, sku fk, delta_on_hand int, delta_reserved int,
                  reason check (seed|restock|reserve|release|sale|refund_restock|adjustment),
                  order_id null fk, actor_user_id, created_at
@@ -76,6 +78,7 @@ orders           id uuid pk, provider_id fk, practice_id fk, patient_id fk,
                  is_synthetic bool default false, created_at, updated_at
 order_lines      id uuid pk, order_id fk, position int, sku fk, qty int check (1..100),
                  unit_price_cents int > 0, unit_cogs_cents int > 0,
+                 unit_markup_cents int null check (null or 0..100000)   -- ADR-028; null = priced before it
                  line_total_cents int, line_cogs_cents int,
                  line_fee_cents int null, line_margin_cents int null,
                  unique (order_id, sku), unique (order_id, position),
@@ -96,7 +99,9 @@ ledger_entries   id bigserial, journal_id fk, order_id fk, line_id null fk,
 recurring_schedules  id uuid pk, provider_id, practice_id, patient_id, interval_days int check (7..90) default 30,
                  next_run_at, status check (active|paused|cancelled),
                  authorized_at null, payment_method_token null, pay_token text unique, created_at
-schedule_lines   id uuid pk, schedule_id fk, position, sku fk, qty int check (1..100), unit_price_cents int > 0
+schedule_lines   id uuid pk, schedule_id fk, position, sku fk, qty int check (1..100),
+                 unit_markup_cents int not null check (0..100000),
+                 unit_price_cents int > 0 (indicative: COGS + markup + fee when created; each cycle re-derives)
 
 payable_statements  id uuid pk, provider_id, practice_id, period_start date, period_end date,
                  opening_cents bigint, credits_cents bigint, debits_cents bigint, closing_cents bigint,
@@ -126,13 +131,17 @@ allocateFee(lines, orderFee):
 split(lines) -> per line { total, cogs, fee, margin = total - cogs - fee }, order totals
   error MARGIN_NEGATIVE if any line margin < 0 (reports position)
 
-priceFromMarginBps(unitCogs, marginBps) = ceil(unitCogs * 10000 / (10000 - marginBps))   // 0 <= marginBps <= 9500
+priceFromMarkupCents(unitCogs, markupCents, feeBps)                 // ADR-028, 0 <= markupCents <= 100000
+  = ceil((unitCogs + max(markupCents, 1)) * 10000 / (10000 - feeBps))
+  // patient pays COGS + markup + fee; a $0 markup is priced as 1 cent of headroom so
+  // largest-remainder fee allocation never pushes a line negative (a $0 line nets 0 or 1 cent).
+  // Order margin >= sum(qty x markup); one line can be 1 cent under its markup.
 
 refund(orderSplit) -> { patientAmount = subtotal, cogsReturned = cogs,
                         providerDebit = margin + fee, feeRetained = fee }
 ```
 
-Worked example (EVAL-01): lines 2 x 2999 (cogs 1450) and 1 x 2499 (cogs 1125). Subtotal 8497, fee 64, line fees 45 and 19, margins 3053 and 1355, order margin 4408.
+Worked example (EVAL-01): lines 2 x 2999 (cogs 1450, markup 1526) and 1 x 2499 (cogs 1125, markup 1355). Subtotal 8497, fee 64, line fees 45 and 19, margins 3053 and 1355, order margin 4408.
 
 ## 5. Ledger posting
 Sign convention: debit positive, credit negative. Posted per line (`line_id` set) so every cent maps to a SKU.
@@ -178,8 +187,9 @@ Provider (`role = provider`, own practice data only):
 GET    /api/products                       sku, name, unit_cogs_cents, available, active
 GET    /api/patients
 POST   /api/orders                         { patientId } -> draft
-POST   /api/orders/:id/lines               { sku, qty, unitPriceCents | marginBps }
-PATCH  /api/orders/:id/lines/:lineId       { qty?, unitPriceCents? , marginBps? }
+GET    /api/products/:sku/price-preview?markupCents=&qty=   server-computed unit price + line split
+POST   /api/orders/:id/lines               { sku, qty, markupCents }   (unitPriceCents / marginBps -> 400)
+PATCH  /api/orders/:id/lines/:lineId       { qty?, markupCents? }
 DELETE /api/orders/:id/lines/:lineId
 GET    /api/orders/:id/quote               live split preview
 POST   /api/orders/:id/send
@@ -187,7 +197,7 @@ POST   /api/orders/:id/cancel
 POST   /api/orders/:id/refund              { reasonCode }
 GET    /api/orders?status=&from=&to=
 GET    /api/orders/:id/audit
-POST   /api/schedules | GET /api/schedules | POST /api/schedules/:id/(pause|resume|cancel|run)
+POST   /api/schedules { patientId, intervalDays, lines: [{ sku, qty, markupCents }] } | GET /api/schedules | POST /api/schedules/:id/(pause|resume|cancel|run)
 GET    /api/reports/sales?from=&to=
 GET    /api/reports/payables?from=&to=
 ```

@@ -18,6 +18,7 @@ import { db } from '../../src/db/knex'
 import { createApp } from '../../src/app'
 import { createKnexActorLoader } from '../../src/auth/loadActor'
 import { seedCore } from '../../src/db/seeds/01_core'
+import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
 function migrateViaCli(): void {
@@ -68,7 +69,7 @@ async function payNewOrder(world: ProviderWorld, lines: Line[]): Promise<string>
   expect(draft.status).toBe(201)
   const orderId = draft.body.id as string
   for (const l of lines) {
-    const r = await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, unitPriceCents: l.price })
+    const r = await asUser(world.userId).post(`/api/orders/${orderId}/lines`).send({ sku: l.sku, qty: l.qty, markupCents: markupFor(l.sku, l.price) })
     expect(r.status).toBe(200)
   }
   const send = await asUser(world.userId).post(`/api/orders/${orderId}/send`).send({})
@@ -121,6 +122,12 @@ describe('FR-13 / EVAL-09 Cerbo Admin metrics (exact values from docs/EVALS.md)'
     expect(b.sunkFeeCents).toBe(64) // Sunk fees on refunded GMV
     expect(b.providerNetMarginCents).toBe(2682) // Provider net margin from settled
     expect(b.providerNetAfterSunkFeesCents).toBe(2618) // 2682 - 64
+    // ADR-028 markup tracking: only the settled EVAL-02 line counts (the refunded order is
+    // excluded). OMEGA @ 4999 is markup 2681; net margin 2682 is >= it (1 cent round-up).
+    expect(b.providerMarkupCents).toBe(2681)
+    expect(b.markupUnits).toBe(1)
+    expect(b.avgMarkupPerUnitCents).toBe(2681)
+    expect(b.providerNetMarginCents).toBeGreaterThanOrEqual(b.providerMarkupCents)
 
     // Reconciliation line passes (ADR-015, per-order formula == ledger figure).
     expect((mine as MetricsGroup).reconciliation.pass).toBe(true)

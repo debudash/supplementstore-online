@@ -1,16 +1,16 @@
 // Recurring schedules + cycles (T9) - FR-12, ADR-017 as amended by ADR-024.
 //
 // A schedule generates one CHILD ORDER per cycle. The provider sets product + quantity +
-// interval only; it carries NO price or margin. The patient authorizes ONCE via the token
-// route. Each cycle DERIVES both the line PRICE (from the current catalog list_price_cents)
-// and the COGS (from the current unit_cogs_cents) at run time (ADR-024, superseding the
-// locked-price clause of ADR-017), then runs the same checks a normal order runs and either
-// PAYS (via T4's posting path) or goes `on_hold` with a `hold_reason` - surfacing a cost
-// increase instead of silently absorbing it.
+// a per-unit dollar markup + interval (ADR-028). The patient authorizes ONCE via the token
+// route. Each cycle reads the CURRENT unit_cogs_cents and prices each line as COGS + the
+// schedule's markup grossed up for the fee (ADR-028, superseding the price clause of
+// ADR-024), so a cost rise passes through to the patient and the provider keeps the markup.
+// It then runs the same checks a normal order runs and either PAYS (via T4's posting path)
+// or goes `on_hold` with a `hold_reason`.
 //
 // Money rules honoured here:
-//  - rule 2: ALL split math goes through @cerbo/money (split()); nothing is recomputed
-//    here. Both price and COGS are read fresh from the catalog each cycle.
+//  - rule 2: ALL split math goes through @cerbo/money (split(), priceFromMarkupCents());
+//    nothing is recomputed here. COGS is read fresh from the catalog each cycle.
 //  - rule 6/7/8: the cycle PAYMENT journal is posted by T4's postPaymentJournal (NO
 //    duplicate posting code), inside ONE transaction that also changes order status and
 //    inventory, under a row lock.
@@ -23,7 +23,7 @@
 // (schedule_id, cycle_number); see the MR description).
 import { randomBytes } from 'node:crypto'
 import type { Knex } from 'knex'
-import { split, type SplitLineInput } from '@cerbo/money'
+import { split, priceFromMarkupCents, type SplitLineInput } from '@cerbo/money'
 import { MoneyError } from '@cerbo/money'
 import type { Actor } from '../auth/types'
 import type { Seams } from '../seams/types'
@@ -31,7 +31,15 @@ import { createSeams } from '../seams'
 import { assertSafeInteger } from '../db/types'
 import { postPaymentJournal } from '../ledger'
 import { availableOf } from '../inventory/service'
-import { requireString, requireInt, optionalInt, QTY_MIN, QTY_MAX } from '../orders/validation'
+import {
+  requireString,
+  requireInt,
+  optionalInt,
+  QTY_MIN,
+  QTY_MAX,
+  MARKUP_MIN,
+  MARKUP_MAX
+} from '../orders/validation'
 import { notFound, invalidInput, notActionable } from './errors'
 import type {
   HoldReason,
@@ -68,6 +76,7 @@ interface ScheduleLineRow {
   sku: string
   qty: number
   unit_price_cents: number
+  unit_markup_cents: number
 }
 
 interface CycleOrderRow {
@@ -91,19 +100,23 @@ interface OrderLineRow {
   qty: number
   unit_price_cents: number
   unit_cogs_cents: number
+  unit_markup_cents: number | null
 }
 
 interface ProductRow {
   sku: string
   name: string
   unit_cogs_cents: number
-  list_price_cents: number
   on_hand_qty: number
   reserved_qty: number
   active: boolean
 }
 
 const iso = (d: Date | null): string | null => (d ? new Date(d).toISOString() : null)
+
+/** A cycle's unit price: current COGS + the provider's markup, grossed up for the fee. */
+const cyclePrice = (unitCogsCents: number, markupCents: number): number =>
+  priceFromMarkupCents(unitCogsCents, markupCents, FEE_BPS)
 
 // ---- Ownership ----
 
@@ -158,20 +171,19 @@ export async function createSchedule(db: Knex, actor: Actor, body: unknown): Pro
       })
       .returning('*')
 
-    // A schedule carries NO price or margin (ADR-024): the provider chooses product +
-    // quantity only. Both PRICE and COGS are DERIVED at each cycle from the CURRENT catalog
-    // (list_price_cents and unit_cogs_cents). Any unitPriceCents/marginBps a client might
-    // still send is deliberately IGNORED. We store the current catalog list price on the
+    // Each line carries the provider's per-unit markup (ADR-028). The price is DERIVED at
+    // each cycle from the CURRENT COGS + that markup. We store today's derived price on the
     // schedule line as an INDICATIVE snapshot (the schema requires unit_price_cents > 0),
     // but the cycle re-derives it fresh and never reads this value for money.
     const seenSku = new Set<string>()
-    const resolved: Array<{ position: number; sku: string; qty: number; listPriceCents: number; unitCogsCents: number }> = []
+    const resolved: Array<{ position: number; sku: string; qty: number; markupCents: number; unitPriceCents: number }> = []
     let position = 1
     for (const raw of rawLines) {
       const sku = requireString(raw.sku, 'sku')
       if (seenSku.has(sku)) throw invalidInput('duplicate sku in schedule', { field: 'lines', sku })
       seenSku.add(sku)
       const qty = requireInt(raw.qty, 'qty', QTY_MIN, QTY_MAX)
+      const markupCents = requireInt(raw.markupCents, 'markupCents', MARKUP_MIN, MARKUP_MAX)
 
       const product = await trx<ProductRow>('products').where({ sku }).first()
       if (!product) throw notFound('No such product', { sku })
@@ -180,24 +192,10 @@ export async function createSchedule(db: Knex, actor: Actor, body: unknown): Pro
         position: position++,
         sku,
         qty,
-        listPriceCents: product.list_price_cents,
-        unitCogsCents: product.unit_cogs_cents
+        markupCents,
+        unitPriceCents: cyclePrice(product.unit_cogs_cents, markupCents)
       })
     }
-
-    // Fail fast on a schedule that cannot price positively against the CURRENT catalog
-    // price and COGS (the same margin floor a cycle enforces). A later catalog change can
-    // still push a cycle on_hold - that is the ADR-024 behaviour - but an obviously broken
-    // schedule is rejected now.
-    split(
-      resolved.map<SplitLineInput>((l) => ({
-        position: l.position,
-        qty: l.qty,
-        unitPriceCents: l.listPriceCents,
-        unitCogsCents: l.unitCogsCents
-      })),
-      FEE_BPS
-    )
 
     await trx('schedule_lines').insert(
       resolved.map((l) => ({
@@ -205,7 +203,8 @@ export async function createSchedule(db: Knex, actor: Actor, body: unknown): Pro
         position: l.position,
         sku: l.sku,
         qty: l.qty,
-        unit_price_cents: l.listPriceCents
+        unit_price_cents: l.unitPriceCents,
+        unit_markup_cents: l.markupCents
       }))
     )
     return schedule.id
@@ -333,10 +332,9 @@ async function createCycleOrder(
     .where({ schedule_id: schedule.id })
     .orderBy('position')
 
-  // Seed the cycle's line price and COGS from the CURRENT catalog (ADR-024): both are
-  // DERIVED at run time, never carried from the schedule. settleCycle re-reads them under
-  // the products lock and re-derives again, so these are just the initial fresh snapshot
-  // (kept > 0 to satisfy the column checks).
+  // Seed the cycle's lines with the schedule's markup and a price from the CURRENT COGS
+  // (ADR-028). settleCycle re-reads COGS under the products lock and re-derives the price,
+  // so these are just the initial fresh snapshot (kept > 0 to satisfy the column checks).
   const products = await trx<ProductRow>('products')
     .whereIn('sku', scheduleLines.map((l) => l.sku))
   const bySku = new Map(products.map((p) => [p.sku, p]))
@@ -347,8 +345,9 @@ async function createCycleOrder(
       position: l.position,
       sku: l.sku,
       qty: l.qty,
-      unit_price_cents: bySku.get(l.sku)?.list_price_cents ?? 1,
-      unit_cogs_cents: bySku.get(l.sku)?.unit_cogs_cents ?? 1
+      unit_price_cents: cyclePrice(bySku.get(l.sku)?.unit_cogs_cents ?? 1, l.unit_markup_cents),
+      unit_cogs_cents: bySku.get(l.sku)?.unit_cogs_cents ?? 1,
+      unit_markup_cents: l.unit_markup_cents
     }))
   )
   await trx('order_events').insert({
@@ -381,17 +380,21 @@ async function settleCycle(
     return hold(trx, order, now, 'NOT_AUTHORIZED')
   }
 
-  // 2. Split with FRESH catalog PRICE + FRESH catalog COGS, both derived at run time from
-  //    the CURRENT catalog (ADR-024, superseding the locked-price clause of ADR-017). A
-  //    negative margin -> on_hold MARGIN_NEGATIVE (EVAL-11d): a cost rise is surfaced, not
-  //    absorbed. The schedule's stored line price is indicative only and never read here.
+  // 2. Split with FRESH catalog COGS and a price derived from it + the line's markup
+  //    (ADR-028): a cost rise passes through to the patient and the provider keeps the
+  //    markup (EVAL-11d). A markup price always covers the fee, so MARGIN_NEGATIVE can only
+  //    come from a pre-ADR-028 line without a markup, which keeps its stored price.
+  const prices = lines.map((l) => {
+    const cogs = (products.get(l.sku) as ProductRow).unit_cogs_cents
+    return l.unit_markup_cents === null ? l.unit_price_cents : cyclePrice(cogs, l.unit_markup_cents)
+  })
   let result
   try {
     result = split(
       lines.map<SplitLineInput>((l, i) => ({
         position: i + 1,
         qty: l.qty,
-        unitPriceCents: (products.get(l.sku) as ProductRow).list_price_cents,
+        unitPriceCents: prices[i],
         unitCogsCents: (products.get(l.sku) as ProductRow).unit_cogs_cents
       })),
       FEE_BPS
@@ -421,14 +424,14 @@ async function settleCycle(
     return hold(trx, order, now, 'PAYMENT_DECLINED')
   }
 
-  // 5. Persist the derived snapshot on the lines (fresh catalog price + COGS + allocation),
+  // 5. Persist the derived snapshot on the lines (derived price + fresh COGS + allocation),
   //    so the paid cycle records exactly what it charged this run.
   const bySplitPos = new Map(result.lines.map((sl) => [sl.position, sl]))
   for (let i = 0; i < lines.length; i++) {
     const s = bySplitPos.get(i + 1)
     if (!s) throw new Error('internal: missing split line')
     await trx('order_lines').where({ id: lines[i].id }).update({
-      unit_price_cents: (products.get(lines[i].sku) as ProductRow).list_price_cents,
+      unit_price_cents: prices[i],
       unit_cogs_cents: (products.get(lines[i].sku) as ProductRow).unit_cogs_cents,
       line_total_cents: s.total,
       line_cogs_cents: s.cogs,
@@ -579,14 +582,33 @@ async function patientLineView(
   db: Knex,
   scheduleId: string
 ): Promise<{ items: ScheduleAuthorizeView['items']; perCycleTotalCents: number }> {
+  const lines = await scheduleLinesPricedNow(db, scheduleId)
+  const items = lines.map((l) => ({ name: l.name, qty: l.qty, unitPriceCents: l.unitPriceCents }))
+  const perCycleTotalCents = lines.reduce((a, l) => a + l.qty * l.unitPriceCents, 0)
+  return { items, perCycleTotalCents }
+}
+
+/**
+ * The schedule's lines priced against TODAY's COGS + their markup (ADR-028): what the next
+ * cycle would charge if COGS does not change before it runs.
+ */
+async function scheduleLinesPricedNow(
+  db: Knex,
+  scheduleId: string
+): Promise<Array<ScheduleLineRow & { name: string; unitPriceCents: number }>> {
   const lines = await db<ScheduleLineRow>('schedule_lines').where({ schedule_id: scheduleId }).orderBy('position')
   const products = lines.length
-    ? await db('products').whereIn('sku', [...new Set(lines.map((l) => l.sku))]).select('sku', 'name')
+    ? await db<ProductRow>('products').whereIn('sku', [...new Set(lines.map((l) => l.sku))]).select('sku', 'name', 'unit_cogs_cents')
     : []
-  const names = new Map<string, string>(products.map((p) => [p.sku, p.name]))
-  const items = lines.map((l) => ({ name: names.get(l.sku) ?? l.sku, qty: l.qty, unitPriceCents: l.unit_price_cents }))
-  const perCycleTotalCents = lines.reduce((a, l) => a + l.qty * l.unit_price_cents, 0)
-  return { items, perCycleTotalCents }
+  const bySku = new Map(products.map((p) => [p.sku, p]))
+  return lines.map((l) => {
+    const p = bySku.get(l.sku)
+    return {
+      ...l,
+      name: p?.name ?? l.sku,
+      unitPriceCents: p ? cyclePrice(p.unit_cogs_cents, l.unit_markup_cents) : l.unit_price_cents
+    }
+  })
 }
 
 function toCycleView(order: CycleOrderRow): ScheduleCycleView {
@@ -602,15 +624,11 @@ function toCycleView(order: CycleOrderRow): ScheduleCycleView {
 
 /** Build the full provider view for one schedule (lines + recent cycles). */
 async function buildScheduleView(db: Knex, s: ScheduleRow): Promise<ScheduleView> {
-  const lines = await db<ScheduleLineRow>('schedule_lines').where({ schedule_id: s.id }).orderBy('position')
-  const products = lines.length
-    ? await db<ProductRow>('products').whereIn('sku', [...new Set(lines.map((l) => l.sku))]).select('sku', 'name')
-    : []
-  const names = new Map<string, string>(products.map((p) => [p.sku, p.name]))
+  const lines = await scheduleLinesPricedNow(db, s.id)
   const cycleRows = await db<CycleOrderRow>('orders')
     .where({ schedule_id: s.id })
     .orderBy('cycle_number', 'desc')
-  const perCycleSubtotalCents = lines.reduce((a, l) => a + l.qty * l.unit_price_cents, 0)
+  const perCycleSubtotalCents = lines.reduce((a, l) => a + l.qty * l.unitPriceCents, 0)
   return {
     id: s.id,
     patientId: s.patient_id,
@@ -625,9 +643,10 @@ async function buildScheduleView(db: Knex, s: ScheduleRow): Promise<ScheduleView
       id: l.id,
       position: l.position,
       sku: l.sku,
-      name: names.get(l.sku) ?? l.sku,
+      name: l.name,
       qty: l.qty,
-      unitPriceCents: l.unit_price_cents
+      unitPriceCents: l.unitPriceCents,
+      unitMarkupCents: l.unit_markup_cents
     })),
     cycles: cycleRows.map(toCycleView),
     createdAt: new Date(s.created_at).toISOString()

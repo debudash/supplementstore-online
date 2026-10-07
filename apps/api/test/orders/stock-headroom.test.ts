@@ -60,13 +60,13 @@ describe('INSUFFICIENT_STOCK add-to-cart detail carries remaining headroom', () 
     expect(draft.status).toBe(201)
     const orderId = draft.body.id as string
 
-    // 3 of 5 available already on the order (priced by margin to avoid typing a price).
-    const first = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 3, marginBps: 3000 })
+    // 3 of 5 available already on the order (priced by a markup).
+    const first = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 3, markupCents: 1000 })
     expect(first.status).toBe(200)
 
     // Adding 3 more would be 6 vs 5 available -> refused. available stays 5, but the
     // remaining headroom to add is 5 - 3 = 2.
-    const second = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 3, marginBps: 3000 })
+    const second = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 3, markupCents: 1000 })
     expect(second.status).toBe(409)
     expect(second.body.error.code).toBe('INSUFFICIENT_STOCK')
     expect(second.body.error.details.available).toBe(5)
@@ -78,10 +78,10 @@ describe('INSUFFICIENT_STOCK add-to-cart detail carries remaining headroom', () 
     const draft = await asUser(w.userId).post('/api/orders').send({ patientId: w.patientId })
     const orderId = draft.body.id as string
     // Fill the order to exactly the 5 available.
-    const first = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 5, marginBps: 3000 })
+    const first = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 5, markupCents: 1000 })
     expect(first.status).toBe(200)
     // Any further add is refused with remaining 0 (no headroom left).
-    const second = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 1, marginBps: 3000 })
+    const second = await asUser(w.userId).post(`/api/orders/${orderId}/lines`).send({ sku: SKU, qty: 1, markupCents: 1000 })
     expect(second.status).toBe(409)
     expect(second.body.error.details.remaining).toBe(0)
   })

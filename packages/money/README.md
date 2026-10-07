@@ -11,7 +11,11 @@ module may recompute these values.
 - **ADR-003** integer cents everywhere; fee computed once per order, half-up;
   allocated to lines by largest remainder (never per-line rounding).
 - **ADR-004** line margin after its allocated fee must be `>= 0`; zero allowed.
-- **ADR-005** price is canonical; margin % is an input mode that derives price.
+- **ADR-028** providers enter a per-unit dollar markup; the unit price is derived as
+  `ceil((unitCogs + max(markup, 1)) * 10000 / (10000 - feeBps))` (patient pays COGS +
+  markup + fee). A $0 markup is priced as 1 cent of headroom so fee allocation never
+  pushes a line negative; order margin is always `>= sum(qty x markup)`.
+  (Supersedes ADR-005, margin %.)
 - **ADR-012 / ADR-014** whole-order refund returns 100% to the patient; the
   platform fee is retained and charged to the provider.
 
@@ -22,7 +26,8 @@ import {
   orderFee,          // (subtotalCents, feeBps=75) -> fee cents, half-up, once per order
   allocateFee,       // (lines, orderFeeCents) -> per-line fees, largest remainder
   split,             // (lines, feeBps=75) -> { subtotal, cogs, fee, margin, lines[] }
-  priceFromMarginBps,// (unitCogsCents, marginBps) -> unit price cents
+  priceFromMarkupCents, // (unitCogsCents, markupCents 0..100000, feeBps) -> unit price cents
+  MAX_MARKUP_CENTS,  // 100000 ($1,000)
   refund,            // (orderSplit) -> { patientAmount, cogsReturned, providerDebit, feeRetained }
   MoneyError,        // code: "INVALID_INPUT" (400) | "MARGIN_NEGATIVE" (422)
 } from "@cerbo/money";

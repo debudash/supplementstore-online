@@ -17,13 +17,15 @@ Every query takes `includeSynthetic` (default false). Basis: payment events coun
 ## Provider economics
 | Metric | Definition |
 |---|---|
-| Provider margin % (per order) | (subtotal - cogs) / subtotal |
+| Provider markup (`providerMarkupCents`) | Sum over settled orders (paid in period, not refunded) of qty x unit_markup_cents, for lines with a tracked markup (ADR-028; lines priced before it have no markup and are excluded) |
+| Markup units (`markupUnits`) | Units on those same lines |
+| Average markup per unit (`avgMarkupPerUnitCents`) | floor(providerMarkupCents / markupUnits); 0 when there are no such units |
 | Provider net margin from settled sales | Sum of margin_cents over orders paid in period and not refunded |
-| Reconciliation check | Per order: subtotal x (margin% - 0.0075) = subtotal - cogs - subtotal x 0.0075. Summed across orders it must match the ledger figure within 1 cent per order. Shown as a pass/fail line in the report |
+| Reconciliation check | Per order: subtotal - cogs - orderFee(subtotal), where orderFee = 0.75% of subtotal, half-up (ADR-001). Summed across orders it must match the ledger figure. Shown as a pass/fail line in the report |
 | Provider net after sunk fees | Provider net margin from settled sales - sunk fees |
 | Payable balance | -(sum of PROVIDER_PAYABLE entries) up to period end |
 
-Note: the formula Settled GMV x (margin% - 0.0075) is only valid per order. Applying one blended margin % across orders with different margins produces a wrong number, so the report sums per-order cents and uses the formula as a check.
+Note: the reconciliation is computed per order in integer cents and then summed; applying one blended margin % across orders with different margins produces a wrong number (ADR-015). Because each markup-priced line is rounded up to cover the fee (ADR-028), provider net margin from settled sales is always >= providerMarkupCents (the sum of qty x markup); the difference is the round-up headroom, a few cents per order.
 
 ## Leading indicator: migration off third-party marketplaces
 | Metric | Definition |

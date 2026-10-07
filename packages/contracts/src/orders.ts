@@ -25,21 +25,19 @@ export interface CreateOrderRequest {
 
 /**
  * POST /api/orders/:id/lines - add a SKU (FR-1, FR-2, FR-3).
- * Exactly one of `unitPriceCents` or `marginBps` sets the price; `unitPriceCents`
- * is canonical and wins if both are present (ADR-005).
+ * `markupCents` is the provider's per-unit dollar markup, 0..100000 ($0..$1,000). The
+ * server derives the price: COGS + markup grossed up for the fee (ADR-028).
  */
 export interface AddLineRequest {
   sku: string
   qty: number
-  unitPriceCents?: number
-  marginBps?: number
+  markupCents: number
 }
 
-/** PATCH /api/orders/:id/lines/:lineId - edit qty and/or price while draft (FR-1 AC4). */
+/** PATCH /api/orders/:id/lines/:lineId - edit qty and/or markup while draft (FR-1 AC4). */
 export interface UpdateLineRequest {
   qty?: number
-  unitPriceCents?: number
-  marginBps?: number
+  markupCents?: number
 }
 
 /** A product as the provider sees it in the catalog (GET /api/products). */
@@ -47,36 +45,24 @@ export interface ProductView {
   sku: string
   name: string
   unitCogsCents: number
-  /** Seeded catalog list price in integer cents; the price the New Order screen shows
-   *  and the provider does not type (owner decision). Always set for catalog rows. */
-  listPriceCents: number
-  /** Gross margin the list price represents over COGS, in basis points, rounded down
-   *  (ADR-025). Display context only; before the platform fee. */
-  listMarginBps: number
   /** on_hand - reserved for the single shared pool (ADR-009). */
   available: number
   active: boolean
 }
 
-/** GET /api/products/:sku/price-preview?marginBps= (ADR-025). All server-computed. */
+/** GET /api/products/:sku/price-preview?markupCents=&qty= (ADR-028). All server-computed. */
 export interface PricePreview {
   sku: string
-  /** The margin asked for, or null when previewing the list price. */
-  marginBps: number | null
-  /** The unit price an order line would get at this margin. */
+  /** The per-unit markup previewed. */
+  markupCents: number
+  /** The unit price an order line would get: COGS + markup grossed up for the fee. */
   unitPriceCents: number
-  listPriceCents: number
-  listMarginBps: number
-  /** unitPriceCents minus listPriceCents; negative means cheaper than list. */
-  differenceFromListCents: number
-  /** Quantity simulated (default 1) and that line's split, from the server. */
+  /** Quantity previewed (default 1) and that line's split, from the server. */
   qty: number
   lineTotalCents: number
   lineCogsCents: number
-  /** Null when the margin cannot cover the platform fee (coversFee false). */
-  lineFeeCents: number | null
-  lineMarginCents: number | null
-  coversFee: boolean
+  lineFeeCents: number
+  lineMarginCents: number
 }
 
 /** One line in a quote/order response, with the full provider-facing economics. */
@@ -88,6 +74,8 @@ export interface OrderLineView {
   qty: number
   unitPriceCents: number
   unitCogsCents: number
+  /** The provider's per-unit markup (ADR-028); null on lines priced before it. */
+  unitMarkupCents: number | null
   /** Computed split for the line (null fields until the order is sent). */
   lineTotalCents: number
   lineCogsCents: number

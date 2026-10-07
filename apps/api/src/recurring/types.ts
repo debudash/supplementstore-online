@@ -17,6 +17,7 @@ export interface ScheduleLineView {
   name: string
   qty: number
   unitPriceCents: number
+  unitMarkupCents: number
 }
 
 export interface ScheduleCycleView {
