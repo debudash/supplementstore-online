@@ -1745,8 +1745,17 @@ components:
         providerId: { type: string, format: uuid }
         baselineMonthlyGmvCents: { type: integer }
         inHouseGmvCents: { type: integer }
-        migrationBps: { type: [integer, "null"], description: Migration % in basis points; null when no baseline }
+        migrationBps: { type: [integer, "null"], description: "Average monthly migration % in basis points = inHouseGmvCents / (baselineMonthlyGmvCents x months); null when no baseline" }
         adopted: { type: boolean }
+        byMonth: { type: array, items: { $ref: "#/components/schemas/MigrationMonth" } }
+
+    MigrationMonth:
+      type: object
+      description: One calendar month of the migration trend (the leading indicator).
+      properties:
+        month: { type: string, description: "YYYY-MM" }
+        inHouseGmvCents: { type: integer }
+        migrationBps: { type: [integer, "null"], description: In-house GMV for the month / baseline monthly GMV, in basis points }
 
     MigrationReport:
       type: object
@@ -1754,7 +1763,9 @@ components:
         providers: { type: array, items: { $ref: "#/components/schemas/MigrationProviderRow" } }
         overallInHouseGmvCents: { type: integer }
         overallBaselineMonthlyGmvCents: { type: integer }
-        overallMigrationBps: { type: [integer, "null"] }
+        months: { type: integer, description: Calendar months in the period }
+        overallMigrationBps: { type: [integer, "null"], description: "Average monthly migration = overall in-house / (overall baseline monthly x months)" }
+        byMonth: { type: array, items: { $ref: "#/components/schemas/MigrationMonth" } }
         adoptionBps: { type: [integer, "null"] }
         noBaselineProviderIds: { type: array, items: { type: string } }
 
