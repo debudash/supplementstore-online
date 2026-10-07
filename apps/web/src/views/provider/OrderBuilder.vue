@@ -11,7 +11,7 @@
 import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
-import type { ProductView, OrderView, OrderStatus, QuoteResponse, SendResponse, PatientView } from '@cerbo/contracts'
+import type { ProductView, OrderView, OrderStatus, QuoteResponse, SendResponse, PatientView, PricePreview } from '@cerbo/contracts'
 import { insufficientStockMessage, formatCents } from '../../components/order/format'
 import AddLineForm from '../../components/order/AddLineForm.vue'
 import LineRow from '../../components/order/LineRow.vue'
@@ -292,6 +292,11 @@ function newOrder(): void {
   if (route.query.orderId) void router.replace({ name: 'order-new' })
 }
 
+/** Server-side price preview for a margin (ADR-025); the UI never computes a price. */
+function previewPrice(sku: string, marginBps: number): Promise<PricePreview> {
+  return apiRequest<PricePreview>(`/products/${encodeURIComponent(sku)}/price-preview?marginBps=${marginBps}`)
+}
+
 function goOrders(e: Event): void {
   const r = router as unknown as { push?: (to: string) => unknown }
   if (r.push) {
@@ -371,7 +376,7 @@ function goOrders(e: Event): void {
           </div>
         </Card>
 
-        <AddLineForm v-if="isDraft" :products="products" :busy="busy" :error="addError" :on-order="onOrderBySku" @add="addLine" />
+        <AddLineForm v-if="isDraft" :products="products" :busy="busy" :error="addError" :on-order="onOrderBySku" :preview-price="previewPrice" @add="addLine" />
 
         <section class="items" aria-labelledby="items-title">
           <h2 id="items-title" class="section-title">Items <span v-if="lines.length" class="count">({{ lines.length }})</span></h2>
@@ -396,6 +401,7 @@ function goOrders(e: Event): void {
                   :line="line"
                   :busy="busy || lineBusyId === line.id || !isDraft"
                   :error="lineErrors[line.id] ?? null"
+                  :preview-price="previewPrice"
                   @commit="(payload) => patchLine(line.id, payload)"
                   @margin="(payload) => patchLine(line.id, payload)"
                   @remove="() => (removeTarget = { id: line.id, name: line.name })"

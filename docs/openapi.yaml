@@ -94,6 +94,28 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/products/{sku}/price-preview:
+    get:
+      tags: [Provider - catalog & patients]
+      summary: Preview the unit price a margin % would set (ADR-025)
+      description: |
+        Read-only. Uses the same priceFromMarginBps the add-line path stores, so the preview
+        is exactly what the order line will get. All amounts are integer cents.
+      parameters:
+        - { name: sku, in: path, required: true, schema: { type: string }, example: "MAG-GLY-120" }
+        - { name: marginBps, in: query, required: true, schema: { type: integer, minimum: 0, maximum: 9500 }, example: 4000 }
+      responses:
+        "200":
+          description: Preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PricePreview" }
+              example: { sku: "MAG-GLY-120", marginBps: 4000, unitPriceCents: 2417, listPriceCents: 2999, listMarginBps: 5165, differenceFromListCents: -582 }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/patients:
     get:
       tags: [Provider - catalog & patients]
@@ -591,6 +613,70 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  /api/admin/products/{sku}/list-price:
+    patch:
+      tags: [Cerbo Admin - inventory]
+      summary: Change a product's catalog list price (ADR-025)
+      description: |
+        Admin only. Requires a reason and the price the admin saw (optimistic concurrency).
+        The new price must be above unit cost. Writes an append-only price history row in
+        the same transaction. Drafts and sent orders keep their stored line prices; active
+        recurring schedules pick up the new price on their next cycle (ADR-024).
+      parameters:
+        - { name: sku, in: path, required: true, schema: { type: string }, example: "MAG-GLY-120" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateListPriceRequest" }
+            example: { listPriceCents: 3299, expectedCurrentPriceCents: 2999, reason: "Supplier cost increase" }
+      responses:
+        "200": { description: Updated, content: { application/json: { schema: { $ref: "#/components/schemas/UpdateListPriceResult" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: PRICE_CONFLICT - the list price changed since the admin loaded it; details.currentPriceCents
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "422":
+          description: PRICE_BELOW_COST - the new price is at or below unit cost; details.unitCogsCents
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /api/admin/products/{sku}/list-price-preview:
+    get:
+      tags: [Cerbo Admin - inventory]
+      summary: Review a proposed list price without saving (ADR-025)
+      parameters:
+        - { name: sku, in: path, required: true, schema: { type: string }, example: "MAG-GLY-120" }
+        - { name: listPriceCents, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 10000000 }, example: 3299 }
+      responses:
+        "200": { description: Preview, content: { application/json: { schema: { $ref: "#/components/schemas/ListPricePreview" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/admin/products/{sku}/price-history:
+    get:
+      tags: [Cerbo Admin - inventory]
+      summary: Append-only list price history, newest first (last 50)
+      parameters:
+        - { name: sku, in: path, required: true, schema: { type: string }, example: "MAG-GLY-120" }
+      responses:
+        "200":
+          description: History
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sku: { type: string }
+                  changes: { type: array, items: { $ref: "#/components/schemas/PriceChange" } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/admin/inventory/{sku}/restock:
     post:
       tags: [Cerbo Admin - inventory]
@@ -980,8 +1066,20 @@ components:
         sku: { type: string }
         name: { type: string }
         unitCogsCents: { type: integer, description: 'Unit cost of goods, INTEGER CENTS' }
+        listPriceCents: { type: integer, description: 'Catalog list price, INTEGER CENTS (Cerbo Admin sets it)' }
+        listMarginBps: { type: integer, description: 'Gross margin at list price, basis points, rounded down; before the platform fee' }
         available: { type: integer, description: on_hand - reserved for the shared pool }
         active: { type: boolean }
+
+    PricePreview:
+      type: object
+      properties:
+        sku: { type: string }
+        marginBps: { type: integer }
+        unitPriceCents: { type: integer, description: INTEGER CENTS - what the order line would get }
+        listPriceCents: { type: integer }
+        listMarginBps: { type: integer }
+        differenceFromListCents: { type: integer, description: unitPriceCents - listPriceCents (negative = below list) }
 
     PatientRosterItem:
       type: object
@@ -1472,10 +1570,60 @@ components:
         sku: { type: string }
         name: { type: string }
         unitCogsCents: { type: integer, description: INTEGER CENTS }
+        listPriceCents: { type: integer, description: INTEGER CENTS }
+        listMarginBps: { type: integer, description: Gross margin at list, basis points, rounded down }
+        activeScheduleCount: { type: integer, description: Active recurring schedules with this SKU (reprice next cycle) }
         onHandQty: { type: integer }
         reservedQty: { type: integer }
         available: { type: integer, description: on_hand - reserved }
         active: { type: boolean }
+
+    UpdateListPriceRequest:
+      type: object
+      required: [listPriceCents, expectedCurrentPriceCents, reason]
+      properties:
+        listPriceCents: { type: integer, minimum: 1, maximum: 10000000, description: New list price, INTEGER CENTS, above unit cost }
+        expectedCurrentPriceCents: { type: integer, description: The price the admin saw; mismatch returns 409 PRICE_CONFLICT }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+
+    PriceChange:
+      type: object
+      properties:
+        id: { type: integer }
+        sku: { type: string }
+        oldPriceCents: { type: integer }
+        newPriceCents: { type: integer }
+        reason: { type: string }
+        actorUserId: { type: string }
+        actorName: { type: string, nullable: true }
+        changedAt: { type: string, format: date-time }
+
+    UpdateListPriceResult:
+      type: object
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        unitCogsCents: { type: integer }
+        previousPriceCents: { type: integer }
+        listPriceCents: { type: integer }
+        previousMarginBps: { type: integer }
+        listMarginBps: { type: integer }
+        activeScheduleCount: { type: integer }
+        change: { $ref: "#/components/schemas/PriceChange" }
+
+    ListPricePreview:
+      type: object
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        unitCogsCents: { type: integer }
+        currentPriceCents: { type: integer }
+        listPriceCents: { type: integer }
+        currentMarginBps: { type: integer }
+        listMarginBps: { type: integer }
+        belowCost: { type: boolean, description: True when saving would be refused (PRICE_BELOW_COST) }
+        differenceCents: { type: integer, description: listPriceCents - currentPriceCents }
+        activeScheduleCount: { type: integer }
 
     RestockRequest:
       type: object

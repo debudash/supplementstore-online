@@ -8,11 +8,12 @@
 // confirms before deleting. Errors (MARGIN_NEGATIVE / INSUFFICIENT_STOCK) render inline
 // in a row beneath this one and are linked to the quantity field.
 import { ref, watch } from 'vue'
-import type { OrderLineView } from '@cerbo/contracts'
+import type { OrderLineView, PricePreview } from '@cerbo/contracts'
 import { formatCents, marginPercentToBps } from './format'
 import DemoBadge from '../DemoBadge.vue'
 import QuantityStepper from '../ui/QuantityStepper.vue'
 import Money from '../ui/Money.vue'
+import MarginPreview from './MarginPreview.vue'
 
 const props = defineProps<{
   line: OrderLineView
@@ -20,6 +21,8 @@ const props = defineProps<{
   error: string | null
   /** True while a request for this line is in flight. */
   busy: boolean
+  /** Server price preview for "Change margin" (ADR-025). Optional. */
+  previewPrice?: (sku: string, marginBps: number) => Promise<PricePreview>
 }>()
 
 const emit = defineEmits<{
@@ -123,7 +126,7 @@ function openMargin(): void {
         </span>
         <button type="submit" class="btn-primary btn-sm" :disabled="busy" data-testid="line-margin-apply">Apply margin</button>
         <button type="button" class="btn-sm" :disabled="busy" @click="editingMargin = false">Cancel</button>
-        <span class="subtle">The server sets the new price from Cerbo's cost.</span>
+        <MarginPreview :sku="line.sku" :margin-input="marginInput" :preview="previewPrice" />
       </form>
     </td>
   </tr>

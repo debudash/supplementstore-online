@@ -10,10 +10,12 @@
 // Availability: out-of-stock products stay listed but disabled (FR-3 AC3); the chosen
 // product shows an In stock / Low stock / Out of stock chip from the API's `available`.
 import { ref, computed, watch } from 'vue'
-import type { ProductView } from '@cerbo/contracts'
+import type { ProductView, PricePreview } from '@cerbo/contracts'
 import { formatCents, marginPercentToBps } from './format'
+import { formatBps } from '../../utils/money'
 import DemoBadge from '../DemoBadge.vue'
 import QuantityStepper from '../ui/QuantityStepper.vue'
+import MarginPreview from './MarginPreview.vue'
 
 const props = defineProps<{
   products: ProductView[]
@@ -23,6 +25,8 @@ const props = defineProps<{
   /** Quantity already on this draft per SKU. A SKU already on the order is hidden here
    *  (change its quantity on the item row instead); removing the item brings it back. */
   onOrder?: Record<string, number>
+  /** Server price preview for a margin (ADR-025). Optional: without it no preview shows. */
+  previewPrice?: (sku: string, marginBps: number) => Promise<PricePreview>
 }>()
 
 const emit = defineEmits<{
@@ -130,6 +134,9 @@ function submit(): void {
       <div class="field">
         <span id="add-price-label" class="label">List price <span class="tag">read-only</span></span>
         <output class="price" aria-labelledby="add-price-label" data-test="unit-price">{{ selectedListPrice !== null ? formatCents(selectedListPrice) : '-' }}</output>
+        <span v-if="selectedProduct && typeof selectedProduct.listMarginBps === 'number'" class="list-margin" data-testid="list-margin">
+          Margin at list: <strong>{{ formatBps(selectedProduct.listMarginBps) }}</strong>
+        </span>
       </div>
 
       <div class="field">
@@ -159,6 +166,7 @@ function submit(): void {
           <span aria-hidden="true">%</span>
         </span>
         <span v-if="marginError" class="err">{{ marginError }}</span>
+        <MarginPreview v-else :sku="sku || null" :margin-input="marginInput" :preview="previewPrice" />
       </div>
 
       <div class="submit">
@@ -169,7 +177,7 @@ function submit(): void {
     <p id="add-margin-hint" class="hint">
       Blank margin uses the list price. A margin sets the price from Cerbo's cost so that
       your share of the price is that percent, before the platform fee - it can raise or
-      lower the price. The resulting price shows on the item line.
+      lower the price. You will see the resulting price as you type.
     </p>
     <p v-if="error" class="field-alert" role="alert" data-test="add-error">{{ error }}</p>
   </form>
@@ -242,6 +250,13 @@ function submit(): void {
   font-size: var(--text-lg);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+.list-margin {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.list-margin strong {
+  color: var(--text);
 }
 .pct {
   display: flex;
