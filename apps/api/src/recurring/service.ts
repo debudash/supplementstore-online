@@ -1,14 +1,16 @@
-// Recurring schedules + cycles (T9) - FR-12, ADR-017.
+// Recurring schedules + cycles (T9) - FR-12, ADR-017 as amended by ADR-024.
 //
-// A schedule generates one CHILD ORDER per cycle. The patient authorizes ONCE via the
-// token route. Each cycle LOCKS the schedule's prices but snapshots FRESH COGS, then
-// runs the same checks a normal order runs and either PAYS (via T4's posting path) or
-// goes `on_hold` with a `hold_reason` - surfacing a cost increase instead of silently
-// absorbing it (ADR-017).
+// A schedule generates one CHILD ORDER per cycle. The provider sets product + quantity +
+// interval only; it carries NO price or margin. The patient authorizes ONCE via the token
+// route. Each cycle DERIVES both the line PRICE (from the current catalog list_price_cents)
+// and the COGS (from the current unit_cogs_cents) at run time (ADR-024, superseding the
+// locked-price clause of ADR-017), then runs the same checks a normal order runs and either
+// PAYS (via T4's posting path) or goes `on_hold` with a `hold_reason` - surfacing a cost
+// increase instead of silently absorbing it.
 //
 // Money rules honoured here:
 //  - rule 2: ALL split math goes through @cerbo/money (split()); nothing is recomputed
-//    here. Price is locked from schedule_lines; COGS is read fresh from products.
+//    here. Both price and COGS are read fresh from the catalog each cycle.
 //  - rule 6/7/8: the cycle PAYMENT journal is posted by T4's postPaymentJournal (NO
 //    duplicate posting code), inside ONE transaction that also changes order status and
 //    inventory, under a row lock.
@@ -29,18 +31,7 @@ import { createSeams } from '../seams'
 import { assertSafeInteger } from '../db/types'
 import { postPaymentJournal } from '../ledger'
 import { availableOf } from '../inventory/service'
-import {
-  requireString,
-  requireInt,
-  optionalInt,
-  QTY_MIN,
-  QTY_MAX,
-  PRICE_MIN,
-  PRICE_MAX,
-  MARGIN_BPS_MIN,
-  MARGIN_BPS_MAX
-} from '../orders/validation'
-import { priceFromMarginBps } from '@cerbo/money'
+import { requireString, requireInt, optionalInt, QTY_MIN, QTY_MAX } from '../orders/validation'
 import { notFound, invalidInput, notActionable } from './errors'
 import type {
   HoldReason,
@@ -106,6 +97,7 @@ interface ProductRow {
   sku: string
   name: string
   unit_cogs_cents: number
+  list_price_cents: number
   on_hand_qty: number
   reserved_qty: number
   active: boolean
@@ -166,36 +158,42 @@ export async function createSchedule(db: Knex, actor: Actor, body: unknown): Pro
       })
       .returning('*')
 
+    // A schedule carries NO price or margin (ADR-024): the provider chooses product +
+    // quantity only. Both PRICE and COGS are DERIVED at each cycle from the CURRENT catalog
+    // (list_price_cents and unit_cogs_cents). Any unitPriceCents/marginBps a client might
+    // still send is deliberately IGNORED. We store the current catalog list price on the
+    // schedule line as an INDICATIVE snapshot (the schema requires unit_price_cents > 0),
+    // but the cycle re-derives it fresh and never reads this value for money.
     const seenSku = new Set<string>()
-    const resolved: Array<{ position: number; sku: string; qty: number; unitPriceCents: number; unitCogsCents: number }> = []
+    const resolved: Array<{ position: number; sku: string; qty: number; listPriceCents: number; unitCogsCents: number }> = []
     let position = 1
     for (const raw of rawLines) {
       const sku = requireString(raw.sku, 'sku')
       if (seenSku.has(sku)) throw invalidInput('duplicate sku in schedule', { field: 'lines', sku })
       seenSku.add(sku)
       const qty = requireInt(raw.qty, 'qty', QTY_MIN, QTY_MAX)
-      const unitPriceCents = optionalInt(raw.unitPriceCents, 'unitPriceCents', PRICE_MIN, PRICE_MAX)
-      const marginBps = optionalInt(raw.marginBps, 'marginBps', MARGIN_BPS_MIN, MARGIN_BPS_MAX)
 
       const product = await trx<ProductRow>('products').where({ sku }).first()
       if (!product) throw notFound('No such product', { sku })
 
-      let unitPrice: number
-      if (unitPriceCents !== undefined) unitPrice = unitPriceCents
-      else if (marginBps !== undefined) unitPrice = priceFromMarginBps(product.unit_cogs_cents, marginBps)
-      else throw invalidInput('either unitPriceCents or marginBps is required', { field: 'unitPriceCents|marginBps' })
-
-      resolved.push({ position: position++, sku, qty, unitPriceCents: unitPrice, unitCogsCents: product.unit_cogs_cents })
+      resolved.push({
+        position: position++,
+        sku,
+        qty,
+        listPriceCents: product.list_price_cents,
+        unitCogsCents: product.unit_cogs_cents
+      })
     }
 
-    // Fail fast on a schedule that cannot price positively against CURRENT COGS (the
-    // same margin floor a one-off order enforces). COGS is still read FRESH each cycle;
-    // this only rejects an obviously broken schedule at creation time.
+    // Fail fast on a schedule that cannot price positively against the CURRENT catalog
+    // price and COGS (the same margin floor a cycle enforces). A later catalog change can
+    // still push a cycle on_hold - that is the ADR-024 behaviour - but an obviously broken
+    // schedule is rejected now.
     split(
       resolved.map<SplitLineInput>((l) => ({
         position: l.position,
         qty: l.qty,
-        unitPriceCents: l.unitPriceCents,
+        unitPriceCents: l.listPriceCents,
         unitCogsCents: l.unitCogsCents
       })),
       FEE_BPS
@@ -207,7 +205,7 @@ export async function createSchedule(db: Knex, actor: Actor, body: unknown): Pro
         position: l.position,
         sku: l.sku,
         qty: l.qty,
-        unit_price_cents: l.unitPriceCents
+        unit_price_cents: l.listPriceCents
       }))
     )
     return schedule.id
@@ -335,11 +333,13 @@ async function createCycleOrder(
     .where({ schedule_id: schedule.id })
     .orderBy('position')
 
-  // Snapshot the LOCKED price from the schedule; unit_cogs is seeded from current catalog
-  // and re-snapshotted fresh at settle time (kept > 0 to satisfy the column check).
+  // Seed the cycle's line price and COGS from the CURRENT catalog (ADR-024): both are
+  // DERIVED at run time, never carried from the schedule. settleCycle re-reads them under
+  // the products lock and re-derives again, so these are just the initial fresh snapshot
+  // (kept > 0 to satisfy the column checks).
   const products = await trx<ProductRow>('products')
     .whereIn('sku', scheduleLines.map((l) => l.sku))
-  const cogsBySku = new Map(products.map((p) => [p.sku, p.unit_cogs_cents]))
+  const bySku = new Map(products.map((p) => [p.sku, p]))
 
   await trx('order_lines').insert(
     scheduleLines.map((l) => ({
@@ -347,8 +347,8 @@ async function createCycleOrder(
       position: l.position,
       sku: l.sku,
       qty: l.qty,
-      unit_price_cents: l.unit_price_cents,
-      unit_cogs_cents: cogsBySku.get(l.sku) ?? 1
+      unit_price_cents: bySku.get(l.sku)?.list_price_cents ?? 1,
+      unit_cogs_cents: bySku.get(l.sku)?.unit_cogs_cents ?? 1
     }))
   )
   await trx('order_events').insert({
@@ -381,14 +381,17 @@ async function settleCycle(
     return hold(trx, order, now, 'NOT_AUTHORIZED')
   }
 
-  // 2. Split with LOCKED price + FRESH COGS (ADR-017). MARGIN_NEGATIVE -> on_hold. EVAL-11d.
+  // 2. Split with FRESH catalog PRICE + FRESH catalog COGS, both derived at run time from
+  //    the CURRENT catalog (ADR-024, superseding the locked-price clause of ADR-017). A
+  //    negative margin -> on_hold MARGIN_NEGATIVE (EVAL-11d): a cost rise is surfaced, not
+  //    absorbed. The schedule's stored line price is indicative only and never read here.
   let result
   try {
     result = split(
       lines.map<SplitLineInput>((l, i) => ({
         position: i + 1,
         qty: l.qty,
-        unitPriceCents: l.unit_price_cents,
+        unitPriceCents: (products.get(l.sku) as ProductRow).list_price_cents,
         unitCogsCents: (products.get(l.sku) as ProductRow).unit_cogs_cents
       })),
       FEE_BPS
@@ -418,12 +421,14 @@ async function settleCycle(
     return hold(trx, order, now, 'PAYMENT_DECLINED')
   }
 
-  // 5. Persist the split snapshot on the lines (fresh COGS + computed allocation).
+  // 5. Persist the derived snapshot on the lines (fresh catalog price + COGS + allocation),
+  //    so the paid cycle records exactly what it charged this run.
   const bySplitPos = new Map(result.lines.map((sl) => [sl.position, sl]))
   for (let i = 0; i < lines.length; i++) {
     const s = bySplitPos.get(i + 1)
     if (!s) throw new Error('internal: missing split line')
     await trx('order_lines').where({ id: lines[i].id }).update({
+      unit_price_cents: (products.get(lines[i].sku) as ProductRow).list_price_cents,
       unit_cogs_cents: (products.get(lines[i].sku) as ProductRow).unit_cogs_cents,
       line_total_cents: s.total,
       line_cogs_cents: s.cogs,

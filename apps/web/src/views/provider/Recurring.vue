@@ -12,6 +12,12 @@ import { apiRequest, ApiError } from '../../api/client'
 import { currentUserId } from '../../api/session'
 import type { ProductView, PatientView, ScheduleView, RunCycleResult } from '@cerbo/contracts'
 import { formatCents as formatCentsRaw } from '../../components/order/format'
+import DemoBadge from '../../components/DemoBadge.vue'
+
+// Same demo-affordance copy the New Order screen uses (MR !45), kept identical so the two
+// provider screens read the same way.
+const COGS_REASON =
+  "COGS is Cerbo's wholesale cost, shown in this list only to make the economics demonstrable. A prescribing doctor would not normally see it."
 
 const schedules = ref<ScheduleView[]>([])
 const products = ref<ProductView[]>([])
@@ -23,21 +29,40 @@ const busy = ref(false)
 const rowBusyId = ref<string | null>(null)
 const origin = typeof location !== 'undefined' ? location.origin : ''
 
+// A draft schedule line. Per ADR-024 a schedule carries PRODUCT + QUANTITY only - no price
+// and no margin. Both price and COGS are DERIVED at each cycle from the current catalog, so
+// the catalog figures shown here are INDICATIVE, not what the schedule stores.
 interface DraftLine {
   sku: string
   qty: number
-  unitPriceCents: number
 }
 
 const form = reactive<{ patientId: string; intervalDays: number; lines: DraftLine[] }>({
   patientId: '',
   intervalDays: 30,
-  lines: [{ sku: '', qty: 1, unitPriceCents: 0 }]
+  lines: [{ sku: '', qty: 1 }]
 })
 
 function formatCents(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return '-'
   return formatCentsRaw(cents)
+}
+
+function productOf(sku: string): ProductView | null {
+  return products.value.find((p) => p.sku === sku) ?? null
+}
+
+/**
+ * The seeded catalog list price in integer cents for a SKU, or null when the field is not
+ * present yet (the window before the backend list_price_cents migration merges). Isolated
+ * accessor so the form degrades to a "catalog price pending" state (margin required) rather
+ * than guessing a number - identical to the New Order screen's approach.
+ */
+function catalogPriceCents(sku: string): number | null {
+  const p = productOf(sku)
+  if (!p) return null
+  const v = (p as unknown as Record<string, unknown>).listPriceCents
+  return typeof v === 'number' && Number.isSafeInteger(v) ? v : null
 }
 
 function messageFor(err: unknown): string {
@@ -72,7 +97,7 @@ onMounted(async () => {
 })
 
 function addDraftLine(): void {
-  form.lines.push({ sku: '', qty: 1, unitPriceCents: 0 })
+  form.lines.push({ sku: '', qty: 1 })
 }
 function removeDraftLine(i: number): void {
   form.lines.splice(i, 1)
@@ -80,11 +105,21 @@ function removeDraftLine(i: number): void {
 
 async function createSchedule(): Promise<void> {
   pageError.value = null
-  const lines = form.lines.filter((l) => l.sku)
-  if (!form.patientId || lines.length === 0) {
-    pageError.value = 'Choose a patient and at least one line.'
+  const draftLines = form.lines.filter((l) => l.sku)
+  if (!form.patientId || draftLines.length === 0) {
+    pageError.value = 'Choose a patient and at least one product.'
     return
   }
+  for (const l of draftLines) {
+    const qty = Math.trunc(Number(l.qty))
+    if (!Number.isInteger(qty) || qty < 1 || qty > 100) {
+      pageError.value = 'Quantity must be a whole number from 1 to 100.'
+      return
+    }
+  }
+  // A schedule carries product + quantity only (ADR-024). Price and COGS are derived at
+  // each cycle from the catalog, so no price or margin is sent.
+  const lines = draftLines.map((l) => ({ sku: l.sku, qty: Math.trunc(Number(l.qty)) }))
   busy.value = true
   try {
     await apiRequest<ScheduleView>('/schedules', {
@@ -93,7 +128,7 @@ async function createSchedule(): Promise<void> {
     })
     form.patientId = ''
     form.intervalDays = 30
-    form.lines = [{ sku: '', qty: 1, unitPriceCents: 0 }]
+    form.lines = [{ sku: '', qty: 1 }]
     await loadAll()
   } catch (err) {
     pageError.value = messageFor(err)
@@ -155,19 +190,48 @@ async function copy(url: string): Promise<void> {
         </label>
 
         <div class="lines">
-          <div v-for="(line, i) in form.lines" :key="i" class="line-row">
-            <select v-model="line.sku" :disabled="busy">
-              <option value="" disabled>Select SKU</option>
-              <option v-for="pr in products" :key="pr.sku" :value="pr.sku">{{ pr.name }} ({{ pr.sku }})</option>
-            </select>
-            <input v-model.number="line.qty" type="number" min="1" max="100" :disabled="busy" title="qty" />
-            <input v-model.number="line.unitPriceCents" type="number" min="1" :disabled="busy" title="unit price (cents)" />
-            <button type="button" class="link" :disabled="busy || form.lines.length === 1" @click="removeDraftLine(i)">remove</button>
+          <div v-for="(line, i) in form.lines" :key="i" class="draft-line">
+            <label class="field">
+              <span class="label-row">
+                Product
+                <DemoBadge label="Demo: COGS" :reason="COGS_REASON" />
+              </span>
+              <select v-model="line.sku" :disabled="busy">
+                <option value="" disabled>Select a SKU</option>
+                <option v-for="pr in products" :key="pr.sku" :value="pr.sku">
+                  {{ pr.name }} ({{ pr.sku }}) - COGS {{ formatCents(pr.unitCogsCents) }} -
+                  {{ pr.available > 0 ? `available ${pr.available}` : 'unavailable' }}
+                </option>
+              </select>
+            </label>
+
+            <label class="field qty">
+              Qty
+              <input v-model.number="line.qty" type="number" min="1" max="100" step="1" :disabled="busy" />
+            </label>
+
+            <div class="field">
+              <span class="label-row">Catalog price <span class="readonly-tag">indicative</span></span>
+              <output class="price" :data-test="`unit-price-${i}`">
+                {{ line.sku && catalogPriceCents(line.sku) !== null ? formatCents(catalogPriceCents(line.sku)) : 'catalog price pending' }}
+              </output>
+            </div>
+
+            <button type="button" class="link remove" :disabled="busy || form.lines.length === 1" @click="removeDraftLine(i)">
+              remove
+            </button>
           </div>
-          <button type="button" class="link" :disabled="busy" @click="addDraftLine">+ add line</button>
+          <button type="button" class="link" :disabled="busy" @click="addDraftLine">+ add product</button>
         </div>
 
-        <button type="button" :disabled="busy" @click="createSchedule">Create schedule</button>
+        <p class="hint">
+          A schedule stores product, quantity and interval only - no price or margin is set
+          here. The catalog price above is INDICATIVE: each cycle derives the price and COGS
+          from the catalog at run time and holds the order if margin would go negative
+          (ADR-024). The provider never types a price.
+        </p>
+
+        <button type="button" class="btn-primary" :disabled="busy" @click="createSchedule">Create schedule</button>
       </template>
       <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
     </section>
@@ -180,15 +244,26 @@ async function copy(url: string): Promise<void> {
         <header class="schedule-head">
           <span class="status" :class="s.status">{{ s.status }}</span>
           <span>every {{ s.intervalDays }} days</span>
-          <span>per cycle: {{ formatCents(s.perCycleSubtotalCents) }}</span>
+          <span>per cycle (indicative): {{ formatCents(s.perCycleSubtotalCents) }}</span>
           <span :class="s.authorized ? 'auth-yes' : 'auth-no'">
             {{ s.authorized ? 'authorized' : 'awaiting patient authorization' }}
           </span>
         </header>
 
         <ul class="items">
-          <li v-for="l in s.lines" :key="l.id">{{ l.qty }} x {{ l.name }} @ {{ formatCents(l.unitPriceCents) }}</li>
+          <li v-for="l in s.lines" :key="l.id">
+            {{ l.qty }} x {{ l.name }}
+            <template v-if="catalogPriceCents(l.sku) !== null">
+              @ {{ formatCents(catalogPriceCents(l.sku)) }} <span class="locked-tag">indicative</span>
+            </template>
+          </li>
         </ul>
+        <p class="locked-note">
+          Prices are INDICATIVE (current catalog). Each cycle derives both the price and COGS
+          from the catalog at run time (ADR-024), so a later catalog change flows into future
+          cycles; a cycle parks on_hold if margin would go negative. The figures below under
+          "Cycles" are the ACTUAL amounts charged each run.
+        </p>
 
         <p v-if="!s.authorized && s.payUrl" class="paylink">
           Authorize link: <code>{{ origin }}{{ s.payUrl }}</code>
@@ -225,11 +300,19 @@ async function copy(url: string): Promise<void> {
 
 <style scoped>
 .recurring { max-width: 920px; }
-.field { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.9em; max-width: 20rem; margin-bottom: 0.6rem; }
+.field { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85em; color: #555; max-width: 22rem; margin-bottom: 0.6rem; }
 .create, .list { margin-bottom: 1.5rem; }
-.line-row { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.3rem; }
-.line-row select { min-width: 16rem; }
-.line-row input { width: 7rem; }
+.draft-line { display: flex; gap: 0.85rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.draft-line select { min-width: 20rem; }
+.draft-line .qty input { width: 6rem; }
+.label-row { display: inline-flex; align-items: center; gap: 0.4rem; }
+.readonly-tag { color: #888; font-size: 0.9em; font-style: italic; }
+.price { font-variant-numeric: tabular-nums; padding: 0.3rem 0; color: #222; }
+.hint { color: #555; font-size: 0.82em; margin: 0.6rem 0 0.8rem; }
+.remove { align-self: center; }
+.btn-primary { margin-top: 0.3rem; }
+.locked-tag { font-size: 0.75em; color: #888; font-style: italic; }
+.locked-note { color: #666; font-size: 0.8em; margin: 0.2rem 0 0.5rem; }
 .schedule { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; }
 .schedule-head { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.4rem; }
 .status { text-transform: uppercase; font-size: 0.8em; font-weight: 700; }
