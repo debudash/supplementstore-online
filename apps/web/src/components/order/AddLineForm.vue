@@ -9,10 +9,7 @@
 // unitPriceCents; here we send the catalog price as-is, or marginBps when it is set.
 //
 // CATALOG PRICE SOURCE: ProductView.listPriceCents (integer cents, same convention as
-// unitCogsCents). Read through one isolated accessor so that on a main where the field is
-// not yet present the form degrades to a neutral "catalog price pending" state (margin
-// required) instead of showing or sending a guessed number. Once the field is present the
-// fallback simply stops being reached - no code change needed.
+// unitCogsCents) - a required field on the catalog response, seeded per SKU.
 import { ref, computed } from 'vue'
 import type { ProductView } from '@cerbo/contracts'
 import { formatCents, marginPercentToBps } from './format'
@@ -34,21 +31,9 @@ const qty = ref<number>(1)
 const marginInput = ref<string>('')
 const inputError = ref<string | null>(null)
 
-/**
- * The seeded catalog list price in integer cents, or null when the field is not present
- * (the window before the backend list_price_cents migration merges). Isolated so wiring
- * it is a single point; reads the fixed field name ProductView.listPriceCents without a
- * compile dependency on it existing yet.
- */
-function listPriceCents(product: ProductView): number | null {
-  const v = (product as unknown as Record<string, unknown>).listPriceCents
-  return typeof v === 'number' && Number.isSafeInteger(v) ? v : null
-}
-
 const selectedProduct = computed(() => props.products.find((p) => p.sku === sku.value) ?? null)
-const selectedListPrice = computed(() =>
-  selectedProduct.value ? listPriceCents(selectedProduct.value) : null
-)
+// The catalog list price for the chosen SKU (null only when no SKU is selected yet).
+const selectedListPrice = computed(() => selectedProduct.value?.listPriceCents ?? null)
 
 function submit(): void {
   inputError.value = null
@@ -73,14 +58,13 @@ function submit(): void {
     return
   }
 
-  // No margin: use the catalog price as-is (not typed by the doctor). If the catalog price
-  // is not available yet, a margin % is required - we never fabricate a price.
-  const listPrice = selectedListPrice.value
-  if (listPrice === null) {
-    inputError.value = 'Catalog price is not available yet. Enter a margin percent to price this line.'
+  // No margin: use the catalog price as-is (not typed by the doctor). A product is always
+  // selected here (guarded above), so its catalog price is present.
+  if (selectedListPrice.value === null) {
+    inputError.value = 'Choose a product.'
     return
   }
-  emit('add', { sku: sku.value, qty: qtyNum, unitPriceCents: listPrice })
+  emit('add', { sku: sku.value, qty: qtyNum, unitPriceCents: selectedListPrice.value })
 }
 </script>
 
@@ -113,7 +97,7 @@ function submit(): void {
       <div class="field">
         <span class="label-row">Unit price <span class="readonly-tag">read-only</span></span>
         <output class="price" data-test="unit-price">
-          {{ selectedListPrice !== null ? formatCents(selectedListPrice) : 'catalog price pending' }}
+          {{ selectedListPrice !== null ? formatCents(selectedListPrice) : '-' }}
         </output>
       </div>
 
