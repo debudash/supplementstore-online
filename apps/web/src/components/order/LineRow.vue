@@ -1,12 +1,17 @@
 <script setup lang="ts">
-// One cart line (FR-1..FR-3). The provider sets EITHER a patient-facing price OR a
-// margin % (ADR-005); the other is derived on the SERVER (price is canonical). This
-// row sends unitPriceCents or marginBps and DISPLAYS the server quote figures (price,
-// COGS, fee, net margin) - it never computes money. A per-line error (MARGIN_NEGATIVE
-// or INSUFFICIENT_STOCK) renders inline against this line, not as a page banner.
+// One cart line (FR-1..FR-3). The line DISPLAYS the server quote figures (price, COGS,
+// fee, net margin) and never computes money.
+//
+// UPDATE LINE IS QUANTITY ONLY (owner requirement): no price or margin field on an
+// existing line - just quantity plus Remove. The canonical price was set from the
+// margin % at add time and is derived on the server (ADR-005); editing it mid-order is
+// not a doctor-facing action. The API still accepts a price/margin on PATCH; the UI
+// simply sends quantity. A per-line error (MARGIN_NEGATIVE or INSUFFICIENT_STOCK)
+// renders inline against this line, not as a page banner.
 import { ref, watch } from 'vue'
 import type { OrderLineView } from '@cerbo/contracts'
-import { formatCents, centsToPlain, dollarsToCents, marginPercentToBps } from './format'
+import { formatCents } from './format'
+import DemoBadge from '../DemoBadge.vue'
 
 const props = defineProps<{
   line: OrderLineView
@@ -17,34 +22,20 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'commit', payload: { qty: number; unitPriceCents?: number; marginBps?: number }): void
+  (e: 'commit', payload: { qty: number }): void
   (e: 'remove'): void
 }>()
 
-type Mode = 'price' | 'margin'
-const mode = ref<Mode>('price')
 const qty = ref<number>(props.line.qty)
-const priceInput = ref<string>(centsToPlain(props.line.unitPriceCents))
-const marginInput = ref<string>('')
 const inputError = ref<string | null>(null)
 
-// Reseed editable fields when the server view for this line changes (e.g. after a
-// successful quote refresh), but never prefill the margin field from the price: that
-// would mean computing margin % in JavaScript, which the UI must not do.
+// Reseed the quantity field when the server view for this line changes.
 watch(
-  () => [props.line.qty, props.line.unitPriceCents],
+  () => props.line.qty,
   () => {
     qty.value = props.line.qty
-    if (mode.value === 'price') priceInput.value = centsToPlain(props.line.unitPriceCents)
   }
 )
-
-function setMode(next: Mode): void {
-  mode.value = next
-  inputError.value = null
-  if (next === 'price') priceInput.value = centsToPlain(props.line.unitPriceCents)
-  else marginInput.value = ''
-}
 
 function commit(): void {
   inputError.value = null
@@ -53,21 +44,7 @@ function commit(): void {
     inputError.value = 'Quantity must be a whole number from 1 to 100.'
     return
   }
-  if (mode.value === 'price') {
-    const cents = dollarsToCents(priceInput.value)
-    if (cents === null || cents < 1) {
-      inputError.value = 'Enter a valid price, e.g. 29.99.'
-      return
-    }
-    emit('commit', { qty: qtyNum, unitPriceCents: cents })
-  } else {
-    const bps = marginPercentToBps(marginInput.value)
-    if (bps === null || bps > 9500) {
-      inputError.value = 'Enter a margin percent from 0 to 95.'
-      return
-    }
-    emit('commit', { qty: qtyNum, marginBps: bps })
-  }
+  emit('commit', { qty: qtyNum })
 }
 </script>
 
@@ -81,27 +58,7 @@ function commit(): void {
     <div class="controls">
       <label class="field">
         Qty
-        <input v-model.number="qty" type="number" min="1" max="100" step="1" :disabled="busy" />
-      </label>
-
-      <div class="mode">
-        <label>
-          <input type="radio" value="price" :checked="mode === 'price'" :disabled="busy" @change="setMode('price')" />
-          Price
-        </label>
-        <label>
-          <input type="radio" value="margin" :checked="mode === 'margin'" :disabled="busy" @change="setMode('margin')" />
-          Margin %
-        </label>
-      </div>
-
-      <label v-if="mode === 'price'" class="field">
-        Unit price
-        <input v-model="priceInput" type="text" inputmode="decimal" placeholder="29.99" :disabled="busy" />
-      </label>
-      <label v-else class="field">
-        Margin %
-        <input v-model="marginInput" type="text" inputmode="decimal" placeholder="50" :disabled="busy" />
+        <input v-model.number="qty" type="number" min="1" max="100" step="1" :disabled="busy" data-test="qty-input" />
       </label>
 
       <button type="button" :disabled="busy" @click="commit">Update line</button>
@@ -114,7 +71,10 @@ function commit(): void {
     <dl class="figures">
       <div><dt>Unit price</dt><dd>{{ formatCents(line.unitPriceCents) }}</dd></div>
       <div><dt>Line total</dt><dd data-test="line-total">{{ formatCents(line.lineTotalCents) }}</dd></div>
-      <div><dt>COGS</dt><dd>{{ formatCents(line.lineCogsCents) }}</dd></div>
+      <div>
+        <dt class="label-row">COGS <DemoBadge reason="COGS is Cerbo's wholesale cost. A prescribing doctor would not normally see it; shown here to make the per-line economics demonstrable." /></dt>
+        <dd data-test="line-cogs">{{ formatCents(line.lineCogsCents) }}</dd>
+      </div>
       <div><dt>Fee</dt><dd>{{ formatCents(line.lineFeeCents) }}</dd></div>
       <div><dt>Net margin</dt><dd data-test="line-margin">{{ formatCents(line.lineMarginCents) }}</dd></div>
     </dl>
@@ -162,12 +122,6 @@ function commit(): void {
 .field input {
   width: 7rem;
 }
-.mode {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.82em;
-  gap: 0.1rem;
-}
 .remove {
   color: var(--danger);
   border-color: var(--border-strong);
@@ -195,6 +149,11 @@ function commit(): void {
 .figures dt {
   color: var(--muted);
   font-size: 0.78em;
+}
+.label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 .figures dd {
   margin: 0;

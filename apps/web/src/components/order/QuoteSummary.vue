@@ -4,6 +4,7 @@
 import { computed } from 'vue'
 import type { OrderTotals } from '@cerbo/contracts'
 import { formatCents } from './format'
+import DemoBadge from '../DemoBadge.vue'
 
 const props = defineProps<{ totals: OrderTotals | null }>()
 
@@ -26,7 +27,7 @@ const feePercentLabel = computed(() => {
         <dd data-test="subtotal">{{ formatCents(totals.subtotalCents) }}</dd>
       </div>
       <div class="row">
-        <dt>COGS</dt>
+        <dt class="label-row">COGS <DemoBadge reason="COGS is Cerbo's wholesale cost. A prescribing doctor would not normally see it; shown here to make the order economics demonstrable." /></dt>
         <dd data-test="cogs">{{ formatCents(totals.cogsCents) }}</dd>
       </div>
       <div class="row">
@@ -74,6 +75,11 @@ dl {
 }
 dt {
   color: var(--muted);
+}
+.label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 dd {
   margin: 0;
