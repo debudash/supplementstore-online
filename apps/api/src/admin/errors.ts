@@ -9,6 +9,8 @@ const STATUS_BY_CODE: Record<string, number> = {
   FORBIDDEN: 403,
   DEMO_DISABLED: 403,
   NOT_FOUND: 404,
+  // The one-click demo reset cannot purge synthetic orders that carry real money rows.
+  DEMO_RESET_BLOCKED: 409,
   INTERNAL: 500
 }
 

@@ -6,7 +6,7 @@
 // row with a reason from the schema enum (seed|restock|reserve|release|sale|
 // refund_restock|adjustment).
 import type { Knex } from 'knex'
-import { marginBpsFromPrice, priceFromMarginBps } from '@cerbo/money'
+import { marginBpsFromPrice, priceFromMarginBps, split, DEFAULT_FEE_BPS, MoneyError } from '@cerbo/money'
 import { insufficientStock, notFound } from '../orders/errors'
 import { requireInt, MARGIN_BPS_MIN, MARGIN_BPS_MAX } from '../orders/validation'
 
@@ -37,14 +37,26 @@ export interface ProductView {
 /** GET /api/products/:sku/price-preview response (ADR-025). */
 export interface PricePreview {
   sku: string
-  marginBps: number
+  /** The margin asked for, or null when previewing the list price. */
+  marginBps: number | null
   /** The unit price the order would get for this margin (priceFromMarginBps). */
   unitPriceCents: number
   listPriceCents: number
   listMarginBps: number
   /** unitPriceCents - listPriceCents (negative = cheaper than list). Server-computed. */
   differenceFromListCents: number
+  /** Quantity simulated (default 1) and the full split for that line (split()). */
+  qty: number
+  lineTotalCents: number
+  lineCogsCents: number
+  /** Null when the margin cannot cover the platform fee (coversFee false). */
+  lineFeeCents: number | null
+  lineMarginCents: number | null
+  coversFee: boolean
 }
+
+/** Simulation quantity bound for the profit simulator (units per month). */
+const PREVIEW_QTY_MAX = 1000
 
 interface ProductRow {
   sku: string
@@ -75,22 +87,59 @@ export async function listProducts(db: Knex): Promise<ProductView[]> {
  * add-line path uses (priceFromMarginBps), so the preview is exactly what the server
  * will store. Read-only; the browser never computes a price (AGENTS.md money rule 2).
  */
-export async function previewPrice(db: Knex, sku: string, marginBpsRaw: unknown): Promise<PricePreview> {
-  const marginBps = requireInt(
-    typeof marginBpsRaw === 'string' && /^\d+$/.test(marginBpsRaw) ? Number(marginBpsRaw) : marginBpsRaw,
-    'marginBps',
-    MARGIN_BPS_MIN,
-    MARGIN_BPS_MAX
-  )
+export async function previewPrice(
+  db: Knex,
+  sku: string,
+  marginBpsRaw: unknown,
+  qtyRaw?: unknown
+): Promise<PricePreview> {
+  const asInt = (v: unknown) => (typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v)
+  // No marginBps = preview at the list price (the profit simulator's baseline).
+  const marginBps =
+    marginBpsRaw === undefined || marginBpsRaw === ''
+      ? null
+      : requireInt(asInt(marginBpsRaw), 'marginBps', MARGIN_BPS_MIN, MARGIN_BPS_MAX)
+  const qty = qtyRaw === undefined || qtyRaw === '' ? 1 : requireInt(asInt(qtyRaw), 'qty', 1, PREVIEW_QTY_MAX)
   const row = await getProduct(db, sku)
-  const unitPriceCents = priceFromMarginBps(row.unit_cogs_cents, marginBps)
+  const unitPriceCents = marginBps === null ? row.list_price_cents : priceFromMarginBps(row.unit_cogs_cents, marginBps)
+
+  // The same split() an order uses, for a one-line order of `qty` units. A margin too thin
+  // to absorb the platform fee is reported (coversFee false), not thrown.
+  let lineFeeCents: number | null = null
+  let lineMarginCents: number | null = null
+  let lineTotalCents = 0
+  let lineCogsCents = 0
+  let coversFee = true
+  try {
+    const s = split([{ position: 1, qty, unitPriceCents, unitCogsCents: row.unit_cogs_cents }], DEFAULT_FEE_BPS)
+    const line = s.lines[0]
+    lineTotalCents = line.total
+    lineCogsCents = line.cogs
+    lineFeeCents = line.fee
+    lineMarginCents = line.margin
+  } catch (err) {
+    if (!(err instanceof MoneyError) || err.code !== 'MARGIN_NEGATIVE') throw err
+    coversFee = false
+    // Line total and COGS still come from split(): with a 0% fee the margin is
+    // price - cogs, which is >= 0 because marginBps >= 0 means price >= cogs.
+    const s = split([{ position: 1, qty, unitPriceCents, unitCogsCents: row.unit_cogs_cents }], 0)
+    lineTotalCents = s.lines[0].total
+    lineCogsCents = s.lines[0].cogs
+  }
+
   return {
     sku,
     marginBps,
     unitPriceCents,
     listPriceCents: row.list_price_cents,
     listMarginBps: marginBpsFromPrice(row.unit_cogs_cents, row.list_price_cents),
-    differenceFromListCents: unitPriceCents - row.list_price_cents
+    differenceFromListCents: unitPriceCents - row.list_price_cents,
+    qty,
+    lineTotalCents,
+    lineCogsCents,
+    lineFeeCents,
+    lineMarginCents,
+    coversFee
   }
 }
 

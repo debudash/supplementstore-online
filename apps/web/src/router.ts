@@ -13,6 +13,7 @@ import ProviderPayables from './views/provider/Payables.vue'
 import Pay from './views/patient/Pay.vue'
 import MyOrders from './views/patient/MyOrders.vue'
 import ScheduleAuthorize from './views/patient/ScheduleAuthorize.vue'
+import Evidence from './views/admin/Evidence.vue'
 import Metrics from './views/admin/Metrics.vue'
 import Inventory from './views/admin/Inventory.vue'
 import Operations from './views/admin/Operations.vue'
@@ -46,6 +47,7 @@ export const routes: RouteRecordRaw[] = [
   { path: '/pay/schedule/:token', name: 'pay-schedule', component: ScheduleAuthorize, meta: { roles: ['patient'] } },
 
   // Cerbo Admin
+  { path: '/admin/evidence', name: 'admin-evidence', component: Evidence, meta: { roles: ['cerbo_admin'], tab: 'Evidence' } },
   { path: '/admin/metrics', name: 'admin-metrics', component: Metrics, meta: { roles: ['cerbo_admin'], tab: 'Metrics' } },
   { path: '/admin/inventory', name: 'admin-inventory', component: Inventory, meta: { roles: ['cerbo_admin'], tab: 'Inventory' } },
   { path: '/admin/operations', name: 'admin-operations', component: Operations, meta: { roles: ['cerbo_admin'], tab: 'Operations' } },

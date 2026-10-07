@@ -22,7 +22,7 @@ productsRouter.get('/', async (_req, res) => {
 // (ADR-025). Read-only; lets the order builder preview without browser money math.
 productsRouter.get('/:sku/price-preview', async (req, res) => {
   try {
-    res.status(200).json(await previewPrice(db, req.params.sku, req.query.marginBps))
+    res.status(200).json(await previewPrice(db, req.params.sku, req.query.marginBps, req.query.qty))
   } catch (err) {
     handleError(res, err)
   }

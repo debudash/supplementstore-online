@@ -17,6 +17,7 @@ import AddLineForm from '../../components/order/AddLineForm.vue'
 import LineRow from '../../components/order/LineRow.vue'
 import QuoteSummary from '../../components/order/QuoteSummary.vue'
 import CopyLink from '../../components/order/CopyLink.vue'
+import ProfitSimulator from '../../components/order/ProfitSimulator.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Card from '../../components/ui/Card.vue'
 import UiAlert from '../../components/ui/UiAlert.vue'
@@ -297,6 +298,14 @@ function previewPrice(sku: string, marginBps: number): Promise<PricePreview> {
   return apiRequest<PricePreview>(`/products/${encodeURIComponent(sku)}/price-preview?marginBps=${marginBps}`)
 }
 
+/** Server profit simulation for the Profit simulator: marginBps null means list price. */
+function simulate(sku: string, marginBps: number | null, qty: number): Promise<PricePreview> {
+  const params = new URLSearchParams()
+  if (marginBps !== null) params.set('marginBps', String(marginBps))
+  params.set('qty', String(qty))
+  return apiRequest<PricePreview>(`/products/${encodeURIComponent(sku)}/price-preview?${params.toString()}`)
+}
+
 function goOrders(e: Event): void {
   const r = router as unknown as { push?: (to: string) => unknown }
   if (r.push) {
@@ -327,28 +336,33 @@ function goOrders(e: Event): void {
     <Skeleton v-if="loading" :lines="4" height="2.5rem" label="Loading order builder" />
 
     <!-- Step 1: patient -->
-    <Card v-else-if="!hasOrder" title="Patient" subtitle="Who is this order for?" class="start">
-      <p v-if="resumeError" class="page-error" role="alert" data-test="resume-error">{{ resumeError }}</p>
-      <UiAlert v-if="patientsUnavailable" tone="info">
-        The patient list is not available yet. You can create an order here once it is live.
-      </UiAlert>
-      <template v-else>
-        <EmptyState v-if="patients.length === 0" title="No patients found" message="Your practice has no patients yet." />
-        <form v-else class="start-form" @submit.prevent="startOrder">
-          <div class="field">
-            <label for="patient-select">Choose a patient</label>
-            <select id="patient-select" v-model="selectedPatientId" :disabled="busy" data-testid="patient-select">
-              <option value="" disabled>Select a patient</option>
-              <option v-for="p in patients" :key="p.id" :value="p.id">{{ p.name }}</option>
-            </select>
-          </div>
-          <UiButton type="submit" variant="primary" :busy="busy" busy-label="Starting..." :disabled="!selectedPatientId" data-testid="start-order">
-            Start order
-          </UiButton>
-        </form>
-      </template>
-      <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
-    </Card>
+    <div v-else-if="!hasOrder" class="step-one">
+      <Card title="Patient" subtitle="Who is this order for?" class="start">
+        <p v-if="resumeError" class="page-error" role="alert" data-test="resume-error">{{ resumeError }}</p>
+        <UiAlert v-if="patientsUnavailable" tone="info">
+          The patient list is not available yet. You can create an order here once it is live.
+        </UiAlert>
+        <template v-else>
+          <EmptyState v-if="patients.length === 0" title="No patients found" message="Your practice has no patients yet." />
+          <form v-else class="start-form" @submit.prevent="startOrder">
+            <div class="field">
+              <label for="patient-select">Choose a patient</label>
+              <select id="patient-select" v-model="selectedPatientId" :disabled="busy" data-testid="patient-select">
+                <option value="" disabled>Select a patient</option>
+                <option v-for="p in patients" :key="p.id" :value="p.id">{{ p.name }}</option>
+              </select>
+            </div>
+            <UiButton type="submit" variant="primary" :busy="busy" busy-label="Starting..." :disabled="!selectedPatientId" data-testid="start-order">
+              Start order
+            </UiButton>
+          </form>
+        </template>
+        <p v-if="pageError" class="page-error" role="alert">{{ pageError }}</p>
+      </Card>
+
+      <!-- Explore margins before starting an order (nothing is saved) -->
+      <ProfitSimulator class="start-sim" :products="products" :preview="simulate" />
+    </div>
 
     <!-- Steps 2-3: builder -->
     <div v-else class="layout">
@@ -410,6 +424,8 @@ function goOrders(e: Event): void {
             </table>
           </div>
         </section>
+
+        <ProfitSimulator :products="products" :preview="simulate" />
       </div>
 
       <aside class="side-col">
@@ -515,8 +531,16 @@ function goOrders(e: Event): void {
   background: var(--success-tint);
   color: var(--success);
 }
+.step-one {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
 .start {
   max-width: 34rem;
+}
+.start-sim {
+  max-width: 52rem;
 }
 .start-form {
   display: flex;

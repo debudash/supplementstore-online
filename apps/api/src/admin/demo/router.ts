@@ -8,7 +8,7 @@
 // to /api/admin/demo/*).
 import { Router, type Request, type Response } from 'express'
 import { db } from '../../db/knex'
-import { handleError, invalidInput } from '../errors'
+import { ApiError, handleError, invalidInput } from '../errors'
 import { demoModeGuard } from './config'
 import { importBaselineCsv, regenerateSyntheticBaseline } from './baseline'
 import { generateMigration } from './migration'
@@ -51,6 +51,48 @@ adminDemoRouter.post('/demo/migration/generate', demoModeGuard, async (req: Requ
     const seed = intField(req.body?.seed, 'seed', 4242, 0, 2_000_000_000)
     const months = intField(req.body?.months, 'months', 3, 1, 60)
     res.status(201).json(await generateMigration(db, seed, months))
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+/** Real (non-synthetic) money rows attached to synthetic orders: these block a purge. */
+async function unpurgeableRows(): Promise<{ journals: number; payments: number; refunds: number; total: number }> {
+  const count = async (table: string): Promise<number> => {
+    const [row] = await db(`${table} as t`)
+      .join('orders as o', 'o.id', 't.order_id')
+      .where('o.is_synthetic', true)
+      .where('t.is_synthetic', false)
+      .count<{ count: string }[]>('* as count')
+    return Number(row?.count ?? 0)
+  }
+  const [journals, payments, refunds] = await Promise.all([count('journals'), count('payments'), count('refunds')])
+  return { journals, payments, refunds, total: journals + payments + refunds }
+}
+
+/** The standard demo story's fixed seeds, so every reset produces the same numbers. */
+export const DEMO_STORY = { baselineSeed: 1337, baselineMonths: 6, migrationSeed: 4242, migrationMonths: 3 }
+
+// Demo-only, one click: purge synthetic data, then regenerate the standard story (6 months
+// of marketplace baseline + 3 months of ramping in-house activity) with fixed seeds. Real
+// orders are never touched (the ledger is append-only; only synthetic rows are purged).
+adminDemoRouter.post('/demo/reset-story', demoModeGuard, async (_req: Request, res: Response) => {
+  try {
+    // The purge only removes synthetic money rows (DB-enforced). A REAL journal or payment
+    // attached to a synthetic order can never be removed, so the purge would fail on a
+    // foreign key. Detect that up front and say so plainly instead of returning a 500.
+    const blocking = await unpurgeableRows()
+    if (blocking.total > 0) {
+      throw new ApiError(
+        'DEMO_RESET_BLOCKED',
+        'Some synthetic demo orders have real money records attached, so they cannot be purged. Nothing was changed.',
+        blocking
+      )
+    }
+    const reset = await resetDemoData(db)
+    const baseline = await regenerateSyntheticBaseline(db, DEMO_STORY.baselineSeed, DEMO_STORY.baselineMonths)
+    const migration = await generateMigration(db, DEMO_STORY.migrationSeed, DEMO_STORY.migrationMonths)
+    res.status(201).json({ story: DEMO_STORY, reset, baseline, migration })
   } catch (err) {
     handleError(res, err)
   }
