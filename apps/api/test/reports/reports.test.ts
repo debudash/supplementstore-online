@@ -226,6 +226,26 @@ describe('FR-10 provider sales dashboard (figures from the ledger)', () => {
   })
 })
 
+describe('FR-10 sales are counted in the month the order was PAID (METRICS.md)', () => {
+  it('a backdated order reports its GMV, fee and margin together in its paid month, not today', async () => {
+    const world = await makeProviderWorld()
+    const orderId = await payNewOrder(world, EVAL02) // GMV 4999, fee 38, margin 2681
+    // Backdate the payment to the 15th of the previous month (as Reset demo story does);
+    // the journal stays posted now, which is what used to pull it into the current month.
+    const now = new Date()
+    const paidAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15, 12))
+    await db('orders').where({ id: orderId }).update({ paid_at: paidAt })
+    const ymd = (d: Date) => d.toISOString().slice(0, 10)
+    const prevFrom = ymd(new Date(Date.UTC(paidAt.getUTCFullYear(), paidAt.getUTCMonth(), 1)))
+    const prevTo = ymd(new Date(Date.UTC(paidAt.getUTCFullYear(), paidAt.getUTCMonth() + 1, 0)))
+
+    const prev = await asUser(world.userId).get(`/api/reports/sales?from=${prevFrom}&to=${prevTo}`)
+    expect(prev.body).toMatchObject({ gmvCents: 4999, platformFeeCents: 38, providerNetMarginCents: 2681 })
+    const current = await asUser(world.userId).get('/api/reports/sales')
+    expect(current.body).toMatchObject({ gmvCents: 0, platformFeeCents: 0, providerNetMarginCents: 0 })
+  })
+})
+
 describe('FR-11 provider payable report (EVAL-09b, verified via the REAL refund path)', () => {
   it('EVAL-09b: credits 7089, debits 4472, closing 2617 after refunding EVAL-01', async () => {
     const world = await makeProviderWorld()

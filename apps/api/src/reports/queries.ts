@@ -28,34 +28,41 @@ function sumToInt(row: { total: string | number | null } | undefined): number {
 }
 
 /**
- * Total GMV: sum of PAYMENT CASH_CLEARING debits in the period for this provider.
- * (METRICS.md "Total GMV".)
+ * Total GMV: sum of PAYMENT CASH_CLEARING debits for this provider's orders PAID in the
+ * period. (METRICS.md "Total GMV": payment events count on orders.paid_at - the same basis
+ * as the admin metrics and as provider net margin below, so a month's GMV, fee and margin
+ * always describe the same orders. journals.posted_at is when the entry was written, which
+ * for a backdated order is not the month it was paid in.)
  */
 export async function queryGmvCents(db: Knex, scope: ReportScope): Promise<number> {
   const q = db('ledger_entries as le')
     .join('journals as j', 'j.id', 'le.journal_id')
+    .join('orders as o', 'o.id', 'le.order_id')
     .where('le.provider_id', scope.providerId)
     .where('le.account', ACCOUNTS.CASH_CLEARING)
     .where('j.type', 'PAYMENT')
-    .where('j.posted_at', '>=', scope.period.startTs)
-    .where('j.posted_at', '<', scope.period.endTsExclusive)
+    .where('o.paid_at', '>=', scope.period.startTs)
+    .where('o.paid_at', '<', scope.period.endTsExclusive)
   if (!scope.includeSynthetic) q.where('le.is_synthetic', false)
   const row = await q.select(db.raw('coalesce(sum(le.amount_cents), 0)::text as total')).first<{ total: string }>()
   return sumToInt(row)
 }
 
 /**
- * Platform fee revenue: -(sum of PLATFORM_FEE_REVENUE entries) in the period. Fees are
- * credits (negative), so negating yields a positive revenue figure. Includes fees on
- * orders later refunded (retained) because REFUND never touches PLATFORM_FEE_REVENUE.
+ * Platform fee revenue: -(sum of PLATFORM_FEE_REVENUE entries) for this provider's orders
+ * PAID in the period (orders.paid_at basis, like GMV). Fees are credits (negative), so
+ * negating yields a positive revenue figure. Includes fees on orders later refunded
+ * (retained) because REFUND never touches PLATFORM_FEE_REVENUE.
  */
 export async function queryPlatformFeeCents(db: Knex, scope: ReportScope): Promise<number> {
   const q = db('ledger_entries as le')
     .join('journals as j', 'j.id', 'le.journal_id')
+    .join('orders as o', 'o.id', 'le.order_id')
     .where('le.provider_id', scope.providerId)
     .where('le.account', ACCOUNTS.PLATFORM_FEE_REVENUE)
-    .where('j.posted_at', '>=', scope.period.startTs)
-    .where('j.posted_at', '<', scope.period.endTsExclusive)
+    .where('j.type', 'PAYMENT')
+    .where('o.paid_at', '>=', scope.period.startTs)
+    .where('o.paid_at', '<', scope.period.endTsExclusive)
   if (!scope.includeSynthetic) q.where('le.is_synthetic', false)
   const row = await q.select(db.raw('coalesce(sum(le.amount_cents), 0)::text as total')).first<{ total: string }>()
   return -sumToInt(row)
