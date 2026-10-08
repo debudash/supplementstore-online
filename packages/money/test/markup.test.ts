@@ -5,7 +5,7 @@
 // priced as 1 cent - no line is ever negative (ADR-004).
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { priceFromMarkupCents, MAX_MARKUP_CENTS, split, MoneyError } from "../src";
+import { priceFromMarkupCents, MAX_MARKUP_CENTS, split, MoneyError, markupBreakdown, maxRoundingCents } from "../src";
 
 describe("priceFromMarkupCents", () => {
   it("grosses COGS + markup up by the fee and rounds up to the cent", () => {
@@ -54,8 +54,35 @@ describe("priceFromMarkupCents", () => {
           expect(sl.margin).toBeGreaterThanOrEqual(lines[i].qty * lines[i].markup - 1);
           expect(sl.margin).toBeGreaterThanOrEqual(0);
         });
+        // Every cent is named: total = cogs + fee + markup + rounding, and the order's
+        // rounding is never negative and within the pricing rule's bound.
+        const b = markupBreakdown(result.lines.map((sl, i) => ({ qty: lines[i].qty, unitMarkupCents: lines[i].markup, marginCents: sl.margin })));
+        result.lines.forEach((sl, i) => {
+          const bl = b.lines[i]!;
+          expect(sl.cogs + sl.fee + bl.markupCents + bl.roundingCents).toBe(sl.total);
+        });
+        expect(b.markupCents).toBe(typed);
+        expect(b.roundingCents).toBeGreaterThanOrEqual(0);
+        expect(b.roundingCents).toBeLessThanOrEqual(maxRoundingCents(lines.map((l) => ({ qty: l.qty, unitMarkupCents: l.markup }))));
       }),
       { numRuns: 10_000 },
     );
+  });
+
+  it("names every cent of the EVAL-01 order: $84.97 = cost 40.25 + fee 0.64 + markup 44.07 + rounding 0.01", () => {
+    const r = split([
+      { position: 1, qty: 2, unitPriceCents: priceFromMarkupCents(1450, 1526, 75), unitCogsCents: 1450 },
+      { position: 2, qty: 1, unitPriceCents: priceFromMarkupCents(1125, 1355, 75), unitCogsCents: 1125 },
+    ]);
+    const b = markupBreakdown([
+      { qty: 2, unitMarkupCents: 1526, marginCents: r.lines[0].margin },
+      { qty: 1, unitMarkupCents: 1355, marginCents: r.lines[1].margin },
+    ]);
+    expect([r.subtotal, r.cogs, r.fee, b.markupCents, b.roundingCents]).toEqual([8497, 4025, 64, 4407, 1]);
+    expect(b.lines).toEqual([{ markupCents: 3052, roundingCents: 1 }, { markupCents: 1355, roundingCents: 0 }]);
+  });
+
+  it("a line priced before markup tracking has no breakdown", () => {
+    expect(markupBreakdown([{ qty: 1, unitMarkupCents: null, marginCents: 500 }])).toEqual({ lines: [null], markupCents: null, roundingCents: null });
   });
 });

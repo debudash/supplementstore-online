@@ -106,7 +106,7 @@ function openMarkup(): void {
     </td>
     <td data-label="Unit price" class="num">
       <span class="money">{{ formatCents(line.unitPriceCents) }}</span>
-      <span v-if="line.unitMarkupCents !== null" class="markup" data-test="line-markup">incl. your {{ formatCents(line.unitMarkupCents) }}</span>
+      <span v-if="line.unitMarkupCents !== null" class="markup" data-test="line-markup">incl. your markup {{ formatCents(line.unitMarkupCents) }}</span>
       <button v-if="!editingMarkup" type="button" class="btn-link change" :disabled="busy" :aria-label="`Change markup for ${line.name}`" data-testid="change-markup" @click="openMarkup">Change markup</button>
     </td>
     <td data-label="Line total" class="num"><span class="money" data-test="line-total">{{ formatCents(line.lineTotalCents) }}</span></td>
@@ -115,7 +115,14 @@ function openMarkup(): void {
       <span class="money" data-test="line-cogs">{{ formatCents(line.lineCogsCents) }}</span>
     </td>
     <td data-label="Fee" class="num"><span class="money">{{ formatCents(line.lineFeeCents) }}</span></td>
-    <td data-label="Net margin" class="num"><Money :cents="line.lineMarginCents" strong data-test="line-margin" /></td>
+    <td data-label="Net margin" class="num">
+      <Money :cents="line.lineMarginCents" strong data-test="line-margin" />
+      <span
+        v-if="line.lineMarkupCents !== null && line.lineMarkupCents !== undefined"
+        class="markup"
+        data-test="line-net-parts"
+      >markup {{ formatCents(line.lineMarkupCents) }} + rounding {{ formatCents(line.lineRoundingCents ?? 0) }}</span>
+    </td>
   </tr>
   <tr v-if="editingMarkup" class="markup-row">
     <td colspan="7">

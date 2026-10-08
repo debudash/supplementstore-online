@@ -367,7 +367,7 @@ const heldCycles = (s: ScheduleView): ScheduleCycleView[] => s.cycles.filter((c)
           <ul class="items">
             <li v-for="l in s.lines" :key="l.id">
               {{ l.qty }} × {{ l.name }}
-              <span class="subtle">- {{ formatMoney(l.unitPriceCents) }} each, incl. your {{ formatMoney(l.unitMarkupCents) }}</span>
+              <span class="subtle">- {{ formatMoney(l.unitPriceCents) }} each, incl. your markup {{ formatMoney(l.unitMarkupCents) }}</span>
             </li>
           </ul>
 
