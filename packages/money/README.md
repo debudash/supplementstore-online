@@ -28,17 +28,22 @@ module may recompute these values.
 ```ts
 import {
   orderFee,          // (subtotalCents, feeBps=75) -> fee cents, rounded up, once per order
+  DEFAULT_FEE_BPS,   // 75 (0.75%)
   allocateFee,       // (lines, orderFeeCents) -> per-line fees, largest remainder
   split,             // (lines, feeBps=75) -> { subtotal, cogs, fee, margin, lines[] } (price-based, legacy)
   priceOrder,        // (markup lines, feeBps=75) -> { subtotal, cogs, fee, margin, lines[] } (ADR-028)
   MAX_MARKUP_CENTS,  // 100000 ($1,000)
   refund,            // (orderSplit) -> { patientAmount, cogsReturned, providerDebit, feeRetained }
+  processingCostCents, // (amountCents, rateBps=290, fixedCents=30) -> estimated card cost (Evidence page)
+  breakevenFeeBps,   // (orderCents, rateBps=290, fixedCents=30) -> smallest fee bps covering it, rounded up
+  averageCents,      // (totalCents, count) -> floor average, 0 when count is 0
+  DEFAULT_PROCESSING_RATE_BPS, DEFAULT_PROCESSING_FIXED_CENTS, // 290 (2.9%), 30
   MoneyError,        // code: "INVALID_INPUT" (400) | "MARGIN_NEGATIVE" (422)
 } from "@cerbo/money";
 ```
 
-All inputs are validated as safe positive integers; violations throw
-`MoneyError("INVALID_INPUT")`. A line whose margin after its allocated fee is
+All inputs are validated as safe integers in range (quantities and COGS positive; a markup
+may be 0 to `MAX_MARKUP_CENTS`); violations throw `MoneyError("INVALID_INPUT")`. A line whose margin after its allocated fee is
 negative throws `MoneyError("MARGIN_NEGATIVE")` naming the line position.
 
 ## Develop

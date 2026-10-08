@@ -4,6 +4,8 @@ Rules: one task = one worker = one PR. Respect "Owns". Build in wave order; task
 Gates G1 to G5 require human approval before merge. All other tasks may be default-approved if CI is green and the PR checklist is complete.
 Size: S (under 1h agent time), M (1 to 3h), L (3h+).
 
+> Note (2026-10-07): this is the original plan, kept as a record. Every task is merged. Some acceptance criteria were later superseded: T6's "price or margin % input per line" is now a per-unit dollar markup (ADR-028), and CI runs on GitLab (`.gitlab-ci.yml`), not only `.github/workflows/ci.yml`.
+
 ## Execution waves
 | Wave | Tasks | Notes |
 |---|---|---|
