@@ -65,12 +65,15 @@ Whole-order refunds only.
 ### FR-10 Provider sales dashboard (Tier 2)
 - AC1: Shows, for a date range (default current month, UTC): orders by status, units sold by SKU, GMV, refunded GMV, settled GMV, platform fees, provider net margin
 - AC2: Numbers come from ledger entries, not recomputed from order lines
+- AC3: Sales count in the month the order was PAID (`orders.paid_at`), refunds in the month of the refund (`refunds.created_at`), so a month's GMV, platform fees and net margin always describe the same orders (METRICS.md basis; same as the admin metrics)
+- AC4: Demo orders (`is_synthetic`) are excluded by default; an "Include demo data" switch mixes them in and shows a "Demo data included" banner
 
 ### FR-11 Provider payable report (Tier 2)
 - AC1: Monthly by default (calendar month UTC), any custom range supported
 - AC2: Shows opening balance, credits (margins earned), debits (margin reversals and fee retentions), closing balance, and contributing orders
 - AC3: Cerbo Admin can close a month, creating an immutable `payable_statement`. A refund posted after close appears as a debit in the period it was posted; closed statements are never rewritten (EVAL-10)
 - AC4: Payout is a stub seam (`PayoutService`), not executed
+- AC5: Real orders only: demo data is never included, and the page says so ("Real orders only"), because payables are the money Cerbo actually owes
 
 ### FR-12 Recurring orders (Tier 3)
 - AC1: Provider creates a schedule for a patient with lines (SKU, qty, markup; `markupCents` required, 0 to 100000) and `interval_days` (default 30, range 7 to 90). One-off remains the default order type
@@ -88,7 +91,7 @@ Whole-order refunds only.
 ### FR-14 Baseline and demo data (Tier 3)
 - AC1: Baseline import via CSV upload (`provider_email, order_date, gmv_cents, source`), validated, stored with `import_batch_id`
 - AC2: Cerbo Admin can regenerate the synthetic baseline (`seed`, `months`, default 6), replacing only previous synthetic baseline rows
-- AC3: Cerbo Admin can generate synthetic in-house migration activity (`seed`, `months`, default 3, ramping share of baseline) that flows through the same split and posting code, flagged `is_synthetic`, backdated via the `Clock` seam, and does not touch inventory
+- AC3: Cerbo Admin can generate synthetic in-house migration activity (`seed`, `months`, default 3, ramping share of baseline) that flows through the same split and posting code, flagged `is_synthetic`, backdated via the `Clock` seam (older months on the 15th; the current month on the 15th or two days before today UTC, whichever is earlier, so demo orders never read as today or the future in any timezone), and does not touch inventory
 - AC4: Cerbo Admin can reset demo data, which purges only `is_synthetic = true` rows (RT-11)
 - AC5: All demo endpoints return `DEMO_DISABLED` unless `DEMO_MODE=true`
 

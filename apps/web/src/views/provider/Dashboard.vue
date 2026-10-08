@@ -2,8 +2,9 @@
 // Provider sales dashboard (FR-10). Reads GET /api/reports/sales; every money figure
 // comes from the ledger (the API aggregates ledger_entries / refunds - the UI only
 // DISPLAYS, it never computes money; AGENTS.md money rule 2). Default window is the
-// current UTC month; a custom From/To range is supported.
-import { onMounted, ref, computed } from 'vue'
+// current UTC month; a custom From/To range is supported. Sales count in the month the
+// order was PAID (METRICS.md). Demo orders are excluded unless "Include demo data" is on.
+import { onMounted, ref, computed, watch } from 'vue'
 import { apiRequest, ApiError } from '../../api/client'
 import type { SalesReport } from '@cerbo/contracts'
 import PageHeader from '../../components/ui/PageHeader.vue'
@@ -13,6 +14,7 @@ import UiAlert from '../../components/ui/UiAlert.vue'
 import UiButton from '../../components/ui/UiButton.vue'
 import EmptyState from '../../components/ui/EmptyState.vue'
 import Skeleton from '../../components/ui/Skeleton.vue'
+import DemoDataSwitch from '../../components/DemoDataSwitch.vue'
 import { formatMoney, isNegative } from '../../utils/money'
 
 const report = ref<SalesReport | null>(null)
@@ -21,6 +23,7 @@ const to = ref('')
 const loading = ref(true)
 const error = ref<string | null>(null)
 const rangeError = ref<string | null>(null)
+const includeSynthetic = ref(false)
 
 function validateRange(): string | null {
   if (Boolean(from.value) !== Boolean(to.value)) return 'Choose both a From and a To date, or clear both to see this month.'
@@ -39,6 +42,7 @@ async function load(): Promise<void> {
       params.set('from', from.value)
       params.set('to', to.value)
     }
+    if (includeSynthetic.value) params.set('includeSynthetic', 'true')
     const qs = params.toString()
     report.value = await apiRequest<SalesReport>(`/reports/sales${qs ? `?${qs}` : ''}`)
     // Reflect the resolved period back into the inputs (e.g. the default month).
@@ -58,6 +62,7 @@ function thisMonth(): void {
 }
 
 onMounted(load)
+watch(includeSynthetic, () => void load())
 
 /** Refunds reduce GMV: shown with negative styling. A server value that is already
  * negative is styled by <Money>; a positive one keeps its sign and gets the style here. */
@@ -89,6 +94,11 @@ const showKpis = computed(() => loading.value || report.value !== null)
       <button type="button" class="btn-link" :disabled="loading" data-testid="dash-this-month" @click="thisMonth">This month</button>
     </form>
     <p id="dash-range-msg" class="range-msg" aria-live="polite">{{ rangeError ?? '' }}</p>
+
+    <DemoDataSwitch v-model="includeSynthetic" class="demo-switch-row" />
+    <UiAlert v-if="includeSynthetic" tone="warning" title="Demo data included" class="demo-banner" data-testid="demo-data-banner">
+      These figures mix in demo orders from Reset demo story. Real reporting runs with the switch off.
+    </UiAlert>
 
     <UiAlert v-if="error" tone="danger" title="Could not load the dashboard">
       {{ error }}
@@ -216,5 +226,11 @@ const showKpis = computed(() => loading.value || report.value !== null)
   .filter input {
     width: 100%;
   }
+}
+.demo-switch-row {
+  margin-bottom: var(--space-4);
+}
+.demo-banner {
+  margin-bottom: var(--space-4);
 }
 </style>

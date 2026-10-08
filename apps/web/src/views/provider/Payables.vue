@@ -87,6 +87,11 @@ onMounted(load)
       </template>
     </PageHeader>
 
+    <p class="real-only-note" role="note" data-testid="payables-real-only">
+      Real orders only: demo data from Reset demo story is never included here, because this is
+      the money Cerbo actually owes you.
+    </p>
+
     <div class="period">
       <div class="presets" role="group" aria-label="Period">
         <button type="button" :class="{ 'btn-primary': preset === 'this' }" :aria-pressed="preset === 'this'" :disabled="loading" data-testid="period-this" @click="choose('this')">This month</button>
@@ -273,5 +278,10 @@ onMounted(load)
   .filter input {
     width: 100%;
   }
+}
+.real-only-note {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--muted);
 }
 </style>

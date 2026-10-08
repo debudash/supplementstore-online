@@ -13,7 +13,8 @@ There is a **2-minute version** for short slots, then the **full walkthrough** b
 3. As **Cerbo Admin** (Demo login, top right), open **Demo Data** and click **Reset demo story**
    (type `RESET`). This clears synthetic data and regenerates the same 6-month baseline and
    3-month ramp every time, so Metrics and Evidence always show the same story. Real orders
-   are never touched.
+   are never touched. Demo orders are dated in the past (this month's on the 15th or two
+   days before today, whichever is earlier), so they never show as today's or future orders.
 
 Demo logins (the picker stands in for sign-in; it carries a DEMO badge):
 
@@ -172,8 +173,13 @@ exposure.
 ## Act 6 - Provider reporting (EVAL-09b)
 
 **Dr. Ana Reyes > Payables**, this month: Opening + Credits - Debits = Closing, with each
-contributing order named by patient and linked to its audit. **Dashboard**: GMV, refunded,
-settled, platform fees and net margin, all read from the ledger.
+contributing order named by patient and linked to its audit. The page notes **Real orders
+only**: demo data is never included, because payables are money Cerbo actually owes.
+
+**Dashboard**: GMV, refunded, settled, platform fees and net margin, all read from the ledger,
+each sale counted in the month it was paid. Real orders only by default; turn on **Include
+demo data** (a "Demo data included" banner appears) to see Dr. Reyes's demo orders, and pick
+last month or the month before to see their sales land in the month they were paid.
 
 ## Act 7 - Recurring orders (EVAL-11)
 
