@@ -493,7 +493,7 @@ paths:
     get:
       tags: [Provider - reports]
       summary: Provider sales dashboard (from the ledger)
-      description: All figures integer cents, read from ledger entries for THIS provider.
+      description: "All figures integer cents, read from ledger entries for THIS provider. Sales, fees and margin count in the month the order was PAID (orders.paid_at); refunds in the month of the refund. Demo orders are excluded unless includeSynthetic=true."
       parameters:
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }

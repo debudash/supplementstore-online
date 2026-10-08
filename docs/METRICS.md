@@ -1,15 +1,15 @@
 # METRICS.md - Metric definitions
 
 All metrics are computed from ledger entries, refunds, and baseline tables, in integer cents, UTC calendar periods.
-Every query takes `includeSynthetic` (default false). Basis: payment events count on `paid_at`, refund events on refund `created_at`.
+Every query takes `includeSynthetic` (default false; the admin Metrics page and the provider Dashboard have an "Include demo data" switch). Basis: payment events count on `paid_at`, refund events on refund `created_at`. Provider payables are the exception: they are ledger movements by `journals.posted_at` and never include demo data.
 
 ## Headline: GMV and platform revenue
 | Metric | Definition | Source |
 |---|---|---|
-| Total GMV | Sum of PAYMENT journal CASH_CLEARING debits in period | ledger_entries |
+| Total GMV | Sum of PAYMENT journal CASH_CLEARING debits for orders PAID in the period (`orders.paid_at`, not `journals.posted_at`) - admin metrics and the provider dashboard use the same basis | ledger_entries |
 | Refunded GMV | Sum of refunds.amount_cents in period | refunds |
 | Settled GMV | Total GMV - Refunded GMV | derived |
-| Platform fee revenue | -(sum of PLATFORM_FEE_REVENUE entries) in period. Includes fees on orders later refunded (retained) | ledger_entries |
+| Platform fee revenue | -(sum of PLATFORM_FEE_REVENUE entries) for orders PAID in the period (`orders.paid_at`). Includes fees on orders later refunded (retained) | ledger_entries |
 | Sunk fees on refunded GMV | Sum of refunds.fee_retained_cents in period. Approximately Refunded GMV x 0.0075 (each order's fee is rounded up to the cent, so exact cents may differ) | refunds |
 | Order count, AOV | Paid orders in period; Total GMV / order count (integer division, display only) | orders |
 | Recurring share | GMV from `recurring_cycle` orders / Total GMV | orders, ledger |
