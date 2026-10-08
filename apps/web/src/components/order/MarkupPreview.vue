@@ -57,7 +57,7 @@ onBeforeUnmount(() => {
   <p class="markup-preview" aria-live="polite" data-testid="markup-preview">
     <template v-if="result">
       Patient pays <strong class="money">{{ formatMoney(result.unitPriceCents) }}</strong> per unit
-      <span class="parts">(cost {{ formatMoney(result.lineCogsCents) }} + you net {{ formatMoney(result.lineMarginCents) }} + fee {{ formatMoney(result.lineFeeCents) }})</span>
+      <span class="parts">(cost {{ formatMoney(result.lineCogsCents) }} + your markup {{ formatMoney(result.lineMarkupCents) }} + fee {{ formatMoney(result.lineFeeCents) }}<template v-if="result.lineRoundingCents !== 0"> + rounding {{ formatMoney(result.lineRoundingCents) }}</template>)</span>
     </template>
     <template v-else-if="failed">Price preview unavailable - the price will show on the line after adding.</template>
   </p>

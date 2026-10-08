@@ -25,6 +25,10 @@ export interface AuditOrder {
   cogsCents: number | null
   feeCents: number | null
   marginCents: number | null
+  /** Sum of line markups; null unless every line has a markup and the order is split. */
+  markupCents: number | null
+  /** Sum of line price roundings (>= 0); null unless every line has a markup. */
+  roundingCents: number | null
   isSynthetic: boolean
   createdAt: string
   sentAt: string | null
@@ -55,6 +59,10 @@ export interface AuditLine {
   lineCogsCents: number | null
   lineFeeCents: number | null
   lineMarginCents: number | null
+  /** qty x unit markup (ADR-028); null on lines priced before it or not yet split. */
+  lineMarkupCents: number | null
+  /** Net margin minus markup: the price rounding, which goes to the provider (ADR-028). */
+  lineRoundingCents: number | null
 }
 
 /** One status transition (order_events). */

@@ -6,7 +6,7 @@
 // row with a reason from the schema enum (seed|restock|reserve|release|sale|
 // refund_restock|adjustment).
 import type { Knex } from 'knex'
-import { priceFromMarkupCents, split, DEFAULT_FEE_BPS } from '@cerbo/money'
+import { priceFromMarkupCents, split, markupBreakdown, DEFAULT_FEE_BPS } from '@cerbo/money'
 import { insufficientStock, notFound } from '../orders/errors'
 import { requireInt, MARKUP_MIN, MARKUP_MAX } from '../orders/validation'
 
@@ -42,6 +42,9 @@ export interface PricePreview {
   lineCogsCents: number
   lineFeeCents: number
   lineMarginCents: number
+  /** qty x markup, and the price rounding that goes to the provider: margin = markup + rounding. */
+  lineMarkupCents: number
+  lineRoundingCents: number
 }
 
 interface ProductRow {
@@ -85,6 +88,7 @@ export async function previewPrice(
 
   // The same split() an order uses, for a one-line order of `qty` units.
   const line = split([{ position: 1, qty, unitPriceCents, unitCogsCents: row.unit_cogs_cents }], DEFAULT_FEE_BPS).lines[0]
+  const named = markupBreakdown([{ qty, unitMarkupCents: markupCents, marginCents: line.margin }]).lines[0]
   return {
     sku,
     markupCents,
@@ -93,7 +97,9 @@ export async function previewPrice(
     lineTotalCents: line.total,
     lineCogsCents: line.cogs,
     lineFeeCents: line.fee,
-    lineMarginCents: line.margin
+    lineMarginCents: line.margin,
+    lineMarkupCents: named?.markupCents ?? 0,
+    lineRoundingCents: named?.roundingCents ?? 0
   }
 }
 

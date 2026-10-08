@@ -27,7 +27,9 @@ const line = {
   lineTotalCents: 5998,
   lineCogsCents: 2900,
   lineFeeCents: 45,
-  lineMarginCents: 3053
+  lineMarginCents: 3053,
+  lineMarkupCents: 3052,
+  lineRoundingCents: 1
 }
 
 describe('AddLineForm - markup entry (ADR-028)', () => {
@@ -133,7 +135,11 @@ describe('LineRow - quantity-only item row, "Update Item", COGS badged', () => {
   })
 
   it('shows the markup included in the unit price', () => {
-    expect(mountRow().find('[data-test="line-markup"]').text()).toBe('incl. your $15.26')
+    expect(mountRow().find('[data-test="line-markup"]').text()).toBe('incl. your markup $15.26')
+  })
+
+  it('shows the net margin as markup + price rounding', () => {
+    expect(mountRow().find('[data-test="line-net-parts"]').text()).toBe('markup $30.52 + rounding $0.01')
   })
 
   it('opens the markup editor seeded with the current markup and emits it in cents', async () => {

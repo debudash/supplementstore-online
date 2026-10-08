@@ -45,6 +45,7 @@ The provider prices each line with a per-unit dollar markup (ADR-028). The patie
 ### FR-7 Auditability (Tier 1)
 - AC1: `GET /api/orders/:id/audit` returns: order snapshot, lines with every amount, status history, payments, refunds, journals with entries, inventory movements, and an `invariants` block where each check passes or fails explicitly
 - AC2: The provider UI has an audit view rendering this for any of their orders. Cerbo Admin can view any order
+- AC4 (ADR-028): The audit names every cent of a paid order: subtotal = COGS + platform fee (exactly 0.75%, half-up) + provider markup (qty x markup, as entered) + price rounding (the unit price is rounded up to the cent; the rounding goes to the provider, who set the price). Lines and the order carry `lineMarkupCents`/`lineRoundingCents` and `markupCents`/`roundingCents`, and the invariants `order.every_cent_accounted` and `order.rounding_within_bounds` (0 <= rounding <= 1 cent per unit, 2 on a $0 line) run on every order
 - AC3: Ledger tables reject UPDATE and DELETE at the database level, except the synthetic purge path (RT-11)
 
 ### FR-8 Refunds (Tier 2)
