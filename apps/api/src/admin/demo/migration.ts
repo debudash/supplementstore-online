@@ -100,10 +100,13 @@ export async function generateMigration(
     // r = 0 is the current month, r = months-1 the oldest. Recent months ramp up.
     for (let r = 0; r < months; r++) {
       const ordersThisMonth = months - r // most for the current month
-      // A deterministic day inside month (now - r); clamp the current month to <= now.
-      const monthBase = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - r, 1))
-      const day = r === 0 ? Math.min(15, now.getUTCDate()) : 15
-      const paidAt = new Date(Date.UTC(monthBase.getUTCFullYear(), monthBase.getUTCMonth(), day, 12, 0, 0))
+      // A deterministic day: the 15th of month (now - r). The current month's orders land on
+      // the 15th or two days BEFORE today (UTC), whichever is earlier, so in every timezone
+      // they read as past orders, never today or tomorrow. (On the 1st-2nd of a month that
+      // date falls in the previous month.)
+      const fifteenth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - r, 15, 12, 0, 0)
+      const twoDaysAgo = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 2, 12, 0, 0)
+      const paidAt = new Date(r === 0 ? Math.min(fifteenth, twoDaysAgo) : fifteenth)
 
       for (let o = 0; o < ordersThisMonth; o++) {
         const result = await generateOneOrder(db, provider, products, paidAt, rng)
