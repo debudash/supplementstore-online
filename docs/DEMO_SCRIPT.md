@@ -98,6 +98,16 @@ Click **Review & send**. The dialog lists the items and **$84.97**, and says sto
 for 7 days. Confirm. The success card shows the **copyable patient pay link** (DEMO badge: in
 production it is emailed or texted). You can recover it later from Orders ("Show link").
 
+**Show-off: lab-informed suggestions (DEMO, ADR-029).** Under the items, the block
+**Suggestions from Cara's latest labs** (DEMO - simulated labs, panel collected Sep 28, 2026)
+lists Vitamin D3 + K2 (vitamin D 22 ng/mL, low - *Already on this order*), Magnesium Glycinate
+(RBC magnesium 4.0 mg/dL, low), Omega-3 Fish Oil (Omega-3 Index 3.6%, low) and Zinc Picolinate
+(64 ug/dL, low - *Currently out of stock*), with hs-CRP listed as normal. Add Magnesium to the
+order and its line changes to "Already on this order". Talking point: read-only decision
+support from fixed, explainable rules, provider-only; the panels are simulated and a real
+version would come from a lab feed (README "Beyond the brief"). As Dr. Ben Cole, a draft for Dev Patel shows a
+different profile (Omega-3 and gut microbiome low).
+
 ## Act 2 - Guardrails (fail on purpose)
 
 In a new draft:

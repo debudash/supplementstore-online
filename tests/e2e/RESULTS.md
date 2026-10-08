@@ -14,7 +14,7 @@ Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 | EVAL-03 | PASS | money | T1/T3 | VITD3 x1@2200 -> fee 17 (16.5 rounded up), margin 1058 |
 | EVAL-04 | PASS | money | T1/T3 | VITD3 margin floor: markup 0 -> price 1134 (cost + fee), margin exactly 0 (split floor still rejects @1125/@1133, accepts @1134) |
 | EVAL-04b | PASS | money | T1/T3 | MAG markup 1000 -> unit price 2469, fee 19, margin 1000 (ADR-028) |
-| EVAL-P1 | PASS | money | T1/T3 | Property: line fees sum to order fee; cogs+fee+margin=total; fee half-up; deterministic (API-driven) |
+| EVAL-P1 | PASS | money | T1/T3 | Property: line fees sum to order fee; cogs+fee+margin=total; fee rounded up; deterministic (API-driven) |
 | EVAL-05 | PASS | inventory | T3 | PROBIO x6 -> 409 INSUFFICIENT_STOCK available 5; x5 succeeds |
 | EVAL-05b | PASS | inventory | T3 | ZINC x1 -> 409 available 0 |
 | EVAL-05c | PASS | inventory | T3 | cross-order reservation: ben 409 available 0; after ana cancels, available 5 |
@@ -48,7 +48,7 @@ Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 | RT-09 | PASS | redteam | T0/T11 | provider calls restock/metrics/demo -> 403 FORBIDDEN (role guard) |
 | RT-10 | PASS | redteam | T4 | patient routes and error bodies never leak COGS/margin/fee |
 | RT-11 | PASS | redteam | T2 | direct SQL UPDATE/DELETE on ledger tables -> trigger raises; synthetic purge gated |
-| RT-12 | PASS | redteam | T3 | SQL injection via sku / date filters -> parameterized, no injection, table intact _(CSV-import row validation portion belongs to T10 (cut) and is reported separately)_ |
+| RT-12 | PASS | redteam | T3 | SQL injection via sku / date filters -> parameterized, no injection, table intact _(CSV-import row validation is covered by the baseline import API test (apps/api/test/admin/demo.test.ts, RT-12))_ |
 | RT-13 | PASS | redteam | T9 | recurring cycle triggered twice (concurrent) for the same period -> exactly ONE child order _(enforced by a schedule row lock + next_run_at due-gate, NOT a DB unique constraint (none exists on (schedule_id, cycle_number) in the approved data model))_ |
 | RT-14 | PASS | redteam | T10 | demo endpoints refused in production mode (403 DEMO_DISABLED); no real data purged; payable_statements never deletable even with the purge flag set |
 | RT-15 | PASS | redteam | T4 | pay an expired order after reservation released -> 409 ORDER_EXPIRED; no oversell |

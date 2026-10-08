@@ -107,6 +107,15 @@ Whole-order refunds only.
 - AC1: App runs on Railway from the repo Dockerfile with Railway Postgres, migrations run on start, seed runs if the database is empty
 - AC2: `GET /api/health` returns 200 with database connectivity status
 
+## Extensions (DEMO showcase, not requirements)
+
+### E-1 Lab-informed supplement suggestions (DEMO, ADR-029)
+A demonstration of where the platform can go, not a delivered capability: no eval or acceptance gate depends on it.
+- The order builder shows one read-only block, "Suggestions from <patient>'s latest labs", DEMO-labelled with the panel's collection date
+- It lists each LOW marker in the patient's latest SIMULATED lab panel with the related catalog product, the result and the reference range; a product already on the order is marked "Already on this order", an out-of-stock one "Currently out of stock"; in-range results are listed as normal
+- No action buttons, nothing stored, no money computed; provider-only (never on patient pages); a patient with no panel sees "No recent lab results on file (DEMO)"
+- Simulated panels exist for the two seeded patients (Cara Lopez, Dev Patel) in `apps/web/src/demo/labSuggestions.ts`; a production version would move panels and rules server-side behind provider-scoped access and source them from a lab feed (HL7 / FHIR)
+
 ## Non-functional requirements
 - NFR-1 Integrity: money invariants hold for every order, line, and journal, enforced in code, tests, and database constraints
 - NFR-2 Idempotency and concurrency: no double charge, no double refund, no oversell under parallel requests (RT-04, RT-05)
