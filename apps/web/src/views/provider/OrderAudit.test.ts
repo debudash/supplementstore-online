@@ -31,15 +31,15 @@ import { ApiError } from '../../api/client'
 const audit = {
   order: {
     id: 'o1', status: 'paid', kind: 'one_time', providerId: 'pr1', practiceId: 'pc1', patientId: 'p1', feeBps: 75,
-    subtotalCents: 5998, cogsCents: 2900, feeCents: 45, marginCents: 3053, markupCents: 3052, roundingCents: 1, isSynthetic: false,
+    subtotalCents: 5997, cogsCents: 2900, feeCents: 45, marginCents: 3052, markupCents: 3052, isSynthetic: false,
     createdAt: '2026-10-06T12:00:00.000Z', sentAt: '2026-10-06T12:05:00.000Z', paidAt: '2026-10-06T13:00:00.000Z',
     fulfilledAt: null, cancelledAt: null, expiredAt: null, refundedAt: null, payToken: null, payPath: null
   },
   lines: [
     {
       id: 'l1', position: 1, sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', qty: 2, unitPriceCents: 2999,
-      unitCogsCents: 1450, unitMarkupCents: 1526, lineTotalCents: 5998, lineCogsCents: 2900, lineFeeCents: 45, lineMarginCents: 3053,
-      lineMarkupCents: 3052, lineRoundingCents: 1
+      unitCogsCents: 1450, unitMarkupCents: 1526, lineTotalCents: 5997, lineCogsCents: 2900, lineFeeCents: 45, lineMarginCents: 3052,
+      lineMarkupCents: 3052, unitPriceIsAverage: true
     }
   ],
   statusHistory: [
@@ -52,8 +52,8 @@ const audit = {
     {
       id: 'j1', type: 'PAYMENT', refId: null, isSynthetic: false, postedAt: '2026-10-06T13:00:00.000Z',
       entries: [
-        { id: 1, account: 'CASH_CLEARING', lineId: null, amountCents: 5998, memo: null },
-        { id: 2, account: 'PROVIDER_PAYABLE', lineId: 'l1', amountCents: -3053, memo: null },
+        { id: 1, account: 'CASH_CLEARING', lineId: null, amountCents: 5997, memo: null },
+        { id: 2, account: 'PROVIDER_PAYABLE', lineId: 'l1', amountCents: -3052, memo: null },
         { id: 3, account: 'COGS_RECOVERY', lineId: 'l1', amountCents: -2900, memo: null },
         { id: 4, account: 'PLATFORM_FEE_REVENUE', lineId: 'l1', amountCents: -45, memo: null }
       ],
@@ -65,7 +65,7 @@ const audit = {
   invariants: {
     ok: false,
     checks: [
-      { name: 'order.split_balances', pass: true, detail: { subtotal: 5998, cogs: 2900, fee: 45, margin: 3053 } },
+      { name: 'order.split_balances', pass: true, detail: { subtotal: 5997, cogs: 2900, fee: 45, margin: 3052 } },
       { name: 'order.margin_nonnegative', pass: false, detail: { margin: -120 } }
     ]
   }
@@ -91,22 +91,22 @@ describe('OrderAudit', () => {
     }
     // Money split totals come from the order fields.
     const splitFoot = w.findAll('tfoot').at(-1)!
-    expect(splitFoot.text()).toContain('$59.98')
-    expect(splitFoot.text()).toContain('$30.53')
+    expect(splitFoot.text()).toContain('$59.97')
     expect(splitFoot.text()).toContain('$30.52')
   })
 
-  it('names every cent: cost + fee + markup + rounding = what the patient paid', async () => {
+  it('names every cent: cost + fee + markup = what the patient paid', async () => {
     const w = mount(OrderAudit)
     await flushPromises()
     const cents = w.find('[data-testid="every-cent"]')
     expect(cents.exists()).toBe(true)
     const text = cents.text()
-    for (const part of ['Cost of goods', '$29.00', 'Platform fee (0.75% of the order)', '$0.45', 'Provider markup', '$30.52', 'Patient paid', '$59.98']) {
+    for (const part of ['Cost of goods', '$29.00', 'Platform fee (0.75% of the order, rounded up to the cent)', '$0.45', 'Provider markup (exactly as entered)', '$30.52', 'Patient paid', '$59.97']) {
       expect(text).toContain(part)
     }
-    expect(cents.find('[data-testid="every-cent-rounding"]').text()).toContain('$0.01')
-    expect(w.find('[data-test="audit-rounding"]').text()).toBe('$0.01')
+    // Rounded once (ADR-028): no rounding is left over, so there is no rounding row.
+    expect(cents.text()).not.toContain('rounding $')
+    expect(w.find('[data-test="audit-rounding"]').exists()).toBe(false)
     expect(w.find('[data-test="audit-markup"]').text()).toContain('2 × $15.26')
   })
 
@@ -123,7 +123,7 @@ describe('OrderAudit', () => {
     const payableRow = journal.findAll('tbody tr')[1]
     const cells = payableRow.findAll('td')
     expect(cells[3].text()).toBe('')
-    expect(cells[4].text()).toBe('$30.53')
+    expect(cells[4].text()).toBe('$30.52')
   })
 
   it('shows a failed check with a fail badge, a readable name and formatted detail', async () => {

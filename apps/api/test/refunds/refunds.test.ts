@@ -151,7 +151,7 @@ async function paidOrder(lines: Line[]): Promise<{ orderId: string; token: strin
 
 const EVAL01: Line[] = [
   { sku: SKU_MAG, qty: 2, price: 2999 },
-  { sku: SKU_VITD, qty: 1, price: 2499 }
+  { sku: SKU_VITD, qty: 1, price: 2500 } // markup 1356: with MAG x2 the order rounds once to 8497 (EVAL-01)
 ]
 const EVAL02: Line[] = [{ sku: SKU_OMEGA, qty: 1, price: 4999 }]
 
@@ -265,7 +265,7 @@ describe('FR-8 AC4 / EVAL-08 refund of a FULFILLED order writes off COGS, no res
     expect(res.status).toBe(200)
     expect(res.body).toMatchObject({
       amountCents: 4999,
-      feeRetainedCents: 37,
+      feeRetainedCents: 38,
       restocked: false,
       writeoffCogsCents: 2280
     })
@@ -276,7 +276,7 @@ describe('FR-8 AC4 / EVAL-08 refund of a FULFILLED order writes off COGS, no res
     expect(await db('inventory_movements').where({ order_id: orderId, reason: 'refund_restock' }).then((r) => r.length)).toBe(0)
 
     const refund = await db('refunds').where({ order_id: orderId }).first()
-    expect(refund).toMatchObject({ restocked: false, writeoff_cogs_cents: 2280, fee_retained_cents: 37 })
+    expect(refund).toMatchObject({ restocked: false, writeoff_cogs_cents: 2280, fee_retained_cents: 38 })
 
     // REFUND journal still balances (money rule 7).
     const refundJournal = await db('journals').where({ order_id: orderId, type: 'REFUND' }).first()
@@ -284,7 +284,7 @@ describe('FR-8 AC4 / EVAL-08 refund of a FULFILLED order writes off COGS, no res
     expect(entries.reduce((a, e) => a + e.amount_cents, 0)).toBe(0)
     expect(sumBy(entries, 'CASH_CLEARING')).toBe(-4999)
     expect(sumBy(entries, 'COGS_RECOVERY')).toBe(2280)
-    expect(sumBy(entries, 'PROVIDER_PAYABLE')).toBe(2719) // margin 2682 + fee 37
+    expect(sumBy(entries, 'PROVIDER_PAYABLE')).toBe(2719) // margin 2681 + fee 38 (ADR-028)
   })
 })
 

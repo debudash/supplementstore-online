@@ -126,7 +126,7 @@ async function sendNewOrder(lines: Line[]): Promise<{ orderId: string; token: st
 // The canonical EVAL-01 order shape on the T4 SKUs.
 const EVAL01: Line[] = [
   { sku: SKU_MAG, qty: 2, price: 2999 },
-  { sku: SKU_VITD, qty: 1, price: 2499 }
+  { sku: SKU_VITD, qty: 1, price: 2500 } // markup 1356: with MAG x2 the order rounds once to 8497 (EVAL-01)
 ]
 
 describe('FR-5 AC1 / EVAL-12 patient-safe view (whitelist)', () => {
@@ -347,15 +347,16 @@ describe('FR-7 AC1 / EVAL-06c audit endpoint', () => {
       expect(check.pass).toBe(true)
     }
 
-    // ADR-028: every cent is named. $84.97 = cost 40.25 + fee 0.64 + markup 44.07 + rounding 0.01.
+    // ADR-028: every cent is named and nothing is left over as rounding:
+    // $84.97 = cost 40.25 + fee 0.64 + provider markup 44.08 (2 x 15.26 + 13.56).
     const names = res.body.invariants.checks.map((c: { name: string }) => c.name)
-    for (const n of ['lines.price_matches_markup', 'order.every_cent_accounted', 'order.rounding_within_bounds']) {
+    for (const n of ['order.price_matches_markup', 'order.every_cent_accounted']) {
       expect(names).toContain(n)
     }
-    expect(res.body.order).toMatchObject({ subtotalCents: 8497, cogsCents: 4025, feeCents: 64, marginCents: 4408, markupCents: 4407, roundingCents: 1 })
-    expect(res.body.lines.map((l: { lineMarkupCents: number; lineRoundingCents: number }) => [l.lineMarkupCents, l.lineRoundingCents])).toEqual([
-      [3052, 1],
-      [1355, 0]
+    expect(res.body.order).toMatchObject({ subtotalCents: 8497, cogsCents: 4025, feeCents: 64, marginCents: 4408, markupCents: 4408 })
+    expect(res.body.lines.map((l: { lineMarkupCents: number; lineMarginCents: number }) => [l.lineMarkupCents, l.lineMarginCents])).toEqual([
+      [3052, 3052],
+      [1356, 1356]
     ])
 
     // Status history.

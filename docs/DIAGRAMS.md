@@ -266,7 +266,7 @@ sequenceDiagram
   actor Prov as Provider (SPA)
   participant API as orders/router.ts
   participant Svc as orders/service.ts
-  participant Money as packages/money (split, priceFromMarkupCents)
+  participant Money as packages/money (priceOrder, split)
   participant Inv as inventory/service.ts
   participant DB as Postgres
   participant Notif as Notifier (stub)
@@ -281,17 +281,17 @@ sequenceDiagram
   Note over API,Svc: unitPriceCents or marginBps then 400 INVALID_INPUT (retired)
   API->>Svc: addLine(...)
   Svc->>DB: load product (catalog COGS)
-  Svc->>Money: priceFromMarkupCents(unitCogs, markupCents, fee_bps)
-  Money-->>Svc: unit price = ceil((COGS + max(markup, 1)) / (1 - fee))
+  Svc->>Money: priceOrder([line], fee_bps) for the line alone (draft display price)
+  Money-->>Svc: total = ceil(qty x (COGS + markup) / (1 - fee)), fee rounded up
   Svc->>DB: merge or insert line (qty sums for same SKU)
   Note over Svc,Inv: add-to-cart stock gate: available = on_hand - reserved
-  Svc->>Money: split(lines, fee_bps) re-validate whole cart
+  Svc->>Money: priceOrder(lines, fee_bps) re-price whole cart (split() for legacy lines)
   Money-->>Svc: throws MARGIN_NEGATIVE then 422 rollback if any line lt 0
   API-->>Prov: 200 OrderView
 
   Prov->>API: GET /api/orders/:id/quote
   API->>Svc: getQuote(...)
-  Svc->>Money: split(lines, fee_bps) using LIVE catalog COGS (draft)
+  Svc->>Money: priceOrder(lines, fee_bps) using LIVE catalog COGS (draft)
   Money-->>Svc: totals + per-line fee/margin
   API-->>Prov: 200 live split preview
 
@@ -301,7 +301,7 @@ sequenceDiagram
   rect rgb(235,245,255)
     Note over Svc,DB: ONE transaction with products row lock (FOR UPDATE, ordered by sku)
     Svc->>DB: SELECT products FOR UPDATE (snapshot COGS now, ADR-006)
-    Svc->>Money: priceFromMarkupCents(snapshot COGS, markup) per line, then split(inputs, fee_bps)
+    Svc->>Money: priceOrder(snapshot COGS + markup per line, fee_bps), order rounded once
     Money-->>Svc: per-line total/cogs/fee/margin (or MARGIN_NEGATIVE then rollback)
     Svc->>Inv: reserveLines(...) re-check available, inc reserved_qty, write reserve movement
     Note over Inv,DB: INSUFFICIENT_STOCK then rollback, nothing reserved
@@ -498,7 +498,12 @@ Source: `apps/api/src/jobs/expire.ts`, `apps/api/src/inventory/service.ts`
 
 ## 7. Money split flow (MERGED, packages/money)
 
-The algorithm: compute the order fee once, half-up, then allocate it across lines by
+Markup-priced orders (ADR-028) are priced by `priceOrder`: need = sum(qty x (COGS + markup)),
+subtotal = ceil(need x 10000 / (10000 - feeBps)) rounded once, fee = 0.75% of the subtotal
+rounded up once (so subtotal - need = fee exactly and each line's margin is exactly
+qty x markup); line totals split the subtotal by largest remainder and line fee = total -
+cogs - qty x markup. The price-based `split()` below still prices legacy orders (lines
+priced before ADR-028). Its algorithm: compute the order fee once, rounded up, then allocate it across lines by
 largest remainder with ties broken by position ascending; derive per-line margin; reject
 the whole split if any line margin is negative. Invariants: `cogs + fee + margin = total`
 per line and per order, and `margin >= 0`.
@@ -508,7 +513,7 @@ flowchart TB
   start(["split(lines, feeBps=75)"]) --> validate["validate: each qty, unitPriceCents,<br/>unitCogsCents safe positive int; position gte 0"]
   validate --> totals["per line: total = qty * unitPriceCents<br/>cogs = qty * unitCogsCents"]
   totals --> subtotal["subtotal = sum(total)<br/>totalCogs = sum(cogs)"]
-  subtotal --> fee["orderFee = floor((subtotal * feeBps + 5000) / 10000)<br/>HALF-UP, once per order"]
+  subtotal --> fee["orderFee = floor((subtotal * feeBps + 9999) / 10000)<br/>ROUNDED UP, once per order"]
   fee --> alloc["allocateFee: for each line<br/>num = orderFee * total<br/>base = floor(num / subtotal)<br/>rem = num mod subtotal<br/>leftover = orderFee - sum(base)"]
   alloc --> distribute["give +1 to the leftover lines<br/>with largest rem; ties to lower position first"]
   distribute --> margin{"per line:<br/>margin = total - cogs - fee<br/>margin lt 0 ?"}
@@ -528,7 +533,7 @@ flowchart TB
   l2["Line 2 (pos 2): VITD3-K2 x1 @ 2499<br/>total = 2499, cogs = 1125"]
   l1 --> sub["subtotal = 5998 + 2499 = 8497<br/>totalCogs = 4025"]
   l2 --> sub
-  sub --> f["orderFee = floor((8497 * 75 + 5000)/10000)<br/>= floor(642275/10000) = floor(64.2275) = 64"]
+  sub --> f["orderFee = floor((8497 * 75 + 9999)/10000)<br/>= floor(647274/10000) = 64 (63.7275 rounded up)"]
   f --> a1["Line 1: num = 64 x 5998 = 383872<br/>base = floor(383872/8497) = 45, rem = 1507"]
   f --> a2["Line 2: num = 64 x 2499 = 159936<br/>base = floor(159936/8497) = 18, rem = 6990"]
   a1 --> lo["baseSum = 45 + 18 = 63<br/>leftover = 64 - 63 = 1"]
@@ -540,8 +545,9 @@ flowchart TB
 
 Source: `packages/money/src/fee.ts` (`orderFee`), `packages/money/src/allocate.ts`
 (`allocateFee`), `packages/money/src/split.ts` (`split`), `packages/money/src/refund.ts`,
-`packages/money/src/pricing.ts` (`priceFromMarkupCents`; EVAL-01 prices come from markups 1526
-and 1355 at these COGS). Expected values from
+`packages/money/src/priceOrder.ts` (`priceOrder`). Through the API, EVAL-01 is priced from
+markups 1526 and 1356 by `priceOrder`: same subtotal 8497 and fee 64 (line fees 45 and 19),
+line totals 5997 and 2500, margins 3052 and 1356 (exactly the markups). Expected values from
 `docs/EVALS.md` EVAL-01.
 
 ---
@@ -551,7 +557,7 @@ and 1355 at these COGS). Expected values from
 Factual breakdown of what the diagrams reflect. "Merged" = present and real on `main`.
 
 **Merged and drawn from real code:**
-- `packages/money`: `fee`, `allocate`, `split`, `refund`, `pricing`, `validate` (diagram 7).
+- `packages/money`: `fee`, `allocate`, `split`, `priceOrder`, `refund`, `pricing`, `validate` (diagram 7).
 - T2 schema: all five migrations and the seed, gate G2 (diagram 2).
 - T0 shell: `app.ts` route registry, auth middleware/guards, seam interfaces + stubs,
   `apps/web/src/router.ts` (diagram 1).

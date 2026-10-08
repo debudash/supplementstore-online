@@ -163,7 +163,7 @@ describe('listing the caller\'s own orders with the pay link', () => {
     expect(order).toBeDefined()
     expect(order).toMatchObject({
       status: 'sent',
-      amountCents: 5998, // MAG x2 @2999 subtotal (the patient pays the subtotal; fee is internal)
+      amountCents: 5997, // MAG x2 at markup 1526, rounded once (ADR-028); the fee is internal
       payToken,
       payPath: `/pay/${payToken}`,
       isPayable: true
@@ -171,7 +171,7 @@ describe('listing the caller\'s own orders with the pay link', () => {
     expect(order.sentAt).toBeTruthy()
     expect(order.paidAt).toBeNull()
     expect(order.items).toHaveLength(1)
-    expect(order.items[0]).toMatchObject({ qty: 2, unitPriceCents: 2999, lineTotalCents: 5998 })
+    expect(order.items[0]).toMatchObject({ qty: 2, unitPriceCents: 2999, lineTotalCents: 5997 }) // 2999 is the average of 5997 / 2 (ADR-028)
   })
 })
 
@@ -235,6 +235,6 @@ describe('paid orders show as paid and no longer payable', () => {
     expect(order.status).toBe('paid')
     expect(order.isPayable).toBe(false)
     expect(order.paidAt).toBeTruthy()
-    expect(order.amountCents).toBe(5998)
+    expect(order.amountCents).toBe(5997)
   })
 })

@@ -14,6 +14,7 @@
 // LAYOUT: mobile-first single centered column. One card whose tone follows the phase,
 // one h1 (focused on every phase change so screen readers hear the new state), one
 // large total and one full-width pay button.
+import { isAverageUnitPrice } from '../../utils/money'
 import { onMounted, ref, computed, watch, watchEffect, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
@@ -173,7 +174,7 @@ onMounted(load)
           <li v-for="(item, i) in view.items" :key="i" class="item">
             <div class="item-main">
               <span class="item-name">{{ item.name }}</span>
-              <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> each</span>
+              <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> {{ isAverageUnitPrice(item) ? 'avg each' : 'each' }}</span>
             </div>
             <Money class="item-total" :cents="item.lineTotalCents" />
           </li>
@@ -222,7 +223,7 @@ onMounted(load)
           <li v-for="(item, i) in view.items" :key="i" class="item">
             <div class="item-main">
               <span class="item-name">{{ item.name }}</span>
-              <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> each</span>
+              <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> {{ isAverageUnitPrice(item) ? 'avg each' : 'each' }}</span>
             </div>
             <Money class="item-total" :cents="item.lineTotalCents" />
           </li>

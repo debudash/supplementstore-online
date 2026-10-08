@@ -122,9 +122,9 @@ async function payNewOrder(world: ProviderWorld, lines: Line[]): Promise<string>
 // The canonical EVAL-01 and EVAL-02 order shapes on the seed SKUs.
 const EVAL01: Line[] = [
   { sku: SKU_MAG, qty: 2, price: 2999 }, // margin 3053, fee 45
-  { sku: SKU_VITD, qty: 1, price: 2499 } // margin 1355, fee 19
+  { sku: SKU_VITD, qty: 1, price: 2500 } // markup 1356: with MAG x2 the order rounds once to 8497 (EVAL-01)
 ] // subtotal 8497, cogs 4025, fee 64, margin 4408
-const EVAL02: Line[] = [{ sku: SKU_OMEGA, qty: 1, price: 4999 }] // fee 37, margin 2682
+const EVAL02: Line[] = [{ sku: SKU_OMEGA, qty: 1, price: 4999 }] // fee 38, margin 2681 (ADR-028: fee rounds up)
 
 /** Refund an order through the REAL T5 refund path (Cerbo Admin route). */
 async function refundViaAdmin(orderId: string, reasonCode = 'patient_request'): Promise<void> {
@@ -155,19 +155,19 @@ describe('FR-10 provider sales dashboard (figures from the ledger)', () => {
   it('reports GMV, platform fees and provider net margin from PAYMENT journals (EVAL-09 inputs)', async () => {
     const world = await makeProviderWorld()
     await payNewOrder(world, EVAL01) // GMV 8497, fee 64, margin 4408
-    await payNewOrder(world, EVAL02) // GMV 4999, fee 37, margin 2682
+    await payNewOrder(world, EVAL02) // GMV 4999, fee 38, margin 2681
 
     const res = await asUser(world.userId).get('/api/reports/sales')
     expect(res.status).toBe(200)
 
     // GMV = sum of PAYMENT CASH_CLEARING debits (EVAL-09: Total GMV 13496).
     expect(res.body.gmvCents).toBe(13496)
-    // Platform fee revenue = -(sum PLATFORM_FEE_REVENUE) (EVAL-09: Fee revenue 101).
-    expect(res.body.platformFeeCents).toBe(101)
+    // Platform fee revenue = -(sum PLATFORM_FEE_REVENUE) (EVAL-09: Fee revenue 64 + 38).
+    expect(res.body.platformFeeCents).toBe(102)
     // No refunds until T5: refunded 0, settled == GMV, net margin = both orders' margin.
     expect(res.body.refundedGmvCents).toBe(0)
     expect(res.body.settledGmvCents).toBe(13496)
-    expect(res.body.providerNetMarginCents).toBe(4408 + 2682)
+    expect(res.body.providerNetMarginCents).toBe(4408 + 2681)
 
     // Units sold by SKU (qty, from paid orders).
     const units = Object.fromEntries(
@@ -185,7 +185,7 @@ describe('FR-10 provider sales dashboard (figures from the ledger)', () => {
   it('EVAL-09 (sales side): a real refund moves GMV from settled to refunded', async () => {
     const world = await makeProviderWorld()
     const refunded = await payNewOrder(world, EVAL01) // GMV 8497, margin 4408
-    await payNewOrder(world, EVAL02) // GMV 4999, margin 2682 (kept)
+    await payNewOrder(world, EVAL02) // GMV 4999, margin 2681 (kept)
     await refundViaAdmin(refunded) // EVAL-01 refunded through the REAL T5 path
 
     const res = await asUser(world.userId).get('/api/reports/sales')
@@ -194,8 +194,8 @@ describe('FR-10 provider sales dashboard (figures from the ledger)', () => {
     expect(res.body.gmvCents).toBe(13496) // Total GMV unchanged by the refund
     expect(res.body.refundedGmvCents).toBe(8497) // Refunded GMV
     expect(res.body.settledGmvCents).toBe(4999) // Settled GMV
-    expect(res.body.platformFeeCents).toBe(101) // fee revenue incl. retained fee (64 + 37)
-    expect(res.body.providerNetMarginCents).toBe(2682) // only the kept (EVAL-02) order
+    expect(res.body.platformFeeCents).toBe(102) // fee revenue incl. retained fee (64 + 38)
+    expect(res.body.providerNetMarginCents).toBe(2681) // only the kept (EVAL-02) order
   })
 
   it('ownership: a provider never sees another provider\'s figures (RT-01 style)', async () => {
@@ -227,10 +227,10 @@ describe('FR-10 provider sales dashboard (figures from the ledger)', () => {
 })
 
 describe('FR-11 provider payable report (EVAL-09b, verified via the REAL refund path)', () => {
-  it('EVAL-09b: credits 7090, debits 4472, closing 2618 after refunding EVAL-01', async () => {
+  it('EVAL-09b: credits 7089, debits 4472, closing 2617 after refunding EVAL-01', async () => {
     const world = await makeProviderWorld()
     const refunded = await payNewOrder(world, EVAL01) // PROVIDER_PAYABLE -4408
-    await payNewOrder(world, EVAL02) // PROVIDER_PAYABLE -2682
+    await payNewOrder(world, EVAL02) // PROVIDER_PAYABLE -2681
     // Refund EVAL-01 through the REAL T5 refund service (not a hand-written journal):
     // PROVIDER_PAYABLE +4408 (margin_reversal) +64 (fee_retention) posted this period.
     await refundViaAdmin(refunded)
@@ -238,10 +238,10 @@ describe('FR-11 provider payable report (EVAL-09b, verified via the REAL refund 
     const res = await asUser(world.userId).get('/api/reports/payables')
     expect(res.status).toBe(200)
     // EVAL-09b exact expected values from docs/EVALS.md.
-    expect(res.body.creditsCents).toBe(7090) // 4408 + 2682 margins earned
+    expect(res.body.creditsCents).toBe(7089) // 4408 + 2681 margins earned
     expect(res.body.debitsCents).toBe(4472) // 4408 margin reversal + 64 fee retention
     expect(res.body.openingCents).toBe(0)
-    expect(res.body.closingCents).toBe(2618) // 7090 - 4472
+    expect(res.body.closingCents).toBe(2617) // 7089 - 4472
 
     // ADR-012: the refunded order nets to -(fee) = -64 for the provider (provider eats
     // the retained platform fee), proving the fee retention IS reflected in payables.
@@ -264,14 +264,14 @@ describe('FR-11 provider payable report (EVAL-09b, verified via the REAL refund 
 
     // After fulfillment (written off, Cerbo bears COGS): the payable debit is UNCHANGED
     // (fulfillment only affects inventory/write-off, not PROVIDER_PAYABLE). EVAL-02
-    // refund debits 2682 + 37 = 2719.
+    // refund debits 2681 + 38 = 2719.
     const b = await makeProviderWorld()
     const afterFulfil = await payNewOrder(b, EVAL02)
     await fulfillViaAdmin(afterFulfil)
     await refundViaAdmin(afterFulfil, 'damaged')
     const bRes = await asUser(b.userId).get('/api/reports/payables')
-    expect(bRes.body.debitsCents).toBe(2719) // margin 2682 + fee 37
-    expect(bRes.body.closingCents).toBe(-37) // credits 2682 - debits 2719 (provider eats the fee)
+    expect(bRes.body.debitsCents).toBe(2719) // margin 2681 + fee 38
+    expect(bRes.body.closingCents).toBe(-38) // credits 2681 - debits 2719 (provider eats the fee)
   })
 
   it('opening balance carries the prior-period payable forward', async () => {

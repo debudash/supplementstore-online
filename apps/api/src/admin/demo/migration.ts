@@ -3,7 +3,7 @@
 // THE POINT (ADR-019, and the #1 thing not to get wrong): synthetic demo orders must be
 // generated through the REAL split and posting code so they prove the same invariants a
 // real order does. We therefore:
-//   - compute every amount with @cerbo/money's split() (money rule 2), never by hand;
+//   - compute every amount with @cerbo/money's priceOrder() (money rule 2), never by hand;
 //   - post the money with the REAL ledger postPaymentJournal() (T4), the same function
 //     the pay flow uses - we do NOT write journals/entries directly;
 //   - flag every row is_synthetic = true so metrics exclude it by default;
@@ -19,7 +19,7 @@
 // migration %) grows toward the present - the "ramping share of baseline" of FR-14 AC3.
 import { randomUUID } from 'node:crypto'
 import type { Knex } from 'knex'
-import { split, priceFromMarkupCents, DEFAULT_FEE_BPS, type SplitLineInput } from '@cerbo/money'
+import { priceOrder, DEFAULT_FEE_BPS, type MarkupLineInput } from '@cerbo/money'
 import { postPaymentJournal } from '../../ledger'
 import type { Clock } from '../../seams/types'
 import { SystemClock } from '../../seams'
@@ -42,10 +42,10 @@ interface GenProvider {
 function buildLines(
   products: ProductRow[],
   rng: { int: (a: number, b: number) => number; pick: <T>(x: T[]) => T }
-): Array<SplitLineInput & { sku: string; unitCogsCents: number; markupCents: number }> {
+): Array<MarkupLineInput & { sku: string }> {
   const count = Math.min(rng.int(1, 3), products.length)
   const chosen = new Set<string>()
-  const lines: Array<SplitLineInput & { sku: string; unitCogsCents: number; markupCents: number }> = []
+  const lines: Array<MarkupLineInput & { sku: string }> = []
   let position = 1
   while (lines.length < count) {
     const product = rng.pick(products)
@@ -54,8 +54,7 @@ function buildLines(
     const qty = rng.int(1, 4)
     // A $4-$15 per-unit markup, priced the same way a provider's line is (ADR-028).
     const markupCents = rng.int(400, 1500)
-    const unitPriceCents = priceFromMarkupCents(product.unit_cogs_cents, markupCents, DEFAULT_FEE_BPS)
-    lines.push({ position: position++, sku: product.sku, qty, unitPriceCents, unitCogsCents: product.unit_cogs_cents, markupCents })
+    lines.push({ position: position++, sku: product.sku, qty, unitCogsCents: product.unit_cogs_cents, markupCents })
   }
   return lines
 }
@@ -126,9 +125,9 @@ async function generateOneOrder(
   rng: ReturnType<typeof makeRng>
 ): Promise<{ subtotalCents: number }> {
   const lineInputs = buildLines(products, rng)
-  // REAL split math (money rule 2). Every line is priced from a markup (ADR-028), which
-  // always covers the fee, so this never throws MARGIN_NEGATIVE for synthetic data.
-  const result = split(lineInputs, 75)
+  // REAL pricing (money rule 2): the order is priced from markups and rounded once (ADR-028),
+  // exactly as a provider's order is.
+  const result = priceOrder(lineInputs, DEFAULT_FEE_BPS)
   const bySplitPosition = new Map(result.lines.map((l) => [l.position, l]))
 
   return db.transaction(async (trx) => {
@@ -163,7 +162,7 @@ async function generateOneOrder(
         position: input.position,
         sku: input.sku,
         qty: input.qty,
-        unit_price_cents: input.unitPriceCents,
+        unit_price_cents: s.unitPriceCents,
         unit_cogs_cents: input.unitCogsCents,
         unit_markup_cents: input.markupCents,
         line_total_cents: s.total,

@@ -8,14 +8,18 @@ module may recompute these values.
 ## Rules enforced (see docs/DECISIONS.md)
 
 - **ADR-001** platform fee = 0.75% (75 bps) of the patient-paid subtotal.
-- **ADR-003** integer cents everywhere; fee computed once per order, half-up;
-  allocated to lines by largest remainder (never per-line rounding).
-- **ADR-004** line margin after its allocated fee must be `>= 0`; zero allowed.
-- **ADR-028** providers enter a per-unit dollar markup; the unit price is derived as
-  `ceil((unitCogs + max(markup, 1)) * 10000 / (10000 - feeBps))` (patient pays COGS +
-  markup + fee). A $0 markup is priced as 1 cent of headroom so fee allocation never
-  pushes a line negative; order margin is always `>= sum(qty x markup)`.
-  (Supersedes ADR-005, margin %.)
+- **ADR-003** integer cents everywhere; fee computed once per order, rounded up
+  (amended by ADR-028); amounts handed to lines by largest remainder (never per-line
+  rounding).
+- **ADR-004** line margin after its fee must be `>= 0`; zero allowed.
+- **ADR-028** providers enter a per-unit dollar markup; `priceOrder` rounds the whole
+  order ONCE: `need = sum(qty x (unitCogs + markup))`,
+  `subtotal = ceil(need * 10000 / (10000 - feeBps))`, `fee = orderFee(subtotal)` (rounded
+  up). Both are rounded up, so `subtotal - need = fee` exactly: no rounding is left over
+  and every line's margin is exactly `qty x markup` (a $0 markup nets exactly 0). Line
+  totals split the subtotal by largest remainder; line fee = total - cogs - qty x markup.
+  (Supersedes ADR-005, margin %.) Orders with lines priced before ADR-028 keep the
+  price-based `split()`.
 - **ADR-012 / ADR-014** whole-order refund returns 100% to the patient; the
   platform fee is retained and charged to the provider.
 
@@ -23,10 +27,10 @@ module may recompute these values.
 
 ```ts
 import {
-  orderFee,          // (subtotalCents, feeBps=75) -> fee cents, half-up, once per order
+  orderFee,          // (subtotalCents, feeBps=75) -> fee cents, rounded up, once per order
   allocateFee,       // (lines, orderFeeCents) -> per-line fees, largest remainder
-  split,             // (lines, feeBps=75) -> { subtotal, cogs, fee, margin, lines[] }
-  priceFromMarkupCents, // (unitCogsCents, markupCents 0..100000, feeBps) -> unit price cents
+  split,             // (lines, feeBps=75) -> { subtotal, cogs, fee, margin, lines[] } (price-based, legacy)
+  priceOrder,        // (markup lines, feeBps=75) -> { subtotal, cogs, fee, margin, lines[] } (ADR-028)
   MAX_MARKUP_CENTS,  // 100000 ($1,000)
   refund,            // (orderSplit) -> { patientAmount, cogsReturned, providerDebit, feeRetained }
   MoneyError,        // code: "INVALID_INPUT" (400) | "MARGIN_NEGATIVE" (422)

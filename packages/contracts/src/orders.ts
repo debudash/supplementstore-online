@@ -63,9 +63,8 @@ export interface PricePreview {
   lineCogsCents: number
   lineFeeCents: number
   lineMarginCents: number
-  /** qty x markup, and the price rounding that goes to the provider: margin = markup + rounding. */
-  lineMarkupCents: number
-  lineRoundingCents: number
+  /** True when lineTotalCents / qty is not a whole cent (unitPriceCents is then the average). */
+  unitPriceIsAverage: boolean
 }
 
 /** One line in a quote/order response, with the full provider-facing economics. */
@@ -79,10 +78,9 @@ export interface OrderLineView {
   unitCogsCents: number
   /** The provider's per-unit markup (ADR-028); null on lines priced before it. */
   unitMarkupCents: number | null
-  /** qty x markup and the price rounding that, with COGS and fee, make up the line total
-   *  (ADR-028). Present on a quote and a sent order; null on lines priced before ADR-028. */
-  lineMarkupCents?: number | null
-  lineRoundingCents?: number | null
+  /** True when the line total is not qty x a whole-cent price (the order total is rounded
+   *  once, ADR-028), so unitPriceCents is an average for display; the line total is charged. */
+  unitPriceIsAverage: boolean
   /** Computed split for the line (null fields until the order is sent). */
   lineTotalCents: number
   lineCogsCents: number
@@ -97,9 +95,6 @@ export interface OrderTotals {
   cogsCents: number
   feeCents: number
   marginCents: number
-  /** marginCents = markupCents + roundingCents (ADR-028); null if a line has no markup. */
-  markupCents?: number | null
-  roundingCents?: number | null
 }
 
 /** The live split preview for a draft (GET /api/orders/:id/quote). */

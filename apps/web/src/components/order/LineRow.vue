@@ -106,6 +106,12 @@ function openMarkup(): void {
     </td>
     <td data-label="Unit price" class="num">
       <span class="money">{{ formatCents(line.unitPriceCents) }}</span>
+      <span
+        v-if="line.unitPriceIsAverage"
+        class="avg"
+        data-test="unit-avg"
+        title="The order total is rounded once, so this line's total is not an exact multiple of a whole-cent price. The line total is what is charged."
+      >avg</span>
       <span v-if="line.unitMarkupCents !== null" class="markup" data-test="line-markup">incl. your markup {{ formatCents(line.unitMarkupCents) }}</span>
       <button v-if="!editingMarkup" type="button" class="btn-link change" :disabled="busy" :aria-label="`Change markup for ${line.name}`" data-testid="change-markup" @click="openMarkup">Change markup</button>
     </td>
@@ -114,18 +120,12 @@ function openMarkup(): void {
       <span class="cogs-head"><DemoBadge reason="COGS is Cerbo's wholesale cost. A prescribing doctor would not normally see it; shown here to make the per-line economics demonstrable." /></span>
       <span class="money" data-test="line-cogs">{{ formatCents(line.lineCogsCents) }}</span>
     </td>
-    <td data-label="Fee" class="num"><span class="money">{{ formatCents(line.lineFeeCents) }}</span></td>
-    <td data-label="Net margin" class="num">
-      <Money :cents="line.lineMarginCents" strong data-test="line-margin" />
-      <span
-        v-if="line.lineMarkupCents !== null && line.lineMarkupCents !== undefined"
-        class="markup"
-        data-test="line-net-parts"
-      >markup {{ formatCents(line.lineMarkupCents) }} + rounding {{ formatCents(line.lineRoundingCents ?? 0) }}</span>
-    </td>
+    <!-- The per-line fee is stored and audited but not shown here (owner decision); the
+         order's fee is shown once in the summary. -->
+    <td data-label="Net margin" class="num"><Money :cents="line.lineMarginCents" strong data-test="line-margin" /></td>
   </tr>
   <tr v-if="editingMarkup" class="markup-row">
-    <td colspan="7">
+    <td colspan="6">
       <form class="markup-form" @submit.prevent="applyMarkup">
         <label :for="`m-${line.id}`">Your markup per unit for {{ line.name }}</label>
         <span class="dollar">
@@ -139,7 +139,7 @@ function openMarkup(): void {
     </td>
   </tr>
   <tr v-if="inputError || error" class="error-row">
-    <td :id="errId" colspan="7">
+    <td :id="errId" colspan="6">
       <span v-if="inputError" class="inline-error" role="alert">{{ inputError }}</span>
       <span v-if="error" class="inline-error" role="alert" data-test="line-error">{{ error }}</span>
     </td>
@@ -167,6 +167,15 @@ function openMarkup(): void {
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+}
+.avg {
+  margin-left: var(--space-1);
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  cursor: help;
 }
 .markup {
   display: block;

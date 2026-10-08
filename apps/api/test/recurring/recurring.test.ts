@@ -119,7 +119,7 @@ async function authorize(token: string): Promise<void> {
 const MAG_SCHEDULE: Line[] = [{ sku: SKU_MAG, qty: 1, markupCents: markupFor(SKU_MAG, 2999) }]
 
 describe('EVAL-11 happy path: authorized cycle pays, price from fresh COGS + markup', () => {
-  it('produces a recurring_cycle child order, paid, fee 22, margin 1527, MAG on_hand -1', async () => {
+  it('produces a recurring_cycle child order, paid, fee 23, margin 1526 (the markup), MAG on_hand -1', async () => {
     const { id, token } = await createSchedule(MAG_SCHEDULE)
     await authorize(token)
 
@@ -133,8 +133,9 @@ describe('EVAL-11 happy path: authorized cycle pays, price from fresh COGS + mar
     expect(order.kind).toBe('recurring_cycle')
     expect(order.status).toBe('paid')
     expect(order.subtotal_cents).toBe(2999)
-    expect(order.fee_cents).toBe(22)
-    expect(order.margin_cents).toBe(1527)
+    // ADR-028: 2999 x 0.75% = 22.49 -> 23 (fee rounded up); the provider nets exactly 1526.
+    expect(order.fee_cents).toBe(23)
+    expect(order.margin_cents).toBe(1526)
     expect(order.cogs_cents).toBe(1450)
 
     // Stock: recurring sale decrements on_hand only (reserved untouched).
@@ -165,8 +166,8 @@ describe('EVAL-11 happy path: authorized cycle pays, price from fresh COGS + mar
     const sumBy = (a: string) => entries.filter((e) => e.account === a).reduce((s, e) => s + e.amount_cents, 0)
     expect(sumBy('CASH_CLEARING')).toBe(2999)
     expect(sumBy('COGS_RECOVERY')).toBe(-1450)
-    expect(sumBy('PROVIDER_PAYABLE')).toBe(-1527)
-    expect(sumBy('PLATFORM_FEE_REVENUE')).toBe(-22)
+    expect(sumBy('PROVIDER_PAYABLE')).toBe(-1526)
+    expect(sumBy('PLATFORM_FEE_REVENUE')).toBe(-23)
     expect(entries.reduce((s, e) => s + e.amount_cents, 0)).toBe(0)
   })
 })
@@ -181,11 +182,11 @@ describe('ADR-028: a cycle prices from the CURRENT COGS + the schedule markup at
     const run = await asUser(PROV_USER).post(`/api/schedules/${id}/run`).send({})
     expect(run.body.cycle.status).toBe('paid')
     const order = await db('orders').where({ schedule_id: id }).first()
-    // (1550 + 1526) * 10000 / 9925 = 3099.24 -> 3100; fee floor((3100*75+5000)/10000) = 23;
-    // margin 3100 - 1550 - 23 = 1527 (the markup, unchanged by the cost rise).
+    // (1550 + 1526) * 10000 / 9925 = 3099.24 -> 3100; fee 0.75% = 23.25 -> 24 (rounded up);
+    // margin 3100 - 1550 - 24 = 1526: exactly the markup, unchanged by the cost rise.
     expect(order.subtotal_cents).toBe(3100)
-    expect(order.fee_cents).toBe(23)
-    expect(order.margin_cents).toBe(1527)
+    expect(order.fee_cents).toBe(24)
+    expect(order.margin_cents).toBe(1526)
     expect(order.cogs_cents).toBe(1550)
     const line = await db('order_lines').where({ order_id: order.id }).first()
     expect(line.unit_markup_cents).toBe(1526)
@@ -228,7 +229,7 @@ describe('EVAL-11c: an unauthorized schedule parks the cycle on_hold', () => {
 })
 
 describe('EVAL-11d: a COGS increase passes through to the patient, never into a loss (ADR-028)', () => {
-  it('raise MAG cogs to 3000 -> the cycle pays at 4561 and the provider still nets the 1527 markup', async () => {
+  it('raise MAG cogs to 3000 -> the cycle pays at 4561 and the provider still nets the 1526 markup', async () => {
     const { id, token } = await createSchedule(MAG_SCHEDULE)
     await authorize(token)
 
@@ -238,10 +239,11 @@ describe('EVAL-11d: a COGS increase passes through to the patient, never into a 
     expect(run.body.cycle.status).toBe('paid')
 
     const order = await db('orders').where({ schedule_id: id }).first()
-    // (3000 + 1526) * 10000 / 9925 = 4560.20 -> 4561; fee 34; margin 4561 - 3000 - 34 = 1527.
+    // (3000 + 1526) * 10000 / 9925 = 4560.20 -> 4561; fee 0.75% = 34.21 -> 35; margin
+    // 4561 - 3000 - 35 = 1526: exactly the markup.
     expect(order.subtotal_cents).toBe(4561)
-    expect(order.fee_cents).toBe(34)
-    expect(order.margin_cents).toBe(1527)
+    expect(order.fee_cents).toBe(35)
+    expect(order.margin_cents).toBe(1526)
     expect(await db('journals').where({ order_id: order.id, type: 'PAYMENT' }).then((r) => r.length)).toBe(1)
   })
 })

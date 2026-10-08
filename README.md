@@ -127,26 +127,30 @@ ever lost to rounding.
 - **Integer cents only.** Every amount is an integer number of cents. No floats, no
   `toFixed`, no decimal strings parsed with float math. `$29.99` is stored as `2999`.
 - **One fee per order, computed once.** The platform fee is 0.75% (75 basis points) of
-  the order subtotal, rounded half-up, computed a single time at the order level:
-  `fee = floor((subtotal * 75 + 5000) / 10000)`. For a subtotal of 8497 cents the fee is
-  64 cents.
-- **The fee is split back down to the lines by largest remainder.** Each line gets a
-  whole-cent share of the order fee, and the line shares always add back up to the order
-  fee exactly (no drift). Ties are broken by line position. For the worked example above
-  the two lines get 45 and 19 cents, which sum to 64.
+  the order subtotal, rounded UP to the cent, computed a single time at the order level:
+  `fee = ceil(subtotal * 75 / 10000)`. It is never below 0.75% and at most 1 cent above.
+  For a subtotal of 8497 cents the fee is 64 cents.
+- **The order total is split back down to the lines by largest remainder.** Each line gets
+  a whole-cent share of the subtotal, so the line totals always add back up to the order
+  total exactly (no drift); ties are broken by line position. Each line's fee is then
+  what is left after its cost and markup, within 1 cent of its exact 0.75%, and the line
+  fees add up to the order fee. For the 8497-cent order (Magnesium x2 + Vitamin D3 x1) the two lines get 45 and 19
+  cents, which sum to 64. Line fees are stored and shown in the audit; the provider's
+  order builder shows the order fee once, in the Order summary.
 - **The invariant that must always hold:** for every order and every line,
   `cogs + fee + margin = total`, and `margin >= 0`. A line whose margin after its fee
   would go negative is rejected with `MARGIN_NEGATIVE` before anything is saved. The
   provider never unknowingly pays to sell (and a markup-priced line can never reach that
   floor - see the next point).
 - **The provider types a dollar markup per unit; the server derives the price (ADR-028).**
-  The patient pays COGS + markup + the 0.75% fee, so
-  `price = ceil((cogs + max(markup, 1)) * 10000 / (10000 - 75))`. Rounding up means the
-  provider keeps what they typed: across an order, net margin is always >= the sum of
-  qty x markup (one line can show a cent less after fee allocation). A $0 markup is priced
-  as 1 cent of headroom, so a $0 line nets 0 or 1 cent and never goes negative. The price
-  and the markup are both stored on the line; the markup is what the provider and the order
-  audit see.
+  The patient pays COGS + markup + the 0.75% fee, and the order is rounded ONCE:
+  `need = sum(qty x (cogs + markup))`, `subtotal = ceil(need * 10000 / (10000 - 75))`.
+  Because the subtotal and the fee are both rounded up, `subtotal - need = fee` exactly:
+  nothing is left over as rounding, and the provider nets exactly qty x markup on every
+  line (a $0 markup nets exactly $0.00). A line whose total does not divide evenly by its
+  quantity shows an average unit price ("avg"); the line total is what is charged. The
+  line total, line fee and markup are all stored on the line; the markup is what the
+  provider and the order audit see.
 - **Snapshots, not live recomputation.** A draft re-derives its prices from the current
   COGS + markup. When an order is sent, the unit COGS is snapshotted and the price is
   re-derived from it and stored on the lines. A paid order is immutable. If catalog costs change later,
@@ -183,9 +187,10 @@ the product:
   markup + fee), so the provider keeps their markup; in the ledger it is still carved out of
   the line total before the provider's margin. The patient never sees a fee line. This matches the owner's headline metric (GMV x 75 bps)
   and keeps the patient experience clean.
-- **ADR-003 - Rounding and allocation.** Fee computed once per order, half-up, then
-  allocated to lines by largest remainder. Per-line rounding would drift by a cent or two;
-  this guarantees line fees sum exactly to the order fee.
+- **ADR-003 - Rounding and allocation.** Fee computed once per order, rounded up (as
+  amended by ADR-028; the order total is also rounded once), and line amounts are handed
+  out by largest remainder. Per-line rounding would drift by a cent or two; this
+  guarantees line fees sum exactly to the order fee.
 - **ADR-004 - Margin floor.** A line's margin after its allocated fee must be >= 0 (zero is
   allowed). This prevents a provider from unknowingly selling at a loss.
 - **ADR-005 - Price is canonical.** *Superseded by ADR-028:* providers no longer enter a price

@@ -66,28 +66,27 @@ describe('catalog (ADR-028: no list price)', () => {
 })
 
 describe('price preview (ADR-028)', () => {
-  it('derives COGS + markup + fee for a quantity, with the split from the server', async () => {
+  it('derives COGS + markup + fee for a quantity, rounded once (ADR-028)', async () => {
     const res = await asProvider('/api/products/MAG-GLY-120/price-preview?markupCents=1000&qty=3')
     expect(res.status).toBe(200)
-    // 2469 x 3 = 7407; fee half-up(7407 x 0.0075) = 56; margin 7407 - 4350 - 56 = 3001.
+    // need 3 x (1450 + 1000) = 7350 -> 7350 / 0.9925 = 7405.54 -> 7406; fee 0.75% = 55.5 -> 56;
+    // the provider nets exactly 3 x 1000. 7406 / 3 is not a whole cent: 2469 is the average.
     expect(res.body).toEqual({
       sku: 'MAG-GLY-120',
       markupCents: 1000,
       unitPriceCents: 2469,
       qty: 3,
-      lineTotalCents: 7407,
+      lineTotalCents: 7406,
       lineCogsCents: 4350,
       lineFeeCents: 56,
-      lineMarginCents: 3001,
-      // margin 3001 = markup 3 x 1000 + 1 cent of price rounding (ADR-028)
-      lineMarkupCents: 3000,
-      lineRoundingCents: 1
+      lineMarginCents: 3000,
+      unitPriceIsAverage: true
     })
   })
 
-  it('markup 0 previews cost + fee with 1 cent of rounding headroom', async () => {
+  it('markup 0 previews cost + fee and nets exactly 0', async () => {
     const res = await asProvider('/api/products/MAG-GLY-120/price-preview?markupCents=0')
-    expect(res.body).toMatchObject({ unitPriceCents: 1462, lineFeeCents: 11, lineMarginCents: 1, lineMarkupCents: 0, lineRoundingCents: 1 })
+    expect(res.body).toMatchObject({ unitPriceCents: 1461, lineFeeCents: 11, lineMarginCents: 0, unitPriceIsAverage: false })
   })
 
   it.each([
