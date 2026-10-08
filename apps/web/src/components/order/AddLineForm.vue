@@ -144,12 +144,17 @@ function submit(): void {
             data-test="markup-input"
           />
         </span>
-        <span v-if="markupError" class="err">{{ markupError }}</span>
-        <MarkupPreview v-else :sku="sku || null" :markup-input="markupInput" :preview="previewPrice" />
       </div>
 
       <div class="submit">
         <button type="submit" class="btn-primary" :disabled="busy" data-testid="add-submit">Add to order</button>
+      </div>
+
+      <!-- Full-width row under the markup + button, so the button stays level with the
+           input however long the preview text is. -->
+      <div class="below">
+        <span v-if="markupError" class="err">{{ markupError }}</span>
+        <MarkupPreview v-else :sku="sku || null" :markup-input="markupInput" :preview="previewPrice" />
       </div>
     </div>
 
@@ -237,10 +242,20 @@ function submit(): void {
   align-self: flex-start;
 }
 .submit {
+  /* Row 2: markup (column 1), button (column 3), bottom edges level with the input. */
+  grid-column: 3;
   align-self: end;
 }
 .submit button {
   width: 100%;
+  min-height: 2.5rem;
+}
+.below {
+  grid-column: 1 / -1;
+  margin-top: calc(-1 * var(--space-2));
+}
+.below:empty {
+  display: none;
 }
 .err {
   color: var(--danger);
@@ -266,8 +281,17 @@ function submit(): void {
   .grid {
     grid-template-columns: 1fr;
   }
-  .product {
+  .product,
+  .submit,
+  .below {
     grid-column: auto;
+  }
+  .below {
+    margin-top: 0;
+  }
+  /* One column: the patient-price preview sits under the markup, the button last. */
+  .submit {
+    order: 1;
   }
 }
 </style>
