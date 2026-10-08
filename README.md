@@ -13,15 +13,16 @@ integration behind a clearly marked stub.
 Live demo: https://cerbo-api-production.up.railway.app
 Health endpoint: https://cerbo-api-production.up.railway.app/api/health
 
-> Status note (2026-10-06): every task in the plan is merged, including all of Tier 3.
+> Status note (2026-10-08, submission baseline `submission-2026-10-08`): every task in the
+> plan is merged, including all of Tier 3, plus the owner's post-plan changes: per-unit dollar
+> markup pricing with the fee rounded once per order (ADR-028), the leading-indicator trend
+> and Reset demo story, and the DEMO lab-suggestions showcase (ADR-029).
 > Tier 3 (recurring orders, admin metrics and demo data, admin inventory and operations)
 > was initially cut for time and then reinstated and completed when the build finished
 > early, so the cut list is now empty. The eval and red-team suite covers every id in the
 > specification - 43 pass, 0 fail, 0 cut - and those counts come from the CI-run suite,
-> not a local claim. See "Build status" at the bottom. The final UI follow-up (styling,
-> DEMO badges, pay-link recovery, My Orders) has now merged too; the one caveat is that the
-> author has not clicked through every styled screen, so the owner confirms visual polish at
-> gate G5.
+> not a local claim. See "Build status" at the bottom, and "Limitations" for what is
+> known not to work.
 
 ## The business problem
 
@@ -461,7 +462,7 @@ Several failures passed CI and were only caught by independently exercising the 
 
 ## Build status
 
-As of 2026-10-06, every task in the plan is merged to `main`: T0 (scaffold, CI, seams, auth
+As of 2026-10-08 (tag `submission-2026-10-08`), every task in the plan is merged to `main`: T0 (scaffold, CI, seams, auth
 stub), T1 (`packages/money`, gate G1), T2 (schema, migrations, DB protections, seed, gate G2),
 T3 (order lifecycle, inventory, `GET /api/patients`), T4 (patient payment, per-line ledger
 posting, audit, gate G3), T5 (refunds and fulfillment, gate G4), T6 (provider UI), T7 (patient
@@ -470,16 +471,19 @@ orders), T10 (Cerbo Admin metrics, baseline import, demo data), T11 (Cerbo Admin
 operations), T12 (Railway deploy), T13 (end-to-end eval and red-team suite), and
 `docs/DIAGRAMS.md`.
 
-The final UI follow-up (styling pass, DEMO badges on the admin views, the pay-link copy control,
-and the My Orders list rendering real data) has merged; see the scope note under "User interface"
-for the one remaining caveat (visual polish is owner-confirmed at gate G5, not author-verified).
+After the plan, the owner made these changes, each merged through CI and deployed: per-unit
+dollar markup pricing with the 0.75% fee rounded up once per order (ADR-028; the margin-percent
+model, admin list price and profit simulator were removed), the migration trend and Reset demo
+story on the Metrics page, the provider dashboard by payment date with an "Include demo data"
+switch, past-dated seed orders, and the DEMO lab-suggestions block (ADR-029). The UI follow-up
+(styling, DEMO badges, pay-link copy control, My Orders) is merged, and the owner reviewed the
+screens during these final iterations.
 
-The setup and run commands in this README were verified on a clean checkout on 2026-10-06:
-`npm install`, `npm run db:migrate`, `npm run db:seed` (seeds exactly the 5-SKU catalog, 2
-practices, 2 providers, 2 patients, 5 users), `npm run typecheck`, `npm run lint`, `npm run
-build`, and `npm test` (101 api and unit tests plus 24 web tests) all passed. `docker compose up
--d db` is the documented way to start Postgres. (That verification run predates the final Tier 3
-merges; the eval results below are the authoritative post-merge check.)
+The `main` pipeline for the submission commit (typecheck, lint, build, unit and API tests, then
+the e2e suite against real Postgres, then the Railway deploy with a health check) passed on
+2026-10-08: `packages/money` 40 tests, `apps/api` 210, `apps/web` 122, and the e2e suite 43. The
+setup and run commands in this README were verified on a clean checkout on 2026-10-06, and
+`scripts/local-check.ps1` reruns the same checks locally before every push.
 
 ### Eval and red-team results (CI-verified)
 
@@ -519,16 +523,37 @@ at a glance, so no demo-only control is misread as a design flaw.
 
 Scope note: the styling pass, the DEMO badges on the admin views, the pay-link copy control, and
 the My Orders list rendering real data have all merged (the Orders list and the order audit view
-now render a pay-link copy control, and My Orders fetches `GET /api/patient/orders`). The caveat
-is only that the author of this README has not personally clicked through every styled screen, so
-treat the visual polish as merged but owner-confirmed at gate G5 rather than author-verified.
+now render a pay-link copy control, and My Orders fetches `GET /api/patient/orders`). The owner
+reviewed the screens during the final iterations (2026-10-07 to 2026-10-08).
+
+## Limitations
+
+Known limits of this submission, beyond the stubs and the out-of-scope list above:
+
+- **One environment.** Railway runs production only, with `DEMO_MODE=true` so the demo tools
+  work. There is no staging; merging to `main` deploys. Real use would split staging and
+  production and turn demo mode off.
+- **No scheduler.** Recurring cycles run when the provider clicks "Run cycle now", and
+  reservation expiry runs from an admin button. `POST /api/admin/jobs/run-due-schedules` is
+  registered but returns 501: the sweep function exists and nothing calls it yet.
+- **Whole-order refunds only.** The ledger and the stored per-line fees support line-level
+  refunds; the UI and posting path for them are not built.
+- **Demo-grade guards on a few admin tools.** Restock is not gated by demo mode (it stands in for
+  procurement), and the payables API accepts the `includeSynthetic` flag even though the
+  Payables page always shows real orders only.
+- **CI runs on the owner's laptop.** The GitLab runner is a Docker container on one machine, so
+  a sleeping laptop stalls a pipeline (the job is retried, not failed).
+- **Simulated lab panels.** The lab-suggestions block (ADR-029) uses hard-coded panels for the
+  two seeded patients; it is a showcase, not clinical decision support.
+- **Metrics on demo volumes.** The migration indicator and fee break-even are computed correctly
+  but on synthetic data; the baseline comes from a CSV import, not a real marketplace feed.
 
 ## Repository map
 
 - `packages/money` - pure integer split math (fee, allocation, margin, refund, pricing).
 - `packages/contracts` - shared request/response types.
 - `apps/api` - Express API, Knex, Postgres, auth stub, seams, jobs.
-- `apps/web` - Vue 3 SPA with the role switcher.
+- `apps/web` - Vue 3 SPA with the role switcher (`src/demo/` holds the ADR-029 lab showcase).
 - `tests/e2e` - golden scenario and red-team evals.
 - `docs/` - the context pack: SPEC, ARCHITECTURE, DECISIONS, METRICS, EVALS, RED_TEAM,
   DEPLOY, DIAGRAMS, AI_LOG, TRACKER, and DEMO_SCRIPT.
