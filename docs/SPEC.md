@@ -14,7 +14,7 @@ A provider creates a draft order for one of their practice's patients and adds o
 
 ### FR-2 Per-item pricing (Tier 1)
 The provider prices each line with a per-unit dollar markup (ADR-028). The patient pays COGS + markup + the 0.75% fee (built into the unit price; no fee line is shown to the patient).
-- AC1: Each line requires `markupCents`, integer cents from 0 to 100000 ($0 to $1,000). The server prices the whole order once (`priceOrder`): `need = sum(qty x (unit_cogs + markup))`, `subtotal = ceil(need x 10000 / (10000 - fee_bps))`, fee = `ceil(subtotal x fee_bps / 10000)`; the subtotal is split across lines by largest remainder of each line's exact share. It stores the line totals, line fees and `unit_markup_cents`. `unitPriceCents` and `marginBps` are rejected with 400 `INVALID_INPUT`
+- AC1: Each line requires `markupCents`, integer cents from 0 to 100000 ($0 to $1,000). The server prices the whole order once (`priceOrder`): `need = sum(qty x (unit_cogs + markup))`, `subtotal = ceil(need x 10000 / (10000 - fee_bps))`, fee = `ceil(subtotal x fee_bps / 10000)`; the subtotal is split across lines by largest remainder of each line's exact share. It stores the line totals, line fees and `unit_markup_cents`. `unitPriceCents` and `marginBps` are rejected with 400 `INVALID_INPUT`, as is a line with no `markupCents` (RT-07)
 - AC2: The UI shows a live, server-computed quote while the provider types the markup ("Patient pays $X per unit"; `GET /api/products/:sku/price-preview`). Per line the builder shows price, COGS and net margin; the order fee is shown once in the Order summary (line fees are stored and shown in the audit, not on the builder). Because the subtotal and the fee are both rounded up, subtotal - need = fee exactly: no rounding is left over, and every line's net margin is exactly qty x markup
 - AC3: The split still guards every line: a line whose net margin after its fee is below 0 is rejected with `MARGIN_NEGATIVE`, naming the line (EVAL-04). A markup-priced line cannot reach it (its margin is exactly qty x markup; a $0 markup nets exactly $0.00); the guard remains for legacy pre-ADR-028 lines, which keep their stored prices and the price-based split()
 
@@ -45,7 +45,7 @@ The provider prices each line with a per-unit dollar markup (ADR-028). The patie
 ### FR-7 Auditability (Tier 1)
 - AC1: `GET /api/orders/:id/audit` returns: order snapshot, lines with every amount, status history, payments, refunds, journals with entries, inventory movements, and an `invariants` block where each check passes or fails explicitly
 - AC2: The provider UI has an audit view rendering this for any of their orders. Cerbo Admin can view any order
-- AC4 (ADR-028): The audit names every cent of a paid order: subtotal = COGS + platform fee (0.75% rounded up, once per order) + provider markup (sum of qty x markup, as entered); nothing is left over as rounding. Audit lines carry `lineMarkupCents` and the order carries `markupCents` (= marginCents). Line fees are stored (`order_lines.line_fee_cents`) and audited, not shown on the provider order builder. The invariants `order.price_matches_markup` (re-prices the order from the stored snapshot COGS and markups with priceOrder; stored totals and fees must match) and `order.every_cent_accounted` run on every order
+- AC4 (ADR-028): The audit names every cent of a paid order: subtotal = COGS + platform fee (0.75% rounded up, once per order) + provider markup (sum of qty x markup, as entered); nothing is left over as rounding. Audit lines carry `lineMarkupCents` (qty x markup) and the order carries `markupCents` (= marginCents); both are null for legacy pre-ADR-028 lines/orders. Line fees are stored (`order_lines.line_fee_cents`) and audited, not shown on the provider order builder. The invariants `order.price_matches_markup` (re-prices the order from the stored snapshot COGS and markups with priceOrder; stored totals and fees must match) and `order.every_cent_accounted` run on every priced order whose lines all carry a markup; every priced order also gets `order.split_balances`, `order.margin_nonnegative`, `lines.split_balances` and `lines.fee_allocation_sums_to_order_fee`, plus a sums-to-zero check per journal and the payment checks once paid
 - AC3: Ledger tables reject UPDATE and DELETE at the database level, except the synthetic purge path (RT-11)
 
 ### FR-8 Refunds (Tier 2)
@@ -64,7 +64,7 @@ Whole-order refunds only.
 
 ### FR-10 Provider sales dashboard (Tier 2)
 - AC1: Shows, for a date range (default current month, UTC): orders by status, units sold by SKU, GMV, refunded GMV, settled GMV, platform fees, provider net margin
-- AC2: Numbers come from ledger entries, not recomputed from order lines
+- AC2: Numbers come from persisted records (ledger entries for GMV and platform fees, refunds for refunded GMV, the stored order margin for net margin), never recomputed from line prices
 - AC3: Sales count in the month the order was PAID (`orders.paid_at`), refunds in the month of the refund (`refunds.created_at`), so a month's GMV, platform fees and net margin always describe the same orders (METRICS.md basis; same as the admin metrics)
 - AC4: Demo orders (`is_synthetic`) are excluded by default; an "Include demo data" switch mixes them in and shows a "Demo data included" banner
 
@@ -73,7 +73,7 @@ Whole-order refunds only.
 - AC2: Shows opening balance, credits (margins earned), debits (margin reversals and fee retentions), closing balance, and contributing orders
 - AC3: Cerbo Admin can close a month, creating an immutable `payable_statement`. A refund posted after close appears as a debit in the period it was posted; closed statements are never rewritten (EVAL-10)
 - AC4: Payout is a stub seam (`PayoutService`), not executed
-- AC5: Real orders only: demo data is never included, and the page says so ("Real orders only"), because payables are the money Cerbo actually owes
+- AC5: Real orders only: the Payables page never includes demo data and says so ("Real orders only"), because payables are the money Cerbo actually owes. Movements count by `journals.posted_at`. (`GET /api/reports/payables` defaults `includeSynthetic` to false and the page never sets it; month close always excludes demo data)
 
 ### FR-12 Recurring orders (Tier 3)
 - AC1: Provider creates a schedule for a patient with lines (SKU, qty, markup; `markupCents` required, 0 to 100000) and `interval_days` (default 30, range 7 to 90). One-off remains the default order type
@@ -81,18 +81,18 @@ Whole-order refunds only.
 - AC3: Each cycle creates a child order (`kind = recurring_cycle`) with a fresh COGS snapshot and prices each line from that CURRENT COGS + the schedule's markup (ADR-028), so a cost rise passes through to the patient and the provider keeps the markup (EVAL-11d); it checks stock and margin, charges the saved method, and posts the PAYMENT journal, all in one transaction
 - AC4: If stock is short, margin would go negative (possible only for legacy pre-ADR-028 lines without a markup), or the schedule is not authorized, the cycle order is `on_hold` with a reason and the provider sees an alert. Retry is possible after the cause is fixed (EVAL-11)
 - AC5: Provider can pause or cancel a schedule
-- AC6: Demo: "Run cycle now" action and a `run-due-schedules` job endpoint replace a real scheduler
+- AC6: Demo: the provider's "Run cycle now" action (`POST /api/schedules/:id/run`) replaces a real scheduler. `POST /api/admin/jobs/run-due-schedules` is registered but still returns 501 `NOT_IMPLEMENTED` (not wired to the engine)
 
 ### FR-13 Cerbo Admin metrics and migration report (Tier 3)
-- AC1: Under the "Cerbo Admin" tab, for a date range and grouping (month, provider): total GMV, refunded GMV, settled GMV, platform fee revenue, sunk fees, provider net margin from settled sales, provider net after sunk fees, order count, AOV, recurring share, baseline monthly GMV, migration %, adoption
+- AC1: Under the "Cerbo Admin" tab, for a date range and grouping (month, provider): total GMV, refunded GMV, settled GMV, platform fee revenue, sunk fees, provider net margin from settled sales, provider net after sunk fees, provider markup (with markup units and average markup per unit), order count, AOV, recurring share, baseline monthly GMV, migration % (average month over the range) with a month-by-month migration trend, adoption
 - AC2: Formulas exactly as `docs/METRICS.md`, including the reconciliation check for provider net margin
-- AC3: Toggle "Include synthetic demo data", default OFF (EVAL-13)
+- AC3: Toggle "Include synthetic demo data", default OFF (EVAL-13); while on, a "Demo data included" banner shows
 
 ### FR-14 Baseline and demo data (Tier 3)
-- AC1: Baseline import via CSV upload (`provider_email, order_date, gmv_cents, source`), validated, stored with `import_batch_id`
+- AC1: Baseline import via CSV upload (`provider_email, order_date, gmv_cents, source`), validated, stored with `import_batch_id` (`POST /api/admin/baseline/import`; real interim import, not demo-gated)
 - AC2: Cerbo Admin can regenerate the synthetic baseline (`seed`, `months`, default 6), replacing only previous synthetic baseline rows
-- AC3: Cerbo Admin can generate synthetic in-house migration activity (`seed`, `months`, default 3, ramping share of baseline) that flows through the same split and posting code, flagged `is_synthetic`, backdated via the `Clock` seam (older months on the 15th; the current month on the 15th or two days before today UTC, whichever is earlier, so demo orders never read as today or the future in any timezone), and does not touch inventory
-- AC4: Cerbo Admin can reset demo data, which purges only `is_synthetic = true` rows (RT-11)
+- AC3: Cerbo Admin can generate synthetic in-house migration activity (`seed`, `months`, default 3, ramping share of baseline) that flows through the same pricing (`priceOrder`, random per-unit markups of $4 to $15) and posting code, flagged `is_synthetic`, backdated via the `Clock` seam (older months on the 15th; the current month on the 15th or two days before today UTC, whichever is earlier, so demo orders never read as today or the future in any timezone), and does not touch inventory
+- AC4: Cerbo Admin can reset demo data, which purges only `is_synthetic = true` rows (RT-11). "Reset demo story" (`POST /api/admin/demo/reset-story`, confirmed by typing RESET) purges and then regenerates the standard story with fixed seeds (baseline seed 1337, 6 months; migration seed 4242, 3 months); it refuses with `DEMO_RESET_BLOCKED`, changing nothing, if a synthetic order has real money rows attached
 - AC5: All demo endpoints return `DEMO_DISABLED` unless `DEMO_MODE=true`
 
 ### FR-15 Restock, demo only (Tier 3)

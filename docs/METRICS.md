@@ -1,7 +1,7 @@
 # METRICS.md - Metric definitions
 
 All metrics are computed from ledger entries, refunds, and baseline tables, in integer cents, UTC calendar periods.
-Every query takes `includeSynthetic` (default false; the admin Metrics page and the provider Dashboard have an "Include demo data" switch). Basis: payment events count on `paid_at`, refund events on refund `created_at`. Provider payables are the exception: they are ledger movements by `journals.posted_at` and never include demo data.
+Every query takes `includeSynthetic` (default false; the admin Metrics page has an "Include synthetic demo data" switch and the provider Dashboard an "Include demo data" switch, each showing a "Demo data included" banner while on). Basis: payment events count on `paid_at`, refund events on refund `created_at`. Provider payables are the exception: they are ledger movements by `journals.posted_at`, and the Payables page and month close never include demo data.
 
 ## Headline: GMV and platform revenue
 | Metric | Definition | Source |
@@ -21,7 +21,7 @@ Every query takes `includeSynthetic` (default false; the admin Metrics page and 
 | Markup units (`markupUnits`) | Units on those same lines |
 | Average markup per unit (`avgMarkupPerUnitCents`) | floor(providerMarkupCents / markupUnits); 0 when there are no such units |
 | Provider net margin from settled sales | Sum of margin_cents over orders paid in period and not refunded |
-| Reconciliation check | Per order: subtotal - cogs - orderFee(subtotal), where orderFee = 0.75% of subtotal rounded UP to the cent, once per order (ADR-001 as amended by ADR-028). For a markup-priced order this equals the ledger margin exactly (= sum of qty x markup). Summed across orders it must match the ledger figure. Shown as a pass/fail line in the report |
+| Reconciliation check | Per order: subtotal - cogs - orderFee(subtotal), where orderFee = 0.75% of subtotal rounded UP to the cent, once per order (ADR-001 as amended by ADR-028). For a markup-priced order this equals the ledger margin exactly (= sum of qty x markup). Summed across settled orders (paid in period, not refunded) it must match the ledger figure; the check passes when the difference is at most 1 cent per settled order. Shown as a pass/fail line in the report |
 | Provider net after sunk fees | Provider net margin from settled sales - sunk fees |
 | Payable balance | -(sum of PROVIDER_PAYABLE entries) up to period end |
 
@@ -35,7 +35,7 @@ Note: the reconciliation is computed per order in integer cents and then summed;
 | Migration % (overall, per month) | Sum of in-house GMV for providers with a baseline in the month / sum of their baseline monthly GMV |
 | Migration trend (the leading indicator) | Migration % for each calendar month in the selected range, overall and per provider (`byMonth`). A rising trend means in-house volume is replacing marketplace volume |
 | Migration % for a multi-month range | Average month: in-house GMV in the range / (baseline monthly GMV x months in the range). A 3-month range is never divided by a single month's baseline |
-| Adoption | Providers with at least 1 in-house paid order in period / providers with a baseline |
+| Adoption | Providers with a baseline and at least 1 in-house paid order in period / providers with a baseline |
 | No baseline | Providers without baseline rows are listed separately and excluded from migration % |
 
 ## Known limitations

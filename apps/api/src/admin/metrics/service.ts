@@ -51,7 +51,7 @@ function intDiv(numerator: number, denominator: number): number {
 /**
  * The reconciliation check (ADR-015, docs/METRICS.md). For each settled order compute the
  * owner's formula from raw snapshots: subtotal - cogs - orderFee(subtotal), where
- * orderFee is the half-up 0.75% fee. Summed, it must match the recorded ledger figure
+ * orderFee is the 0.75% fee rounded up (ADR-028). Summed, it must match the recorded ledger figure
  * (provider net margin from settled sales) within 1 cent per order.
  */
 function reconcile(

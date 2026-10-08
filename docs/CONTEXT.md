@@ -17,12 +17,12 @@ Providers order supplements on third-party marketplaces on the patient's behalf.
 
 ## What we are building
 A working vertical slice where:
-1. A provider assembles a supplement order for a patient and sets the patient-facing price
+1. A provider assembles a supplement order for a patient and sets a per-unit dollar markup; the server derives the patient-facing price as COGS + markup grossed up for the platform fee (ADR-028)
 2. The patient pays Cerbo directly (stubbed payment)
 3. The system computes and records the split: item cost (COGS, kept by Cerbo since Cerbo holds inventory), provider margin (owed to the provider), and a 75 bps platform fee (Cerbo revenue)
 4. Every cent of a paid or refunded order is traceable
 
-Plus: refunds, recurring orders, provider sales and payable reporting, Cerbo-owned inventory with stock checks and reservations, and a Cerbo Admin report that measures GMV, fee revenue, and migration off third-party marketplaces against a baseline.
+Plus: refunds (including patient refund requests the provider approves or declines), recurring orders, provider sales and payable reporting, Cerbo-owned inventory with stock checks and reservations, and a Cerbo Admin report that measures GMV, fee revenue, and migration off third-party marketplaces against a baseline.
 
 ## Business goal and metrics
 - **Headline metric:** GMV processed in-house and the 75 bps earned on it
@@ -41,10 +41,11 @@ Plus: refunds, recurring orders, provider sales and payable reporting, Cerbo-own
 | GMV | Gross merchandise value: total amount patients paid |
 | COGS | Cerbo's unit cost of a SKU, snapshotted onto the order when it is sent |
 | Platform fee | 0.75% (75 bps) of the order subtotal, rounded up to the cent once per order (ADR-028), built into the patient's price |
-| Provider margin | Order total - COGS - platform fee. Owed to the provider (payee is the practice) |
+| Markup | The provider's per-unit dollar amount on top of COGS ($0 to $1,000), set per line (ADR-028) |
+| Provider margin | Order total - COGS - platform fee. On a markup-priced order it equals exactly qty x markup per line. Owed to the provider (payee is the practice) |
 | Settled GMV | Total GMV - refunded GMV |
 | Sunk fee | The platform fee Cerbo keeps on a refunded order |
-| Snapshot | Price and COGS copied onto order lines at send time. Never recomputed from the live catalog |
+| Snapshot | COGS copied onto order lines at send time, with the price and split derived from it plus the markup. Never recomputed from the live catalog after send |
 | Journal | One balanced group of ledger entries for one money event (payment, refund) |
 | Reservation | Stock held for a sent, unpaid order. Expires after 7 days |
 | Baseline | A provider's historical external marketplace supplement GMV, used to measure migration |

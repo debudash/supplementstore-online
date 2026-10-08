@@ -2,6 +2,8 @@
 
 Updated by the Claude planning project from AO status reports. Status: not-started / working / needs-you / in-review / merged / blocked / cut.
 
+> Note (2026-10-07): this table was never updated past kickoff. Every task T0-T14 is merged to `main` (Tier 3 included, nothing cut); see the root `README.md` "Build status" and `tests/e2e/RESULTS.md`.
+
 | Task | Tier | Wave | Gate | Status | PR | CI | EVALs passing | Notes |
 |---|---|---|---|---|---|---|---|---|
 | T0 Scaffold | 1 | 1 | - | not-started | | | | |

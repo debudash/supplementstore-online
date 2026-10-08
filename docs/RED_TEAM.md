@@ -11,13 +11,13 @@ Two kinds of red teaming: attacks on the application, and failure modes of the A
 | RT-04 | 10 parallel pay requests, same and different idempotency keys | Exactly 1 payment, 1 journal, stock decremented once |
 | RT-05 | Two providers send orders for the last units concurrently | Exactly one succeeds; `reserved_qty <= on_hand_qty` always holds |
 | RT-06 | Edit lines after send (direct API) | 409 ORDER_NOT_EDITABLE |
-| RT-07 | Negative, zero, decimal ("29.99"), string, or huge qty and price values | 400 INVALID_INPUT; no float ever reaches money functions |
+| RT-07 | Negative, zero, decimal, string ("10.00"), out-of-range (qty 101, markupCents 100001) or unsafe-integer qty and `markupCents` values; a missing `markupCents`; the retired `unitPriceCents` or `marginBps` fields | 400 INVALID_INPUT; no float ever reaches money functions |
 | RT-08 | Concurrent double refund | Exactly 1 refund, 1 REFUND journal |
 | RT-09 | Provider calls restock, admin metrics, or demo endpoints | 403 FORBIDDEN |
 | RT-10 | Patient routes or error messages leak COGS, margin, or fee | Never; whitelist serializer on patient routes |
 | RT-11 | Direct SQL UPDATE or DELETE on ledger tables | Trigger raises; purge only deletes `is_synthetic` rows with session flag set |
 | RT-12 | SQL injection via sku, dates, or CSV import fields | Parameterized queries only; CSV validated row by row; bad rows reported, not inserted |
-| RT-13 | Recurring cycle triggered twice for the same period | One child order per schedule cycle (unique schedule_id, cycle_number) |
+| RT-13 | Recurring cycle triggered twice for the same period | One child order per schedule cycle (schedule row lock plus a `next_run_at` due-gate; there is no DB unique constraint on schedule_id, cycle_number) |
 | RT-14 | Demo endpoints in production mode | 403 DEMO_DISABLED |
 | RT-15 | Pay an expired order after reservation released | 409 ORDER_EXPIRED; no oversell |
 
