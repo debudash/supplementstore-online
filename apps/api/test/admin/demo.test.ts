@@ -13,6 +13,8 @@ import { createApp } from '../../src/app'
 import { createKnexActorLoader } from '../../src/auth/loadActor'
 import { seedCore } from '../../src/db/seeds/01_core'
 import { resetDemoData } from '../../src/admin/demo/reset'
+import { generateMigration } from '../../src/admin/demo/migration'
+import { regenerateSyntheticBaseline } from '../../src/admin/demo/baseline'
 import { markupFor } from '../pricing'
 
 const apiRoot = path.resolve(__dirname, '../..')
@@ -310,3 +312,23 @@ describe('ADR-019 / money rule 6: the reset is the ONLY append-only exception - 
     expect(survived).toBeTruthy()
   }, 30_000)
 })
+
+describe('synthetic demo orders are dated in the past', () => {
+  // Fixed clock: early on Oct 8 UTC (still Oct 7 in the Americas). The current month's
+  // orders must land two days before today, never on today (which reads as the future).
+  it.each([
+    ['2026-10-08T03:00:00.000Z', '2026-10-06'],
+    ['2026-10-20T03:00:00.000Z', '2026-10-15'],
+    ['2026-10-01T03:00:00.000Z', '2026-09-29']
+  ])('with now = %s the latest synthetic order is paid on %s', async (nowIso, expected) => {
+    await resetDemoData(db)
+    await regenerateSyntheticBaseline(db, 1, 2)
+    await generateMigration(db, 2, 2, { now: () => new Date(nowIso) })
+    const row = await db('orders').where({ is_synthetic: true }).max<{ latest: Date }[]>('paid_at as latest').first()
+    const latest = new Date((row as { latest: Date }).latest)
+    expect(latest.toISOString().slice(0, 10)).toBe(expected)
+    expect(latest.getTime()).toBeLessThan(new Date(nowIso).getTime() - 24 * 60 * 60 * 1000)
+    await resetDemoData(db)
+  }, 30_000)
+})
+
