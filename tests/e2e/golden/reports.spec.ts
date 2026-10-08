@@ -54,7 +54,7 @@ interface Line {
 }
 const EVAL01: Line[] = [
   { sku: SKU.MAG, qty: 2, price: 2999 },
-  { sku: SKU.VITD, qty: 1, price: 2499 }
+  { sku: SKU.VITD, qty: 1, price: 2500 } // markup 1356: with MAG x2 the order rounds once to 8497 (EVAL-01)
 ] // subtotal 8497, fee 64, margin 4408
 const EVAL02: Line[] = [{ sku: SKU.OMEGA, qty: 1, price: 4999 }] // fee 37, margin 2682
 
@@ -111,10 +111,10 @@ async function insertBackdatedPaidEval01(world: World, postedAt: Date): Promise<
 }
 
 describe('reports / payables (golden)', () => {
-  evalCase('EVAL-09b', 'provider payables: credits 7090, debits 4472, closing 2618', async () => {
+  evalCase('EVAL-09b', 'provider payables: credits 7089, debits 4472, closing 2617', async () => {
     const world = await makeWorld()
     const refunded = await payNewOrder(world, EVAL01) // PROVIDER_PAYABLE -4408 (credit)
-    await payNewOrder(world, EVAL02) // PROVIDER_PAYABLE -2682 (credit)
+    await payNewOrder(world, EVAL02) // PROVIDER_PAYABLE -2681 (credit)
     // Refund EVAL-01 through the REAL T5 route: +4408 margin_reversal +64 fee_retention.
     expect((await refundViaAdmin(refunded)).status).toBe(200)
 
@@ -122,9 +122,9 @@ describe('reports / payables (golden)', () => {
     expect(res.status).toBe(200)
     // EVAL-09b exact expected values (docs/EVALS.md).
     expect(res.body.openingCents).toBe(0)
-    expect(res.body.creditsCents).toBe(7090) // 4408 + 2682 margins earned
+    expect(res.body.creditsCents).toBe(7089) // 4408 + 2681 margins earned
     expect(res.body.debitsCents).toBe(4472) // 4408 margin reversal + 64 fee retention
-    expect(res.body.closingCents).toBe(2618) // 7090 - 4472
+    expect(res.body.closingCents).toBe(2617) // 7089 - 4472
 
     // ADR-012 cross-check: the refunded order nets to -(fee) = -64 for the provider.
     const row = res.body.contributingOrders.find((o: { orderId: string }) => o.orderId === refunded)

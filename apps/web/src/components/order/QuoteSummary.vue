@@ -30,17 +30,6 @@ defineProps<{ totals: OrderTotals | null; itemCount?: number }>()
         <dt>Your net margin<span v-if="isNegative(totals.marginCents)" class="neg-tag"> - negative</span></dt>
         <dd class="money" data-test="margin">{{ formatCents(totals.marginCents) }}</dd>
       </div>
-      <!-- ADR-028: the net margin is the markup entered plus the price rounding (server figures). -->
-      <template v-if="totals.markupCents !== null && totals.markupCents !== undefined">
-        <div class="row sub" data-test="summary-markup">
-          <dt>Your markup</dt>
-          <dd class="money">{{ formatCents(totals.markupCents) }}</dd>
-        </div>
-        <div class="row sub" data-test="summary-rounding">
-          <dt>Price rounding <span class="hint">(price rounded up to the cent)</span></dt>
-          <dd class="money">{{ formatCents(totals.roundingCents ?? 0) }}</dd>
-        </div>
-      </template>
     </dl>
     <p v-else class="empty">Add an item to see the totals.</p>
     <slot />
@@ -48,13 +37,6 @@ defineProps<{ totals: OrderTotals | null; itemCount?: number }>()
 </template>
 
 <style scoped>
-.row.sub {
-  font-size: var(--text-sm);
-  color: var(--muted);
-}
-.row.sub .hint {
-  font-size: var(--text-xs);
-}
 .quote-summary {
   background: var(--surface);
   border: 1px solid var(--border);

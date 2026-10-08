@@ -40,7 +40,7 @@ Plus: refunds, recurring orders, provider sales and payable reporting, Cerbo-own
 |---|---|
 | GMV | Gross merchandise value: total amount patients paid |
 | COGS | Cerbo's unit cost of a SKU, snapshotted onto the order when it is sent |
-| Platform fee | 0.75% (75 bps) of the order subtotal, rounded half-up to the cent, borne by the provider |
+| Platform fee | 0.75% (75 bps) of the order subtotal, rounded up to the cent once per order (ADR-028), built into the patient's price |
 | Provider margin | Order total - COGS - platform fee. Owed to the provider (payee is the practice) |
 | Settled GMV | Total GMV - refunded GMV |
 | Sunk fee | The platform fee Cerbo keeps on a refunded order |

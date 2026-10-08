@@ -10,6 +10,7 @@
 //
 // Eligibility to pay is taken from the server's `isPayable`, and the link from
 // `payPath` - neither is re-derived in the client.
+import { isAverageUnitPrice } from '../../utils/money'
 import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { apiRequest, ApiError } from '../../api/client'
@@ -165,7 +166,7 @@ onMounted(load)
             <li v-for="(item, i) in o.items" :key="i" class="item">
               <span class="item-main">
                 <span class="item-name">{{ item.name }}</span>
-                <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> each</span>
+                <span class="item-meta">Qty {{ item.qty }} · <Money :cents="item.unitPriceCents" /> {{ isAverageUnitPrice(item) ? 'avg each' : 'each' }}</span>
               </span>
               <Money :cents="item.lineTotalCents" class="item-total" />
             </li>

@@ -99,32 +99,34 @@ describe('FR-1 draft assembly', () => {
 })
 
 describe('EVAL-01 split at API level (quote)', () => {
-  it('MAG x2 @2999 + VITD3 x1 @2499 -> subtotal 8497, fee 64, line fees [45,19], margins [3053,1355]', async () => {
+  // ADR-028: markups 1526 + 1356 price the order ONCE at exactly 8497 (the brief's EVAL-01 total); the
+  // lines split 5997 + 2500 and the provider nets exactly the markups: 3052 + 1356 = 4408.
+  it('MAG x2 markup 1526 + VITD3 x1 markup 1356 -> subtotal 8497, fee 64, line fees [45,19], margins [3052,1356]', async () => {
     const id = await newDraftAna()
     await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'MAG-GLY-120', qty: 2, markupCents: markupFor('MAG-GLY-120', 2999) })
-    await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'VITD3-K2', qty: 1, markupCents: markupFor('VITD3-K2', 2499) })
+    await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'VITD3-K2', qty: 1, markupCents: 1356 })
 
     const q = await asUser('prov-ana').get(`/api/orders/${id}/quote`)
     expect(q.status).toBe(200)
     expect(q.body.totals).toMatchObject({ subtotalCents: 8497, cogsCents: 4025, feeCents: 64, marginCents: 4408 })
     const mag = q.body.lines.find((l: { sku: string }) => l.sku === 'MAG-GLY-120')
     const vit = q.body.lines.find((l: { sku: string }) => l.sku === 'VITD3-K2')
-    expect(mag).toMatchObject({ lineFeeCents: 45, lineMarginCents: 3053, lineCogsCents: 2900 })
-    expect(vit).toMatchObject({ lineFeeCents: 19, lineMarginCents: 1355, lineCogsCents: 1125 })
+    expect(mag).toMatchObject({ lineTotalCents: 5997, lineFeeCents: 45, lineMarginCents: 3052, lineCogsCents: 2900, unitPriceIsAverage: true })
+    expect(vit).toMatchObject({ lineTotalCents: 2500, lineFeeCents: 19, lineMarginCents: 1356, lineCogsCents: 1125, unitPriceIsAverage: false })
   })
 })
 
 describe('EVAL-04 margin floor (FR-2 AC3) under markup pricing (ADR-028)', () => {
-  // The split still rejects a negative line margin (packages/money EVAL-04), but a markup
-  // price always covers the fee and a $0 markup is priced as 1 cent of rounding headroom,
-  // so no line can go negative: markup 0 sells at cost + fee and nets 0 or 1 cent.
-  it('VITD markup 0 -> unit price 1135 (cost + fee + 1 cent headroom), net margin 1', async () => {
+  // The split still rejects a negative line margin (packages/money EVAL-04), but an order
+  // priced from markups is rounded once (price and fee both up), so the provider nets exactly
+  // the markup: a $0 markup sells at cost + fee and nets exactly 0.
+  it('VITD markup 0 -> unit price 1134 (cost + fee), net margin exactly 0', async () => {
     const id = await newDraftAna()
     const r = await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'VITD3-K2', qty: 1, markupCents: 0 })
     expect(r.status).toBe(200)
-    expect(r.body.lines[0]).toMatchObject({ unitPriceCents: 1135, unitMarkupCents: 0 })
+    expect(r.body.lines[0]).toMatchObject({ unitPriceCents: 1134, unitMarkupCents: 0 })
     const q = await asUser('prov-ana').get(`/api/orders/${id}/quote`)
-    expect(q.body.lines[0]).toMatchObject({ lineFeeCents: 9, lineMarginCents: 1 })
+    expect(q.body.lines[0]).toMatchObject({ lineFeeCents: 9, lineMarginCents: 0 })
   })
 
   it('EVAL-04b markup mode: MAG markup 1000 -> unit price 2469, fee 19, margin 1000', async () => {
@@ -142,12 +144,12 @@ describe('EVAL-04 margin floor (FR-2 AC3) under markup pricing (ADR-028)', () =>
     await db('products').where({ sku: 'MAG-GLY-120' }).update({ unit_cogs_cents: 1550 })
     try {
       const q = await asUser('prov-ana').get(`/api/orders/${id}/quote`)
-      // (1550 + 1000) * 10000 / 9925 = 2569.27 -> 2570; fee 19; margin 2570 - 1550 - 19 = 1001
-      // (rounding the price up never leaves the provider below the 1000 markup).
-      expect(q.body.lines[0]).toMatchObject({ unitPriceCents: 2570, lineMarginCents: 1001 })
+      // (1550 + 1000) * 10000 / 9925 = 2569.27 -> 2570; fee 0.75% = 19.28 -> 20; the provider
+      // nets exactly the 1000 markup (ADR-028: nothing is left over as rounding).
+      expect(q.body.lines[0]).toMatchObject({ unitPriceCents: 2570, lineFeeCents: 20, lineMarginCents: 1000 })
       const sent = await asUser('prov-ana').post(`/api/orders/${id}/send`).send({})
       expect(sent.status).toBe(200)
-      expect(sent.body.order.lines[0]).toMatchObject({ unitPriceCents: 2570, unitCogsCents: 1550, unitMarkupCents: 1000, lineMarginCents: 1001 })
+      expect(sent.body.order.lines[0]).toMatchObject({ unitPriceCents: 2570, unitCogsCents: 1550, unitMarkupCents: 1000, lineMarginCents: 1000 })
     } finally {
       await db('products').where({ sku: 'MAG-GLY-120' }).update({ unit_cogs_cents: 1450 })
     }
@@ -159,7 +161,8 @@ describe('EVAL-04 margin floor (FR-2 AC3) under markup pricing (ADR-028)', () =>
     const lineId = add.body.lines[0].id as string
     const r = await asUser('prov-ana').patch(`/api/orders/${id}/lines/${lineId}`).send({ markupCents: markupFor('MAG-GLY-120', 2999) })
     expect(r.status).toBe(200)
-    expect(r.body.lines[0]).toMatchObject({ qty: 2, unitPriceCents: 2999, unitMarkupCents: 1526 })
+    // 2 x (1450 + 1526) rounded once = 5997, shown as an average of 2999 a unit.
+    expect(r.body.lines[0]).toMatchObject({ qty: 2, unitPriceCents: 2999, unitMarkupCents: 1526, unitPriceIsAverage: true })
   })
 })
 
@@ -188,7 +191,7 @@ describe('FR-4 send: snapshot, reserve, persist', () => {
   it('persists totals, sets status sent, reserves stock, and returns a pay link', async () => {
     const id = await newDraftAna()
     await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'MAG-GLY-120', qty: 2, markupCents: markupFor('MAG-GLY-120', 2999) })
-    await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'VITD3-K2', qty: 1, markupCents: markupFor('VITD3-K2', 2499) })
+    await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'VITD3-K2', qty: 1, markupCents: 1356 })
 
     const res = await asUser('prov-ana').post(`/api/orders/${id}/send`).send({})
     expect(res.status).toBe(200)
@@ -209,7 +212,7 @@ describe('FR-4 send: snapshot, reserve, persist', () => {
   it('ignores any client-sent totals and recomputes from DB snapshots (money rule 9)', async () => {
     const id = await newDraftAna()
     await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'MAG-GLY-120', qty: 2, markupCents: markupFor('MAG-GLY-120', 2999) })
-    await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'VITD3-K2', qty: 1, markupCents: markupFor('VITD3-K2', 2499) })
+    await asUser('prov-ana').post(`/api/orders/${id}/lines`).send({ sku: 'VITD3-K2', qty: 1, markupCents: 1356 })
     const res = await asUser('prov-ana')
       .post(`/api/orders/${id}/send`)
       .send({ subtotalCents: 1, feeCents: 1, marginCents: 999999 })

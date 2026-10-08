@@ -38,10 +38,10 @@ export interface ManifestEntry {
 // ---------------------------------------------------------------------------
 export const MANIFEST: ManifestEntry[] = [
   // Money core (T1, merged) - exercised at the API quote/add level end to end.
-  { id: 'EVAL-01', area: 'money', task: 'T1/T3', plan: 'live', summary: 'MAG x2@2999 + VITD3 x1@2499 -> subtotal 8497, fee 64, line fees [45,19], margins [3053,1355]' },
-  { id: 'EVAL-02', area: 'money', task: 'T1/T3', plan: 'live', summary: 'OMEGA3 x1@4999 -> fee 37, margin 2682' },
-  { id: 'EVAL-03', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 x1@2200 half-up -> fee 17, margin 1058' },
-  { id: 'EVAL-04', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 margin floor: markup 0 -> price 1135 (cost + fee + 1 cent headroom), margin 1 (split floor still rejects @1125/@1132)' },
+  { id: 'EVAL-01', area: 'money', task: 'T1/T3', plan: 'live', summary: 'MAG x2 markup 1526 + VITD3 x1 markup 1356, priced once -> subtotal 8497, fee 64, line fees [45,19], margins [3052,1356] (exactly the markups)' },
+  { id: 'EVAL-02', area: 'money', task: 'T1/T3', plan: 'live', summary: 'OMEGA3 x1@4999 -> fee 38 (37.49 rounded up, ADR-028), margin 2681' },
+  { id: 'EVAL-03', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 x1@2200 -> fee 17 (16.5 rounded up), margin 1058' },
+  { id: 'EVAL-04', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 margin floor: markup 0 -> price 1134 (cost + fee), margin exactly 0 (split floor still rejects @1125/@1133, accepts @1134)' },
   { id: 'EVAL-04b', area: 'money', task: 'T1/T3', plan: 'live', summary: 'MAG markup 1000 -> unit price 2469, fee 19, margin 1000 (ADR-028)' },
   { id: 'EVAL-P1', area: 'money', task: 'T1/T3', plan: 'live', summary: 'Property: line fees sum to order fee; cogs+fee+margin=total; fee half-up; deterministic (API-driven)' },
 
@@ -64,15 +64,15 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'EVAL-08b', area: 'refund', task: 'T5', plan: 'live', summary: 'refund a sent order -> 409 NOT_REFUNDABLE' },
 
   // Reports / payables (T8, pending) and admin metrics (T10, cut).
-  { id: 'EVAL-09', area: 'metrics', task: 'T10', plan: 'live', summary: 'admin metrics (groupBy=provider): GMV 13496, refunded 8497, settled 4999, fee revenue 101, sunk fees 64, net margin 2682, net after sunk fees 2618; reconciliation passes' },
-  { id: 'EVAL-09b', area: 'reports', task: 'T8', plan: 'live', summary: 'provider payables: credits 7090, debits 4472, closing 2618; refunded order nets -64 (ADR-012)' },
+  { id: 'EVAL-09', area: 'metrics', task: 'T10', plan: 'live', summary: 'admin metrics (groupBy=provider): GMV 13496, refunded 8497, settled 4999, fee revenue 102, sunk fees 64, net margin 2681, net after sunk fees 2617; reconciliation passes' },
+  { id: 'EVAL-09b', area: 'reports', task: 'T8', plan: 'live', summary: 'provider payables: credits 7089, debits 4472, closing 2617; refunded order nets -64 (ADR-012)' },
   { id: 'EVAL-10', area: 'reports', task: 'T8', plan: 'live', summary: 'late refund of a closed-month order: M statement frozen (credits 4408); current period debits 4472, closing -64 (ADR-014/016)' },
 
   // Recurring (T9, merged).
-  { id: 'EVAL-11', area: 'recurring', task: 'T9', plan: 'live', summary: 'authorized cycle pays: recurring_cycle, fee 22, margin 1527, MAG on_hand -1; balanced PAYMENT journal via T4 path' },
+  { id: 'EVAL-11', area: 'recurring', task: 'T9', plan: 'live', summary: 'authorized cycle pays: recurring_cycle, fee 23, margin 1526 (the markup), MAG on_hand -1; balanced PAYMENT journal via T4 path' },
   { id: 'EVAL-11b', area: 'recurring', task: 'T9', plan: 'live', summary: 'schedule PROBIO x6 -> cycle on_hold INSUFFICIENT_STOCK, no journal, stock untouched' },
   { id: 'EVAL-11c', area: 'recurring', task: 'T9', plan: 'live', summary: 'unauthorized schedule run -> cycle on_hold NOT_AUTHORIZED, no journal' },
-  { id: 'EVAL-11d', area: 'recurring', task: 'T9', plan: 'live', summary: 'raise MAG cogs to 3000, run cycle -> pays at 4561, provider still nets the 1527 markup (ADR-028 pass-through)' },
+  { id: 'EVAL-11d', area: 'recurring', task: 'T9', plan: 'live', summary: 'raise MAG cogs to 3000, run cycle -> pays at 4561, provider still nets the 1526 markup (ADR-028 pass-through)' },
 
   // Privacy + demo isolation.
   { id: 'EVAL-12', area: 'privacy', task: 'T4', plan: 'live', summary: 'GET /api/pay/:token strict whitelist; no cogs/fee/margin/provider economics' },

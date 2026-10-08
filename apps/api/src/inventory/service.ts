@@ -6,7 +6,7 @@
 // row with a reason from the schema enum (seed|restock|reserve|release|sale|
 // refund_restock|adjustment).
 import type { Knex } from 'knex'
-import { priceFromMarkupCents, split, markupBreakdown, DEFAULT_FEE_BPS } from '@cerbo/money'
+import { priceOrder, DEFAULT_FEE_BPS } from '@cerbo/money'
 import { insufficientStock, notFound } from '../orders/errors'
 import { requireInt, MARKUP_MIN, MARKUP_MAX } from '../orders/validation'
 
@@ -42,9 +42,8 @@ export interface PricePreview {
   lineCogsCents: number
   lineFeeCents: number
   lineMarginCents: number
-  /** qty x markup, and the price rounding that goes to the provider: margin = markup + rounding. */
-  lineMarkupCents: number
-  lineRoundingCents: number
+  /** True when lineTotalCents / qty is not a whole cent (unitPriceCents is then the average). */
+  unitPriceIsAverage: boolean
 }
 
 interface ProductRow {
@@ -70,7 +69,7 @@ export async function listProducts(db: Knex): Promise<ProductView[]> {
 
 /**
  * Preview the price a per-unit markup would produce for a SKU, using the same function
- * the add-line path uses (priceFromMarkupCents), so the preview is exactly what the
+ * the order uses (priceOrder, ADR-028), so the preview is exactly what the
  * server will store. Read-only; the browser never computes a price (AGENTS.md money
  * rule 2).
  */
@@ -84,22 +83,18 @@ export async function previewPrice(
   const markupCents = requireInt(asInt(markupRaw), 'markupCents', MARKUP_MIN, MARKUP_MAX)
   const qty = qtyRaw === undefined || qtyRaw === '' ? 1 : requireInt(asInt(qtyRaw), 'qty', 1, 100)
   const row = await getProduct(db, sku)
-  const unitPriceCents = priceFromMarkupCents(row.unit_cogs_cents, markupCents, DEFAULT_FEE_BPS)
-
-  // The same split() an order uses, for a one-line order of `qty` units.
-  const line = split([{ position: 1, qty, unitPriceCents, unitCogsCents: row.unit_cogs_cents }], DEFAULT_FEE_BPS).lines[0]
-  const named = markupBreakdown([{ qty, unitMarkupCents: markupCents, marginCents: line.margin }]).lines[0]
+  // The same priceOrder() an order uses, for a one-line order of `qty` units (ADR-028).
+  const line = priceOrder([{ position: 1, qty, unitCogsCents: row.unit_cogs_cents, markupCents }], DEFAULT_FEE_BPS).lines[0]
   return {
     sku,
     markupCents,
-    unitPriceCents,
+    unitPriceCents: line.unitPriceCents,
     qty,
     lineTotalCents: line.total,
     lineCogsCents: line.cogs,
     lineFeeCents: line.fee,
     lineMarginCents: line.margin,
-    lineMarkupCents: named?.markupCents ?? 0,
-    lineRoundingCents: named?.roundingCents ?? 0
+    unitPriceIsAverage: line.unitPriceIsAverage
   }
 }
 

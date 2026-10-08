@@ -117,7 +117,7 @@ export interface Line {
 /** The canonical EVAL-01 basket. */
 export const EVAL01_LINES: Line[] = [
   { sku: SKU.MAG, qty: 2, price: 2999 },
-  { sku: SKU.VITD, qty: 1, price: 2499 }
+  { sku: SKU.VITD, qty: 1, price: 2500 } // markup 1356: with MAG x2 the order rounds once to 8497 (EVAL-01)
 ]
 
 /** Open a draft for prov-ana / pat-cara and return its id. */

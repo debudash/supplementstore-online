@@ -30,7 +30,7 @@ afterAll(async () => {
 
 const EVAL01: Line[] = [
   { sku: SKU.MAG, qty: 2, price: 2999 },
-  { sku: SKU.VITD, qty: 1, price: 2499 }
+  { sku: SKU.VITD, qty: 1, price: 2500 } // markup 1356: with MAG x2 the order rounds once to 8497 (EVAL-01)
 ]
 const EVAL02: Line[] = [{ sku: SKU.OMEGA, qty: 1, price: 4999 }]
 
@@ -69,7 +69,7 @@ function withDemoMode<T>(value: string | undefined, fn: () => Promise<T>): Promi
 }
 
 describe('admin metrics + demo data (golden)', () => {
-  evalCase('EVAL-09', 'metrics reconciliation: GMV 13496, refunded 8497, settled 4999, fees 101/64, net 2682/2618', async () => {
+  evalCase('EVAL-09', 'metrics reconciliation: GMV 13496, refunded 8497, settled 4999, fees 102/64, net 2681/2617', async () => {
     // Metrics are GLOBAL, so isolate on a fresh provider and read its groupBy=provider block.
     const { from, to } = currentMonthWindow()
     const world = await makeProviderWorld('t13m')
@@ -88,10 +88,10 @@ describe('admin metrics + demo data (golden)', () => {
     expect(b.gmvCents).toBe(13496)
     expect(b.refundedGmvCents).toBe(8497)
     expect(b.settledGmvCents).toBe(4999)
-    expect(b.platformFeeCents).toBe(101) // 64 + 37 fee revenue
+    expect(b.platformFeeCents).toBe(102) // 64 + 38 fee revenue (ADR-028: fee rounds up)
     expect(b.sunkFeeCents).toBe(64) // fee retained on the refunded order
-    expect(b.providerNetMarginCents).toBe(2682) // only the settled (EVAL-02) order
-    expect(b.providerNetAfterSunkFeesCents).toBe(2618) // 2682 - 64
+    expect(b.providerNetMarginCents).toBe(2681) // only the settled (EVAL-02) order
+    expect(b.providerNetAfterSunkFeesCents).toBe(2617) // 2681 - 64
     // Reconciliation (owner's per-order formula vs the ledger) passes.
     expect(group.reconciliation.pass).toBe(true)
   })

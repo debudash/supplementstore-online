@@ -270,13 +270,8 @@ function signed(n: number): string {
                 <caption class="sr-only">Where the patient's payment went</caption>
                 <tbody>
                   <tr><th scope="row">Cost of goods</th><td class="subtle">Cerbo</td><td class="num"><Money :cents="audit.order.cogsCents" /></td></tr>
-                  <tr><th scope="row">Platform fee ({{ formatBps(audit.order.feeBps) }} of the order)</th><td class="subtle">Cerbo</td><td class="num"><Money :cents="audit.order.feeCents" /></td></tr>
-                  <tr><th scope="row">Provider markup (as entered)</th><td class="subtle">Provider</td><td class="num"><Money :cents="audit.order.markupCents" /></td></tr>
-                  <tr data-testid="every-cent-rounding">
-                    <th scope="row">Price rounding <span class="subtle">(price rounded up to the cent; goes to the provider, who set it)</span></th>
-                    <td class="subtle">Provider</td>
-                    <td class="num"><Money :cents="audit.order.roundingCents" /></td>
-                  </tr>
+                  <tr><th scope="row">Platform fee ({{ formatBps(audit.order.feeBps) }} of the order, rounded up to the cent)</th><td class="subtle">Cerbo</td><td class="num"><Money :cents="audit.order.feeCents" /></td></tr>
+                  <tr><th scope="row">Provider markup (exactly as entered)</th><td class="subtle">Provider</td><td class="num"><Money :cents="audit.order.markupCents" /></td></tr>
                 </tbody>
                 <tfoot>
                   <tr><th scope="row">Patient paid</th><td></td><td class="num"><Money :cents="audit.order.subtotalCents" strong /></td></tr>
@@ -295,31 +290,24 @@ function signed(n: number): string {
                   <th scope="col" class="num">Line total</th>
                   <th scope="col" class="num">COGS</th>
                   <th scope="col" class="num">Fee</th>
-                  <th scope="col" class="num">Markup</th>
-                  <th scope="col" class="num">Rounding</th>
-                  <th scope="col" class="num">Provider net</th>
+                  <th scope="col" class="num">Provider (markup)</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="l in audit.lines" :key="l.id">
                   <td data-label="Item"><span class="item-name">{{ l.name }}</span> <span class="subtle">{{ l.sku }}</span></td>
                   <td data-label="Qty" class="num">{{ l.qty }}</td>
-                  <td data-label="Unit price" class="num"><Money :cents="l.unitPriceCents" /></td>
+                  <td data-label="Unit price" class="num"><Money :cents="l.unitPriceCents" /><span v-if="l.unitPriceIsAverage" class="subtle"> avg</span></td>
                   <td data-label="Line total" class="num"><Money :cents="l.lineTotalCents" /></td>
                   <td data-label="COGS" class="num"><Money :cents="l.lineCogsCents" /></td>
                   <td data-label="Fee" class="num"><Money :cents="l.lineFeeCents" /></td>
-                  <td data-label="Markup" class="num" data-test="audit-markup">
+                  <td data-label="Provider (markup)" class="num" data-test="audit-markup">
                     <template v-if="l.lineMarkupCents != null">
-                      <Money :cents="l.lineMarkupCents" />
+                      <Money :cents="l.lineMarginCents" />
                       <span class="subtle unit-markup">{{ l.qty }} × <Money :cents="l.unitMarkupCents" /></span>
                     </template>
                     <span v-else class="subtle">-</span>
                   </td>
-                  <td data-label="Rounding" class="num" data-test="audit-rounding">
-                    <Money v-if="l.lineRoundingCents != null" :cents="l.lineRoundingCents" />
-                    <span v-else class="subtle">-</span>
-                  </td>
-                  <td data-label="Provider net" class="num"><Money :cents="l.lineMarginCents" /></td>
                 </tr>
               </tbody>
               <tfoot>
@@ -328,9 +316,7 @@ function signed(n: number): string {
                   <td data-label="Line total" class="num"><Money :cents="audit.order.subtotalCents" /></td>
                   <td data-label="COGS" class="num"><Money :cents="audit.order.cogsCents" /></td>
                   <td data-label="Fee" class="num"><Money :cents="audit.order.feeCents" /></td>
-                  <td data-label="Markup" class="num"><Money v-if="audit.order.markupCents != null" :cents="audit.order.markupCents" /><span v-else class="subtle">-</span></td>
-                  <td data-label="Rounding" class="num"><Money v-if="audit.order.roundingCents != null" :cents="audit.order.roundingCents" /><span v-else class="subtle">-</span></td>
-                  <td data-label="Provider net" class="num"><Money :cents="audit.order.marginCents" /></td>
+                  <td data-label="Provider (markup)" class="num"><Money :cents="audit.order.marginCents" /></td>
                 </tr>
               </tfoot>
             </table>

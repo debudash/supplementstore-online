@@ -9,7 +9,7 @@
 // or goes `on_hold` with a `hold_reason`.
 //
 // Money rules honoured here:
-//  - rule 2: ALL split math goes through @cerbo/money (split(), priceFromMarkupCents());
+//  - rule 2: ALL split math goes through @cerbo/money (priceLines -> priceOrder/split);
 //    nothing is recomputed here. COGS is read fresh from the catalog each cycle.
 //  - rule 6/7/8: the cycle PAYMENT journal is posted by T4's postPaymentJournal (NO
 //    duplicate posting code), inside ONE transaction that also changes order status and
@@ -23,7 +23,7 @@
 // (schedule_id, cycle_number); see the MR description).
 import { randomBytes } from 'node:crypto'
 import type { Knex } from 'knex'
-import { split, priceFromMarkupCents, type SplitLineInput } from '@cerbo/money'
+import { priceLines, standaloneUnitPrice } from '../orders/pricing'
 import { MoneyError } from '@cerbo/money'
 import type { Actor } from '../auth/types'
 import type { Seams } from '../seams/types'
@@ -115,8 +115,8 @@ interface ProductRow {
 const iso = (d: Date | null): string | null => (d ? new Date(d).toISOString() : null)
 
 /** A cycle's unit price: current COGS + the provider's markup, grossed up for the fee. */
-const cyclePrice = (unitCogsCents: number, markupCents: number): number =>
-  priceFromMarkupCents(unitCogsCents, markupCents, FEE_BPS)
+const cyclePrice = (qty: number, unitCogsCents: number, markupCents: number): number =>
+  standaloneUnitPrice(qty, unitCogsCents, markupCents, FEE_BPS)
 
 // ---- Ownership ----
 
@@ -193,7 +193,7 @@ export async function createSchedule(db: Knex, actor: Actor, body: unknown): Pro
         sku,
         qty,
         markupCents,
-        unitPriceCents: cyclePrice(product.unit_cogs_cents, markupCents)
+        unitPriceCents: cyclePrice(qty, product.unit_cogs_cents, markupCents)
       })
     }
 
@@ -345,7 +345,7 @@ async function createCycleOrder(
       position: l.position,
       sku: l.sku,
       qty: l.qty,
-      unit_price_cents: cyclePrice(bySku.get(l.sku)?.unit_cogs_cents ?? 1, l.unit_markup_cents),
+      unit_price_cents: cyclePrice(l.qty, bySku.get(l.sku)?.unit_cogs_cents ?? 1, l.unit_markup_cents),
       unit_cogs_cents: bySku.get(l.sku)?.unit_cogs_cents ?? 1,
       unit_markup_cents: l.unit_markup_cents
     }))
@@ -382,20 +382,18 @@ async function settleCycle(
 
   // 2. Split with FRESH catalog COGS and a price derived from it + the line's markup
   //    (ADR-028): a cost rise passes through to the patient and the provider keeps the
-  //    markup (EVAL-11d). A markup price always covers the fee, so MARGIN_NEGATIVE can only
-  //    come from a pre-ADR-028 line without a markup, which keeps its stored price.
-  const prices = lines.map((l) => {
-    const cogs = (products.get(l.sku) as ProductRow).unit_cogs_cents
-    return l.unit_markup_cents === null ? l.unit_price_cents : cyclePrice(cogs, l.unit_markup_cents)
-  })
+  //    markup (EVAL-11d). The order is priced once (priceLines), so nothing is left over as
+  //    rounding. MARGIN_NEGATIVE can only come from a pre-ADR-028 line without a markup,
+  //    which keeps its stored price.
   let result
   try {
-    result = split(
-      lines.map<SplitLineInput>((l, i) => ({
+    result = priceLines(
+      lines.map((l, i) => ({
         position: i + 1,
         qty: l.qty,
-        unitPriceCents: prices[i],
-        unitCogsCents: (products.get(l.sku) as ProductRow).unit_cogs_cents
+        unitCogsCents: (products.get(l.sku) as ProductRow).unit_cogs_cents,
+        unitMarkupCents: l.unit_markup_cents,
+        unitPriceCents: l.unit_price_cents
       })),
       FEE_BPS
     )
@@ -431,7 +429,7 @@ async function settleCycle(
     const s = bySplitPos.get(i + 1)
     if (!s) throw new Error('internal: missing split line')
     await trx('order_lines').where({ id: lines[i].id }).update({
-      unit_price_cents: prices[i],
+      unit_price_cents: s.unitPriceCents,
       unit_cogs_cents: (products.get(lines[i].sku) as ProductRow).unit_cogs_cents,
       line_total_cents: s.total,
       line_cogs_cents: s.cogs,
@@ -582,9 +580,8 @@ async function patientLineView(
   db: Knex,
   scheduleId: string
 ): Promise<{ items: ScheduleAuthorizeView['items']; perCycleTotalCents: number }> {
-  const lines = await scheduleLinesPricedNow(db, scheduleId)
+  const { lines, subtotalCents: perCycleTotalCents } = await scheduleLinesPricedNow(db, scheduleId)
   const items = lines.map((l) => ({ name: l.name, qty: l.qty, unitPriceCents: l.unitPriceCents }))
-  const perCycleTotalCents = lines.reduce((a, l) => a + l.qty * l.unitPriceCents, 0)
   return { items, perCycleTotalCents }
 }
 
@@ -595,20 +592,38 @@ async function patientLineView(
 async function scheduleLinesPricedNow(
   db: Knex,
   scheduleId: string
-): Promise<Array<ScheduleLineRow & { name: string; unitPriceCents: number }>> {
+): Promise<{ lines: Array<ScheduleLineRow & { name: string; unitPriceCents: number }>; subtotalCents: number }> {
   const lines = await db<ScheduleLineRow>('schedule_lines').where({ schedule_id: scheduleId }).orderBy('position')
   const products = lines.length
     ? await db<ProductRow>('products').whereIn('sku', [...new Set(lines.map((l) => l.sku))]).select('sku', 'name', 'unit_cogs_cents')
     : []
   const bySku = new Map(products.map((p) => [p.sku, p]))
-  return lines.map((l) => {
-    const p = bySku.get(l.sku)
+  if (lines.length === 0 || !lines.every((l) => bySku.has(l.sku))) {
     return {
-      ...l,
-      name: p?.name ?? l.sku,
-      unitPriceCents: p ? cyclePrice(p.unit_cogs_cents, l.unit_markup_cents) : l.unit_price_cents
+      lines: lines.map((l) => ({ ...l, name: bySku.get(l.sku)?.name ?? l.sku, unitPriceCents: l.unit_price_cents })),
+      subtotalCents: lines.reduce((a, l) => a + l.qty * l.unit_price_cents, 0)
     }
-  })
+  }
+  // Priced as one cycle order would be: rounded once (ADR-028).
+  const priced = priceLines(
+    lines.map((l) => ({
+      position: l.position,
+      qty: l.qty,
+      unitCogsCents: (bySku.get(l.sku) as ProductRow).unit_cogs_cents,
+      unitMarkupCents: l.unit_markup_cents,
+      unitPriceCents: l.unit_price_cents
+    })),
+    FEE_BPS
+  )
+  const byPosition = new Map(priced.lines.map((pl) => [pl.position, pl]))
+  return {
+    lines: lines.map((l) => ({
+      ...l,
+      name: (bySku.get(l.sku) as ProductRow).name,
+      unitPriceCents: byPosition.get(l.position)?.unitPriceCents ?? l.unit_price_cents
+    })),
+    subtotalCents: priced.subtotal
+  }
 }
 
 function toCycleView(order: CycleOrderRow): ScheduleCycleView {
@@ -624,11 +639,10 @@ function toCycleView(order: CycleOrderRow): ScheduleCycleView {
 
 /** Build the full provider view for one schedule (lines + recent cycles). */
 async function buildScheduleView(db: Knex, s: ScheduleRow): Promise<ScheduleView> {
-  const lines = await scheduleLinesPricedNow(db, s.id)
+  const { lines, subtotalCents: perCycleSubtotalCents } = await scheduleLinesPricedNow(db, s.id)
   const cycleRows = await db<CycleOrderRow>('orders')
     .where({ schedule_id: s.id })
     .orderBy('cycle_number', 'desc')
-  const perCycleSubtotalCents = lines.reduce((a, l) => a + l.qty * l.unitPriceCents, 0)
   return {
     id: s.id,
     patientId: s.patient_id,

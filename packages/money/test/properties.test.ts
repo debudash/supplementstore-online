@@ -7,7 +7,7 @@
  *
  *   - line fees sum EXACTLY to the order fee              (AI-02)
  *   - per line: cogs + fee + margin = total              (ADR-003)
- *   - order fee = half-up of subtotal x 0.0075           (ADR-001/003)
+ *   - order fee = subtotal x 0.0075 rounded UP           (ADR-001/028)
  *   - allocation is deterministic                        (ADR-003)
  *   - when split succeeds, every line margin >= 0        (ADR-004)
  *
@@ -19,9 +19,9 @@ import { MoneyError, allocateFee, orderFee, split, type SplitLineInput } from ".
 
 const RUNS = { numRuns: 10_000 } as const;
 
-/** Independent BigInt oracle for the half-up order fee (no reuse of production code). */
+/** Independent BigInt oracle for the rounded-up order fee (no reuse of production code). */
 function feeOracle(subtotal: number, feeBps = 75): number {
-  return Number((BigInt(subtotal) * BigInt(feeBps) + 5000n) / 10000n);
+  return Number((BigInt(subtotal) * BigInt(feeBps) + 9999n) / 10000n);
 }
 
 // qty 1..100 and prices up to 10_000_000 cents keep subtotal <= 1e10 (safe).
@@ -55,8 +55,8 @@ describe("EVAL-P1: allocateFee reconciles exactly (direct AI-02 guard)", () => {
   });
 });
 
-describe("EVAL-P1: orderFee is the half-up fee of the subtotal", () => {
-  it("matches an independent BigInt half-up oracle", () => {
+describe("EVAL-P1: orderFee is the subtotal's fee rounded up", () => {
+  it("matches an independent BigInt round-up oracle", () => {
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 10_000_000_000 }), (subtotal) => {
         expect(orderFee(subtotal)).toBe(feeOracle(subtotal));
@@ -104,7 +104,7 @@ describe("EVAL-P1: split holds all invariants for random orders (prices >= cogs)
           return;
         }
 
-        // Order fee is the half-up fee of the subtotal (ADR-001/003).
+        // Order fee is the subtotal's fee rounded up (ADR-001/028).
         expect(result.fee).toBe(feeOracle(result.subtotal));
 
         // Line fees reconcile exactly to the order fee (AI-02).

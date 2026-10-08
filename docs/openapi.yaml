@@ -105,10 +105,11 @@ paths:
       tags: [Provider - catalog & patients]
       summary: Preview the unit price a per-unit markup would set (ADR-028)
       description: |
-        Read-only. Uses the same priceFromMarkupCents the add-line path stores, so the preview
-        is exactly what the order line will get: unit price = ceil((unitCogs + max(markup, 1))
-        * 10000 / (10000 - feeBps)) against the CURRENT catalog COGS, feeBps = 75. The response
-        also carries the split for `qty` units. All amounts are integer cents.
+        Read-only. Uses the same priceOrder an order uses, for a one-line order of `qty` units
+        against the CURRENT catalog COGS, feeBps = 75: line total = ceil(qty x (unitCogs +
+        markup) x 10000 / (10000 - feeBps)), fee = 0.75% of it rounded up to the cent, and the
+        provider nets exactly qty x markup. unitPriceCents is the line total / qty (half-up);
+        unitPriceIsAverage is true when that is not exact. All amounts are integer cents.
       parameters:
         - { name: sku, in: path, required: true, schema: { type: string }, example: "MAG-GLY-120" }
         - { name: markupCents, in: query, required: true, description: "Per-unit markup, INTEGER CENTS ($0..$1,000)", schema: { type: integer, minimum: 0, maximum: 100000 }, example: 1526 }
@@ -119,7 +120,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PricePreview" }
-              example: { sku: "MAG-GLY-120", markupCents: 1526, unitPriceCents: 2999, qty: 1, lineTotalCents: 2999, lineCogsCents: 1450, lineFeeCents: 22, lineMarginCents: 1527, lineMarkupCents: 1526, lineRoundingCents: 1 }
+              example: { sku: "MAG-GLY-120", markupCents: 1526, unitPriceCents: 2999, qty: 1, lineTotalCents: 2999, lineCogsCents: 1450, lineFeeCents: 23, lineMarginCents: 1526, unitPriceIsAverage: false }
         "400": { $ref: "#/components/responses/InvalidInput" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -1186,14 +1187,13 @@ components:
       properties:
         sku: { type: string }
         markupCents: { type: integer, description: The per-unit markup previewed, INTEGER CENTS }
-        unitPriceCents: { type: integer, description: INTEGER CENTS - what the order line would get (COGS + markup + fee) }
+        unitPriceCents: { type: integer, description: "INTEGER CENTS - line total / qty, half-up, for display (COGS + markup + fee); an average when unitPriceIsAverage" }
         qty: { type: integer, description: Quantity previewed (default 1) }
-        lineTotalCents: { type: integer }
+        lineTotalCents: { type: integer, description: "What is charged for the line (authoritative)" }
         lineCogsCents: { type: integer }
-        lineFeeCents: { type: integer }
-        lineMarginCents: { type: integer, description: Provider net for the line; >= qty x markup at order level }
-        lineMarkupCents: { type: integer, description: qty x markup }
-        lineRoundingCents: { type: integer, description: "lineMarginCents - lineMarkupCents: the price rounding, which goes to the provider (ADR-028)" }
+        lineFeeCents: { type: integer, description: "0.75% of the line total, rounded up to the cent (one-line order)" }
+        lineMarginCents: { type: integer, description: "Provider net for the line: exactly qty x markup (ADR-028)" }
+        unitPriceIsAverage: { type: boolean, description: "True when lineTotalCents / qty is not a whole cent, so unitPriceCents is an average" }
 
     PatientRosterItem:
       type: object
@@ -1236,12 +1236,11 @@ components:
         unitPriceCents: { type: integer }
         unitCogsCents: { type: integer }
         unitMarkupCents: { type: [integer, "null"], description: "The provider's per-unit markup (ADR-028); null on lines priced before it" }
-        lineTotalCents: { type: integer }
+        unitPriceIsAverage: { type: boolean, description: "True when the line total is not qty x a whole-cent price (the order total is rounded once, ADR-028); unitPriceCents is then an average for display and the line total is what is charged" }
+        lineTotalCents: { type: integer, description: "What is charged for the line (authoritative)" }
         lineCogsCents: { type: integer }
-        lineFeeCents: { type: integer }
-        lineMarginCents: { type: integer }
-        lineMarkupCents: { type: [integer, "null"], description: "qty x markup; present on a quote or sent order (ADR-028)" }
-        lineRoundingCents: { type: [integer, "null"], description: "Price rounding to the provider: lineMarginCents - lineMarkupCents" }
+        lineFeeCents: { type: integer, description: "Stored line fee: line total - line cogs - qty x markup (within 1 cent of the line's exact 0.75%); line fees sum to the order fee" }
+        lineMarginCents: { type: integer, description: "Provider net for the line; exactly qty x markup on a markup-priced line" }
 
     OrderTotals:
       type: object
@@ -1250,10 +1249,8 @@ components:
         feeBps: { type: integer, description: 'Platform fee rate in basis points (snapshotted, default 75)' }
         subtotalCents: { type: integer }
         cogsCents: { type: integer }
-        feeCents: { type: integer }
-        marginCents: { type: integer }
-        markupCents: { type: [integer, "null"], description: "Sum of qty x markup; marginCents = markupCents + roundingCents (ADR-028)" }
-        roundingCents: { type: [integer, "null"], description: "Sum of line price roundings (to the provider, >= 0)" }
+        feeCents: { type: integer, description: "0.75% of the subtotal, rounded up to the cent, once per order (ADR-028)" }
+        marginCents: { type: integer, description: "Provider net; equals the sum of qty x markup on a markup-priced order" }
 
     OrderView:
       type: object
@@ -1357,10 +1354,9 @@ components:
         feeBps: { type: integer }
         subtotalCents: { type: [integer, "null"] }
         cogsCents: { type: [integer, "null"] }
-        feeCents: { type: [integer, "null"] }
+        feeCents: { type: [integer, "null"], description: "0.75% of the subtotal, rounded up to the cent, once per order (ADR-028)" }
         marginCents: { type: [integer, "null"] }
-        markupCents: { type: [integer, "null"], description: "Sum of qty x markup; marginCents = markupCents + roundingCents (ADR-028)" }
-        roundingCents: { type: [integer, "null"], description: "Sum of line price roundings (to the provider, >= 0)" }
+        markupCents: { type: [integer, "null"], description: "Sum of qty x markup (ADR-028); equals marginCents (subtotal = cogs + fee + markup, nothing left over as rounding). Null unless every line has a markup" }
         isSynthetic: { type: boolean }
         createdAt: { type: string }
         sentAt: { type: [string, "null"] }
@@ -1387,8 +1383,8 @@ components:
         lineCogsCents: { type: [integer, "null"] }
         lineFeeCents: { type: [integer, "null"] }
         lineMarginCents: { type: [integer, "null"] }
-        lineMarkupCents: { type: [integer, "null"], description: "qty x markup (ADR-028); null before split or for legacy lines" }
-        lineRoundingCents: { type: [integer, "null"], description: "Price rounding to the provider: lineMarginCents - lineMarkupCents" }
+        lineMarkupCents: { type: [integer, "null"], description: "qty x markup (ADR-028): the provider's share of the line; null on legacy lines" }
+        unitPriceIsAverage: { type: boolean, description: "True when lineTotalCents / qty is not a whole cent (the order is rounded once, ADR-028); unitPriceCents is then an average" }
 
     AuditEvent:
       type: object
