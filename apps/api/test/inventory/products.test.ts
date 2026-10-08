@@ -78,13 +78,16 @@ describe('price preview (ADR-028)', () => {
       lineTotalCents: 7407,
       lineCogsCents: 4350,
       lineFeeCents: 56,
-      lineMarginCents: 3001
+      lineMarginCents: 3001,
+      // margin 3001 = markup 3 x 1000 + 1 cent of price rounding (ADR-028)
+      lineMarkupCents: 3000,
+      lineRoundingCents: 1
     })
   })
 
   it('markup 0 previews cost + fee with 1 cent of rounding headroom', async () => {
     const res = await asProvider('/api/products/MAG-GLY-120/price-preview?markupCents=0')
-    expect(res.body).toMatchObject({ unitPriceCents: 1462, lineFeeCents: 11, lineMarginCents: 1 })
+    expect(res.body).toMatchObject({ unitPriceCents: 1462, lineFeeCents: 11, lineMarginCents: 1, lineMarkupCents: 0, lineRoundingCents: 1 })
   })
 
   it.each([

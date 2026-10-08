@@ -15,7 +15,9 @@ const result = (unitPriceCents: number, marginCents = 1000, feeCents = 19) => ({
   lineTotalCents: unitPriceCents,
   lineCogsCents: 1450,
   lineFeeCents: feeCents,
-  lineMarginCents: marginCents
+  lineMarginCents: marginCents,
+  lineMarkupCents: marginCents,
+  lineRoundingCents: 0
 })
 
 beforeEach(() => {
@@ -33,7 +35,8 @@ describe('MarkupPreview', () => {
     await flushPromises()
     expect(preview).toHaveBeenCalledWith('MAG-GLY-120', 1000)
     expect(w.text()).toContain('Patient pays $24.69 per unit')
-    expect(w.text()).toContain('cost $14.50 + you net $10.00 + fee $0.19')
+    expect(w.text()).toContain('cost $14.50 + your markup $10.00 + fee $0.19')
+    expect(w.text()).not.toContain('rounding')
   })
 
   it('does nothing for blank, malformed or over-cap markups', async () => {

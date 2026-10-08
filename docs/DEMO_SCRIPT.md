@@ -65,9 +65,9 @@ The items table and Order summary read:
 | **Order** | **$84.97** | **$40.25** | **$0.64** | **$44.08** |
 
 Talking points: the 0.75% fee is computed once on $84.97 (64c, half-up) and split 45/19 by
-largest remainder, so the lines add back exactly. Every line satisfies cost + fee + margin =
-total, and margin is never negative. The provider keeps the markup they typed: the order nets
-$44.08 against $44.07 of markup (2 x $15.26 + $13.55); the extra cent is round-up headroom.
+largest remainder, so the lines add back exactly. The Order summary shows **Your markup $44.07**
+(2 x $15.26 + $13.55) and **Price rounding $0.01**: the unit price is rounded up to the cent and
+that rounding goes to the provider, who set the price. Cerbo's fee stays exactly 0.75%.
 
 **Price is never typed.** The provider enters a dollar markup; the server derives the price as
 cost + markup grossed up for the fee (`price = ceil((cost + markup) / (1 - 0.0075))`, a $0
@@ -89,8 +89,9 @@ In a new draft:
 - **Low stock.** Add **Probiotic, quantity 6**. Refused with "On-hand stock cannot meet this
   quantity (available: 5). Wait for restock or reduce quantity." Quantity 5 is accepted.
 - **Out of stock.** Zinc is listed but disabled ("Out of stock").
-- **Margin floor.** Add **Vitamin D3, markup $0**. The patient pays **$11.35** (cost + fee + 1
-  cent of rounding headroom) and the provider nets **$0.01**. Because the price is always cost +
+- **Margin floor.** Add **Vitamin D3, markup $0**. The patient pays **$11.35** and the line reads
+  **markup $0.00 + rounding $0.01**: cost $11.25 + fee $0.09 + markup $0.00 + price rounding $0.01.
+  Because the price is always cost +
   markup grossed up for the fee, a markup-priced line can never go below zero: a provider can
   never sell at a loss (the `MARGIN_NEGATIVE` guard still exists for legacy lines, EVAL-04).
 
@@ -116,8 +117,11 @@ order stays sent and nothing is posted.
 
 **Dr. Ana Reyes > Orders**, click the order row. The audit page shows the patient, status and
 amounts, and **Invariants: all checks pass**. Tabs:
-- **Money split:** each line's total, COGS, fee and net, plus the provider's **Markup / unit**
-  ($15.26 and $13.55); totals from the order record.
+- **Money split - "Where every cent went":** **$84.97 = cost of goods $40.25 (Cerbo) + platform
+  fee $0.64 (Cerbo, exactly 0.75%) + provider markup $44.07 + price rounding $0.01 (provider)**.
+  Each line shows the same parts: Magnesium x2 = $29.00 + $0.45 + markup $30.52 (2 x $15.26) +
+  rounding $0.01; Vitamin D3 = $11.25 + $0.19 + $13.55 + $0.00. The **Checks** tab includes
+  `order.every_cent_accounted` and `order.rounding_within_bounds`, both passing.
 - **Ledger:** the payment journal with Debit and Credit columns and a **Balanced** badge.
 - **Timeline:** draft, sent, paid. **Stock:** reserve at send, sale at pay.
 - **Checks:** each invariant in plain English, all passing.

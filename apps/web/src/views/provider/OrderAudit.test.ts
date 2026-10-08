@@ -31,14 +31,15 @@ import { ApiError } from '../../api/client'
 const audit = {
   order: {
     id: 'o1', status: 'paid', kind: 'one_time', providerId: 'pr1', practiceId: 'pc1', patientId: 'p1', feeBps: 75,
-    subtotalCents: 5998, cogsCents: 2900, feeCents: 45, marginCents: 3053, isSynthetic: false,
+    subtotalCents: 5998, cogsCents: 2900, feeCents: 45, marginCents: 3053, markupCents: 3052, roundingCents: 1, isSynthetic: false,
     createdAt: '2026-10-06T12:00:00.000Z', sentAt: '2026-10-06T12:05:00.000Z', paidAt: '2026-10-06T13:00:00.000Z',
     fulfilledAt: null, cancelledAt: null, expiredAt: null, refundedAt: null, payToken: null, payPath: null
   },
   lines: [
     {
       id: 'l1', position: 1, sku: 'MAG-GLY-120', name: 'Magnesium Glycinate 120ct', qty: 2, unitPriceCents: 2999,
-      unitCogsCents: 1450, lineTotalCents: 5998, lineCogsCents: 2900, lineFeeCents: 45, lineMarginCents: 3053
+      unitCogsCents: 1450, unitMarkupCents: 1526, lineTotalCents: 5998, lineCogsCents: 2900, lineFeeCents: 45, lineMarginCents: 3053,
+      lineMarkupCents: 3052, lineRoundingCents: 1
     }
   ],
   statusHistory: [
@@ -89,8 +90,24 @@ describe('OrderAudit', () => {
       expect(w.find(`[data-testid="tab-${id}"]`).exists()).toBe(true)
     }
     // Money split totals come from the order fields.
-    expect(w.find('tfoot').text()).toContain('$59.98')
-    expect(w.find('tfoot').text()).toContain('$30.53')
+    const splitFoot = w.findAll('tfoot').at(-1)!
+    expect(splitFoot.text()).toContain('$59.98')
+    expect(splitFoot.text()).toContain('$30.53')
+    expect(splitFoot.text()).toContain('$30.52')
+  })
+
+  it('names every cent: cost + fee + markup + rounding = what the patient paid', async () => {
+    const w = mount(OrderAudit)
+    await flushPromises()
+    const cents = w.find('[data-testid="every-cent"]')
+    expect(cents.exists()).toBe(true)
+    const text = cents.text()
+    for (const part of ['Cost of goods', '$29.00', 'Platform fee (0.75% of the order)', '$0.45', 'Provider markup', '$30.52', 'Patient paid', '$59.98']) {
+      expect(text).toContain(part)
+    }
+    expect(cents.find('[data-testid="every-cent-rounding"]').text()).toContain('$0.01')
+    expect(w.find('[data-test="audit-rounding"]').text()).toBe('$0.01')
+    expect(w.find('[data-test="audit-markup"]').text()).toContain('2 × $15.26')
   })
 
   it('shows a journal with Debit and Credit columns and a Balanced badge', async () => {

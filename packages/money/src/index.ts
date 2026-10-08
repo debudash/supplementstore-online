@@ -19,6 +19,8 @@ export { split } from "./split";
 export type { SplitLineInput, SplitLine, OrderSplit } from "./split";
 
 export { priceFromMarkupCents, MAX_MARKUP_CENTS } from "./pricing";
+export { markupBreakdown, maxRoundingCents } from "./breakdown";
+export type { MarkupBreakdown, MarkupBreakdownLine } from "./breakdown";
 
 export {
   processingCostCents,

@@ -5,7 +5,7 @@
 // write inventory_movements (money rule 8).
 import { randomBytes } from 'node:crypto'
 import type { Knex } from 'knex'
-import { split, priceFromMarkupCents, type OrderSplit, type SplitLineInput } from '@cerbo/money'
+import { split, priceFromMarkupCents, markupBreakdown, type OrderSplit, type SplitLineInput } from '@cerbo/money'
 import type { Actor } from '../auth/types'
 import type { Seams } from '../seams/types'
 import { createSeams } from '../seams'
@@ -83,6 +83,8 @@ export interface OrderLineView {
   unitCogsCents: number
   /** The provider's per-unit markup (ADR-028); null on lines priced before it. */
   unitMarkupCents: number | null
+  lineMarkupCents?: number | null
+  lineRoundingCents?: number | null
   lineTotalCents: number
   lineCogsCents: number
   lineFeeCents: number
@@ -102,6 +104,8 @@ export interface OrderView {
     cogsCents: number
     feeCents: number
     marginCents: number
+    markupCents?: number | null
+    roundingCents?: number | null
   } | null
   lines: OrderLineView[]
   payToken: string | null
@@ -170,6 +174,25 @@ function liveSplit(order: OrderRow, lines: LineRow[], products: Map<string, Prod
   return split(inputs, order.fee_bps)
 }
 
+/**
+ * Name every cent of a split order (ADR-028): each line's net margin is the provider's
+ * markup plus the price rounding, so total = COGS + fee + markup + rounding. Applied only
+ * once lines carry a split (a quote or a sent order).
+ */
+function withMarkupBreakdown<T extends { totals: OrderView['totals']; lines: OrderLineView[] }>(v: T): T {
+  if (!v.totals || v.lines.length === 0) return v
+  const b = markupBreakdown(v.lines.map((l) => ({ qty: l.qty, unitMarkupCents: l.unitMarkupCents, marginCents: l.lineMarginCents })))
+  return {
+    ...v,
+    totals: { ...v.totals, markupCents: b.markupCents, roundingCents: b.roundingCents },
+    lines: v.lines.map((l, i) => ({
+      ...l,
+      lineMarkupCents: b.lines[i]?.markupCents ?? null,
+      lineRoundingCents: b.lines[i]?.roundingCents ?? null
+    }))
+  }
+}
+
 function viewFromRows(
   order: OrderRow,
   lines: LineRow[],
@@ -189,7 +212,7 @@ function viewFromRows(
           marginCents: order.margin_cents
         }
       : null
-  return {
+  return withMarkupBreakdown({
     id: order.id,
     status: order.status,
     providerId: order.provider_id,
@@ -220,7 +243,7 @@ function viewFromRows(
     reservationExpiresAt: iso(order.reservation_expires_at),
     sentAt: iso(order.sent_at),
     createdAt: new Date(order.created_at).toISOString()
-  }
+  })
 }
 
 /** Build an OrderView after a mutation, pulling fresh lines + product names. */
@@ -455,7 +478,7 @@ export async function getQuote(db: Knex, actor: Actor, orderId: string): Promise
   if (order.status === 'draft') {
     const result = liveSplit(order, lines, products)
     const bySplitPosition = new Map(result.lines.map((l) => [l.position, l]))
-    return {
+    return withMarkupBreakdown({
       orderId,
       status: order.status,
       totals: {
@@ -483,7 +506,7 @@ export async function getQuote(db: Knex, actor: Actor, orderId: string): Promise
           lineMarginCents: s?.margin ?? 0
         }
       })
-    }
+    })
   }
 
   const view = viewFromRows(order, lines, names)
