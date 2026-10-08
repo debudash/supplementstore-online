@@ -366,6 +366,10 @@ product it relates to, the result, the range and the date. A product already on 
 is marked as such; an out-of-stock one says so. It is decision support for the provider only:
 no buttons, nothing stored, never shown to the patient.
 
+![Lab suggestions block on the order builder (DEMO)](docs/images/lab-suggestions-option-c.png)
+
+The approved wireframe is in `docs/SPEC.md` (E-1).
+
 This is a showcase of where Cerbo can go, not a delivered requirement (ADR-029, SPEC E-1). The
 lab panels are simulated for the two seeded patients and the rules are a small table in
 `apps/web/src/demo/labSuggestions.ts`. A production version would move panels and rules
