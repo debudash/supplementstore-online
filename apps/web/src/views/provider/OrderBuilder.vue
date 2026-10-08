@@ -17,6 +17,7 @@ import AddLineForm from '../../components/order/AddLineForm.vue'
 import LineRow from '../../components/order/LineRow.vue'
 import QuoteSummary from '../../components/order/QuoteSummary.vue'
 import CopyLink from '../../components/order/CopyLink.vue'
+import LabSuggestions from '../../components/order/LabSuggestions.vue'
 import PageHeader from '../../components/ui/PageHeader.vue'
 import Card from '../../components/ui/Card.vue'
 import UiAlert from '../../components/ui/UiAlert.vue'
@@ -66,6 +67,10 @@ const patientName = computed(() => {
   const id = orderPatientId.value ?? selectedPatientId.value
   return patients.value.find((p) => p.id === id)?.name ?? null
 })
+// DEMO extension (ADR-029): inputs for the read-only lab suggestions block.
+const labPatientId = computed(() => orderPatientId.value ?? (selectedPatientId.value || null))
+const patientFirstName = computed(() => patientName.value?.split(' ')[0] ?? null)
+const onOrderSkus = computed(() => new Set(Object.keys(onOrderBySku.value)))
 
 const step = computed(() => (!hasOrder.value ? 1 : sendResult.value || !isDraft.value ? 3 : 2))
 const STEPS = ['Patient', 'Items', 'Review & send']
@@ -408,6 +413,14 @@ function goOrders(e: Event): void {
             </table>
           </div>
         </section>
+
+        <LabSuggestions
+          v-if="isDraft"
+          :patient-id="labPatientId"
+          :patient-first-name="patientFirstName"
+          :on-order-skus="onOrderSkus"
+          :products="products"
+        />
       </div>
 
       <aside class="side-col">

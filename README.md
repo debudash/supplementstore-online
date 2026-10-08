@@ -358,6 +358,23 @@ These capabilities are implemented and merged, and each is covered by at least o
   order's pay path), so a demo does not depend on copying the link at the moment the order is
   sent. The link is also reachable via the send response and the Notifier stub log.
 
+### Beyond the brief: lab-informed suggestions (DEMO showcase)
+
+The order builder shows a read-only, DEMO-labelled block, "Suggestions from <patient>'s latest
+labs". It reads the patient's latest lab panel and lists each low marker with the catalog
+product it relates to, the result, the range and the date. A product already on the order
+is marked as such; an out-of-stock one says so. It is decision support for the provider only:
+no buttons, nothing stored, never shown to the patient.
+
+This is a showcase of where Cerbo can go, not a delivered requirement (ADR-029, SPEC E-1). The
+lab panels are simulated for the two seeded patients and the rules are a small table in
+`apps/web/src/demo/labSuggestions.ts`. A production version would move panels and rules
+server-side behind provider-scoped access (lab results are protected health information),
+source them from a lab feed (HL7 v2 / FHIR Observation), have the rules reviewed clinically,
+and log who viewed them. The point it makes: an ordering platform that already knows the
+patient, the catalog and the provider's margin can turn lab results into relevant,
+explainable suggestions at the moment the order is built.
+
 ### Still out of scope by design
 
 From `docs/SPEC.md` "Out of scope"; none of these is a cut, they were never in scope:
