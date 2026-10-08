@@ -45,6 +45,7 @@ apps/web/
   src/router.ts             all routes pre-registered (T0)
   src/api/                  client
   src/views/provider/       OrderBuilder, Orders, OrderAudit, Recurring, Dashboard, Payables, RefundReview
+  src/demo/                 labSuggestions.ts - DEMO extension (ADR-029): simulated lab panels + rule table, web only
   src/views/patient/        MyOrders, Pay, ScheduleAuthorize
   src/views/admin/          Evidence, Metrics, Inventory, Operations, DemoData, Payables
 tests/e2e/                  scenario evals, golden/** (protected)
