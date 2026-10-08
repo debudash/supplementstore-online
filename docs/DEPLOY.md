@@ -101,3 +101,14 @@ Railway has no permanent free tier. New users get a one-time 5 USD trial credit.
 
 ## Rollback
 Redeploy the previous successful deployment from the Railway dashboard (option 1 above). Migrations are additive only, so rolling back code does not require rolling back schema.
+
+## CI fast path (2026-10-08)
+Push-to-live time was dominated by queueing and duplicate work, not by the safety gates:
+- **One pipeline per change.** `workflow:rules` skips a branch-push pipeline when the branch already has an open MR; the MR pipeline (started by GitLab for the same push) is the gate. For the first push of a new change, push with `git push -o ci.skip` and open the MR: the MR pipeline is then the only one. Never trigger an extra MR pipeline by hand when the `approved-protected-change` label is set at MR creation - it only queues behind the others on the single laptop runner (4 job slots).
+- **Docs-only MRs skip the suite.** `build-test` and `e2e` exit early when every changed file is under `docs/` or is `*.md`; the `ai01`/`ai03` guardrails (including the protected-docs label check) still run. The check fails open: if the MR diff cannot be computed, the full suite runs.
+- **Not yet enabled: skipping the re-test on `main`.** It is safe only when `main` can change exclusively through tested MRs (protected branch: "Allowed to push" = No one, force push off) and the merge method is fast-forward, so `main` is byte-for-byte the commit the MR pipeline tested. Until then `main` re-runs the suite before deploying.
+
+### Restore points for this change
+- Git tag `restore/pre-ci-fast-path-2026-10-08` = `main` as deployed before the change (`1ecd603`). Revert CI with `git checkout restore/pre-ci-fast-path-2026-10-08 -- .gitlab-ci.yml` and ship it through an MR.
+- Railway deployment `64371d73-6833-4170-9eae-507f0cb29bba` (SUCCESS, 2026-10-08 01:09 UTC) is the last deploy before the change: redeploy it from the Railway dashboard to roll the app back.
+- Off-repo (owner's machine, `Downloads/cerbo-backups/`): GitLab project merge settings and a full production DB JSON backup taken before the change.
