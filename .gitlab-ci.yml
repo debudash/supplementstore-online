@@ -18,9 +18,16 @@ stages:
 # excluded, which is why a manual/api pipeline on main was refused. This only lets the
 # pipeline START; the deploy-railway job's own rules still gate it to main AND
 # $RAILWAY_TOKEN, so a web/api run on a feature branch runs guardrails + build-test only.
+#
+# ONE PIPELINE PER CHANGE: a push to a branch that already has an open MR does not start a
+# separate branch pipeline - the MR pipeline (which GitLab starts for the same push) is
+# the gate. Before this rule every push ran two identical pipelines that competed for the
+# single laptop runner and left the MR pipeline queued for minutes.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push" && $CI_OPEN_MERGE_REQUESTS'
+      when: never
     - if: '$CI_COMMIT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
     - if: '$CI_PIPELINE_SOURCE == "web"'
     - if: '$CI_PIPELINE_SOURCE == "api"'
@@ -123,10 +130,23 @@ ai03-protected:
 build-test:
   stage: test
   needs: []
+  variables:
+    GIT_DEPTH: "0"
   services:
     - name: postgres:16
       alias: postgres
   script:
+    # DOCS-ONLY MRs skip the suite: if every file the MR changes is under docs/ or is a
+    # Markdown file, there is no code to test (ai01/ai03 guardrails still run, including
+    # the protected-docs label check). Fails OPEN: if the MR diff cannot be computed, or
+    # this is not an MR pipeline (e.g. main), the full suite runs.
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] \
+         && CHANGED="$(git diff --name-only "$CI_MERGE_REQUEST_DIFF_BASE_SHA" HEAD)" && [ -n "$CHANGED" ] \
+         && ! printf '%s\n' "$CHANGED" | grep -qvE '^docs/|\.md$'; then
+        echo "Docs-only MR - nothing to test:"; printf '%s\n' "$CHANGED"
+        exit 0
+      fi
     # Strict, reproducible install. NO `|| npm install` fallback: the fallback
     # silently masked root lockfile drift, so every "green" pipeline was really
     # green on npm install, never on npm ci. A green build-test here now proves the
@@ -154,10 +174,23 @@ build-test:
 e2e:
   stage: test
   needs: []
+  variables:
+    GIT_DEPTH: "0"
   services:
     - name: postgres:16
       alias: postgres
   script:
+    # DOCS-ONLY MRs skip the suite: if every file the MR changes is under docs/ or is a
+    # Markdown file, there is no code to test (ai01/ai03 guardrails still run, including
+    # the protected-docs label check). Fails OPEN: if the MR diff cannot be computed, or
+    # this is not an MR pipeline (e.g. main), the full suite runs.
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] \
+         && CHANGED="$(git diff --name-only "$CI_MERGE_REQUEST_DIFF_BASE_SHA" HEAD)" && [ -n "$CHANGED" ] \
+         && ! printf '%s\n' "$CHANGED" | grep -qvE '^docs/|\.md$'; then
+        echo "Docs-only MR - nothing to test:"; printf '%s\n' "$CHANGED"
+        exit 0
+      fi
     - npm ci --prefer-offline
     - npm run build
     - npm run test:e2e
