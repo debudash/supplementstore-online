@@ -14,7 +14,7 @@
  * The rules under review:
  *   ADR-001  platform fee = 0.75% (75 bps) of the patient-paid subtotal
  *   ADR-002  patient sees no fee line (ADR-028: the fee is built into the price)
- *   ADR-003  integer cents; fee computed once per order, half-up; allocated to
+ *   ADR-003  integer cents; fee computed once per order, rounded UP (ADR-028); allocated to
  *            lines by largest remainder (never per-line rounding)
  *   ADR-004  line margin after allocated fee must be >= 0; zero margin allowed
  *   ADR-028  price derives from the provider's per-unit dollar markup:
@@ -29,7 +29,7 @@ import {
   MoneyError,
   allocateFee,
   orderFee,
-  priceFromMarkupCents,
+  priceOrder,
   refund,
   split,
   type SplitLineInput,
@@ -43,7 +43,7 @@ const COGS = {
 } as const;
 
 describe("EVAL-01 - two-line order, fee allocation by largest remainder", () => {
-  // ADR-001 (0.75% fee), ADR-003 (half-up once per order, largest-remainder allocation).
+  // ADR-001 (0.75% fee), ADR-003 (rounded up once per order, largest-remainder allocation).
   const lines: SplitLineInput[] = [
     { position: 0, qty: 2, unitPriceCents: 2999, unitCogsCents: COGS.MAG_GLY_120 },
     { position: 1, qty: 1, unitPriceCents: 2499, unitCogsCents: COGS.VITD3_K2 },
@@ -75,19 +75,19 @@ describe("EVAL-01 - two-line order, fee allocation by largest remainder", () => 
   });
 });
 
-describe("EVAL-02 - single line, fee rounds down", () => {
-  // ADR-001 (0.75%), ADR-003 (half-up: raw 37.4925 rounds DOWN to 37).
-  it("EVAL-02: OMEGA3-1000 x1 @ 4999 -> fee 37, margin 2682", () => {
+describe("EVAL-02 - single line, fee rounds up (ADR-028)", () => {
+  // ADR-001 (0.75%), ADR-028 (rounded up once: raw 37.4925 rounds UP to 38).
+  it("EVAL-02: OMEGA3-1000 x1 @ 4999 -> fee 38, margin 2681", () => {
     const result = split([
       { position: 0, qty: 1, unitPriceCents: 4999, unitCogsCents: COGS.OMEGA3_1000 },
     ]);
-    expect(result.fee).toBe(37);
-    expect(result.lines[0]?.margin).toBe(2682);
+    expect(result.fee).toBe(38);
+    expect(result.lines[0]?.margin).toBe(2681);
   });
 });
 
-describe("EVAL-03 - half-up boundary, fee rounds up", () => {
-  // ADR-003: half-up rounding - raw fee of exactly 16.5 cents rounds UP to 17.
+describe("EVAL-03 - fee rounds up", () => {
+  // ADR-028: a raw fee of 16.5 cents rounds UP to 17.
   it("EVAL-03: VITD3-K2 x1 @ 2200 -> fee 17, margin 1058", () => {
     const result = split([
       { position: 0, qty: 1, unitPriceCents: 2200, unitCogsCents: COGS.VITD3_K2 },
@@ -104,7 +104,8 @@ describe("EVAL-04 - margin floor (margin after allocated fee must be >= 0)", () 
     { position: 0, qty: 1, unitPriceCents, unitCogsCents: COGS.VITD3_K2 },
   ];
 
-  it("EVAL-04: @1125 rejected MARGIN_NEGATIVE (margin -8)", () => {
+  // The fee rounds up (ADR-028): 0.75% of 1125..1134 is 8.44..8.51 cents -> 9.
+  it("EVAL-04: @1125 rejected MARGIN_NEGATIVE (margin -9)", () => {
     expect(() => split(line(1125))).toThrowError(MoneyError);
     try {
       split(line(1125));
@@ -112,13 +113,13 @@ describe("EVAL-04 - margin floor (margin after allocated fee must be >= 0)", () 
       const err = e as MoneyError;
       expect(err.code).toBe("MARGIN_NEGATIVE");
       expect(err.details.position).toBe(0); // the offending line is named
-      expect(err.details.margin).toBe(-8);
+      expect(err.details.margin).toBe(-9);
     }
   });
 
-  it("EVAL-04: @1132 rejected MARGIN_NEGATIVE (margin -1)", () => {
+  it("EVAL-04: @1133 rejected MARGIN_NEGATIVE (margin -1)", () => {
     try {
-      split(line(1132));
+      split(line(1133));
       throw new Error("expected MARGIN_NEGATIVE");
     } catch (e) {
       const err = e as MoneyError;
@@ -127,26 +128,22 @@ describe("EVAL-04 - margin floor (margin after allocated fee must be >= 0)", () 
     }
   });
 
-  it("EVAL-04: @1133 accepted with margin 0 (zero margin allowed)", () => {
-    const result = split(line(1133));
+  it("EVAL-04: @1134 accepted with margin 0 (zero margin allowed)", () => {
+    const result = split(line(1134));
     expect(result.lines[0]?.margin).toBe(0);
   });
 });
 
 describe("EVAL-04b - dollar markup derives the price (ADR-028)", () => {
-  // The patient pays COGS + markup + fee; the price is grossed up so the fee is covered.
+  // The patient pays COGS + markup + fee, rounded once; the provider nets exactly the markup.
   it("EVAL-04b: MAG-GLY-120 (cogs 1450) + markup 1000 -> unit price 2469, fee 19, margin 1000", () => {
-    const price = priceFromMarkupCents(COGS.MAG_GLY_120, 1000, 75);
-    expect(price).toBe(2469);
-    const result = split([{ position: 0, qty: 1, unitPriceCents: price, unitCogsCents: COGS.MAG_GLY_120 }]);
-    expect(result.fee).toBe(19);
-    expect(result.margin).toBe(1000);
+    const r = priceOrder([{ position: 0, qty: 1, unitCogsCents: COGS.MAG_GLY_120, markupCents: 1000 }]);
+    expect([r.subtotal, r.fee, r.margin, r.lines[0]?.unitPriceCents]).toEqual([2469, 19, 1000, 2469]);
   });
 
-  it("EVAL-04b: markup 0 sells at cost + fee with 1 cent of rounding headroom (1462, margin 1)", () => {
-    const price = priceFromMarkupCents(COGS.MAG_GLY_120, 0, 75);
-    expect(price).toBe(1462);
-    expect(split([{ position: 0, qty: 1, unitPriceCents: price, unitCogsCents: COGS.MAG_GLY_120 }]).margin).toBe(1);
+  it("EVAL-04b: markup 0 sells at cost + fee (1461) and nets exactly 0", () => {
+    const r = priceOrder([{ position: 0, qty: 1, unitCogsCents: COGS.MAG_GLY_120, markupCents: 0 }]);
+    expect([r.subtotal, r.fee, r.margin]).toEqual([1461, 11, 0]);
   });
 });
 
@@ -225,10 +222,11 @@ describe("Input validation - safe positive integers only (RT-07 / AI-01)", () =>
     ["unsafe integer price", () => split([{ position: 0, qty: 1, unitPriceCents: Number.MAX_SAFE_INTEGER + 1, unitCogsCents: 1000 }])],
     ["empty order", () => split([])],
     ["fee on zero subtotal", () => orderFee(0)],
-    ["markup above $1,000", () => priceFromMarkupCents(1450, 100001, 75)],
-    ["negative markup", () => priceFromMarkupCents(1450, -1, 75)],
-    ["decimal markup", () => priceFromMarkupCents(1450, 10.5, 75)],
-    ["feeBps 10000 (div by zero)", () => priceFromMarkupCents(1450, 1000, 10000)],
+    ["markup above $1,000", () => priceOrder([{ position: 0, qty: 1, unitCogsCents: 1450, markupCents: 100001 }])],
+    ["negative markup", () => priceOrder([{ position: 0, qty: 1, unitCogsCents: 1450, markupCents: -1 }])],
+    ["decimal markup", () => priceOrder([{ position: 0, qty: 1, unitCogsCents: 1450, markupCents: 10.5 }])],
+    ["feeBps 10000 (div by zero)", () => priceOrder([{ position: 0, qty: 1, unitCogsCents: 1450, markupCents: 1000 }], 10000)],
+    ["empty markup order", () => priceOrder([])],
   ];
 
   for (const [name, fn] of bad) {

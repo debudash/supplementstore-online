@@ -1,8 +1,10 @@
 // Test helper (ADR-028): providers price a line with a per-unit markup, not a price. Many
 // scenarios are specified by the PRICE the patient pays (docs/EVALS.md: MAG @ 2999 ...),
-// so this returns the exact markup that prices a seed SKU at that price, and fails loudly
-// if no markup can (the grossed-up price skips about 1 in 133 cent values).
-import { priceFromMarkupCents, DEFAULT_FEE_BPS } from '@cerbo/money'
+// so this returns the exact markup that prices ONE unit of a seed SKU at that price, and
+// fails loudly if no markup can (the grossed-up price skips about 1 in 133 cent values).
+// Orders round once (ADR-028), so a multi-unit or multi-line order built from these
+// markups can total a cent less than qty x price.
+import { priceOrder, DEFAULT_FEE_BPS } from '@cerbo/money'
 
 /** Seed COGS from docs/EVALS.md, keyed by SKU. */
 export const SEED_COGS: Record<string, number> = {
@@ -16,7 +18,7 @@ export const SEED_COGS: Record<string, number> = {
 /** The per-unit markup that prices `sku` (at `cogs`, default seed COGS) at exactly `priceCents`. */
 export function markupFor(sku: string, priceCents: number, cogs: number = SEED_COGS[sku]): number {
   const markup = Math.floor((priceCents * (10000 - DEFAULT_FEE_BPS)) / 10000) - cogs
-  if (markup < 0 || priceFromMarkupCents(cogs, markup, DEFAULT_FEE_BPS) !== priceCents) {
+  if (markup < 0 || priceOrder([{ position: 1, qty: 1, unitCogsCents: cogs, markupCents: markup }], DEFAULT_FEE_BPS).subtotal !== priceCents) {
     throw new Error(`no markup prices ${sku} (cogs ${cogs}) at exactly ${priceCents}`)
   }
   return markup

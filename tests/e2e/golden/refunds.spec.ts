@@ -162,7 +162,7 @@ describe('refunds (golden)', () => {
     const res = await adminRefund(orderId, 'damaged')
     expect(res.status).toBe(200)
     // restocked=false -> patient notice keepOrDispose=true (written off, do not return).
-    expect(res.body).toMatchObject({ amountCents: 4999, feeRetainedCents: 37, restocked: false, writeoffCogsCents: 2280 })
+    expect(res.body).toMatchObject({ amountCents: 4999, feeRetainedCents: 38, restocked: false, writeoffCogsCents: 2280 })
 
     // ADR-013 write-off branch: NO restock, no refund_restock movement; OMEGA stays 29.
     expect((await db('products').where({ sku: SKU.OMEGA }).first()).on_hand_qty).toBe(29)

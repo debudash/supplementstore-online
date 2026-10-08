@@ -9,10 +9,10 @@ Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 
 | ID | Status | Area | Task | Scenario |
 |---|---|---|---|---|
-| EVAL-01 | PASS | money | T1/T3 | MAG x2@2999 + VITD3 x1@2499 -> subtotal 8497, fee 64, line fees [45,19], margins [3053,1355] |
-| EVAL-02 | PASS | money | T1/T3 | OMEGA3 x1@4999 -> fee 37, margin 2682 |
-| EVAL-03 | PASS | money | T1/T3 | VITD3 x1@2200 half-up -> fee 17, margin 1058 |
-| EVAL-04 | PASS | money | T1/T3 | VITD3 margin floor: markup 0 -> price 1135 (cost + fee + 1 cent headroom), margin 1 (split floor still rejects @1125/@1132) |
+| EVAL-01 | PASS | money | T1/T3 | MAG x2 markup 1526 + VITD3 x1 markup 1356, priced once -> subtotal 8497, fee 64, line fees [45,19], margins [3052,1356] (exactly the markups) |
+| EVAL-02 | PASS | money | T1/T3 | OMEGA3 x1@4999 -> fee 38 (37.49 rounded up, ADR-028), margin 2681 |
+| EVAL-03 | PASS | money | T1/T3 | VITD3 x1@2200 -> fee 17 (16.5 rounded up), margin 1058 |
+| EVAL-04 | PASS | money | T1/T3 | VITD3 margin floor: markup 0 -> price 1134 (cost + fee), margin exactly 0 (split floor still rejects @1125/@1133, accepts @1134) |
 | EVAL-04b | PASS | money | T1/T3 | MAG markup 1000 -> unit price 2469, fee 19, margin 1000 (ADR-028) |
 | EVAL-P1 | PASS | money | T1/T3 | Property: line fees sum to order fee; cogs+fee+margin=total; fee half-up; deterministic (API-driven) |
 | EVAL-05 | PASS | inventory | T3 | PROBIO x6 -> 409 INSUFFICIENT_STOCK available 5; x5 succeeds |
@@ -27,13 +27,13 @@ Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 | EVAL-07b | PASS | refund | T5 | refund again -> 409 ALREADY_REFUNDED |
 | EVAL-08 | PASS | refund | T5 | pay EVAL-02, fulfill, refund damaged: no restock (OMEGA stays 29); writeoff_cogs 2280 |
 | EVAL-08b | PASS | refund | T5 | refund a sent order -> 409 NOT_REFUNDABLE |
-| EVAL-09 | PASS | metrics | T10 | admin metrics (groupBy=provider): GMV 13496, refunded 8497, settled 4999, fee revenue 101, sunk fees 64, net margin 2682, net after sunk fees 2618; reconciliation passes |
-| EVAL-09b | PASS | reports | T8 | provider payables: credits 7090, debits 4472, closing 2618; refunded order nets -64 (ADR-012) |
+| EVAL-09 | PASS | metrics | T10 | admin metrics (groupBy=provider): GMV 13496, refunded 8497, settled 4999, fee revenue 102, sunk fees 64, net margin 2681, net after sunk fees 2617; reconciliation passes |
+| EVAL-09b | PASS | reports | T8 | provider payables: credits 7089, debits 4472, closing 2617; refunded order nets -64 (ADR-012) |
 | EVAL-10 | PASS | reports | T8 | late refund of a closed-month order: M statement frozen (credits 4408); current period debits 4472, closing -64 (ADR-014/016) |
-| EVAL-11 | PASS | recurring | T9 | authorized cycle pays: recurring_cycle, fee 22, margin 1527, MAG on_hand -1; balanced PAYMENT journal via T4 path |
+| EVAL-11 | PASS | recurring | T9 | authorized cycle pays: recurring_cycle, fee 23, margin 1526 (the markup), MAG on_hand -1; balanced PAYMENT journal via T4 path |
 | EVAL-11b | PASS | recurring | T9 | schedule PROBIO x6 -> cycle on_hold INSUFFICIENT_STOCK, no journal, stock untouched |
 | EVAL-11c | PASS | recurring | T9 | unauthorized schedule run -> cycle on_hold NOT_AUTHORIZED, no journal |
-| EVAL-11d | PASS | recurring | T9 | raise MAG cogs to 3000, run cycle -> pays at 4561, provider still nets the 1527 markup (ADR-028 pass-through) |
+| EVAL-11d | PASS | recurring | T9 | raise MAG cogs to 3000, run cycle -> pays at 4561, provider still nets the 1526 markup (ADR-028 pass-through) |
 | EVAL-12 | PASS | privacy | T4 | GET /api/pay/:token strict whitelist; no cogs/fee/margin/provider economics |
 | EVAL-13 | PASS | demo | T10 | synthetic baseline + migration generated via real split/posting: includeSynthetic=false metrics identical before/after; =true surfaces migration %; reset purges synthetic to 0 and leaves real ledger untouched |
 | EVAL-15 | PASS | demo | T10 | DEMO_MODE=false -> every /api/admin/demo/* returns 403 DEMO_DISABLED |

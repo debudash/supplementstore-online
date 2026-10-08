@@ -389,7 +389,6 @@ function goOrders(e: Event): void {
                   <th scope="col" class="num">Unit price</th>
                   <th scope="col" class="num">Line total</th>
                   <th scope="col" class="num">COGS</th>
-                  <th scope="col" class="num">Fee</th>
                   <th scope="col" class="num">Net margin</th>
                 </tr>
               </thead>

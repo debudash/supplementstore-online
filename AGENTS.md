@@ -28,7 +28,7 @@ npm run build
 ## 3. Money rules (non-negotiable)
 1. All money is integer cents (`number`, always `Number.isSafeInteger`). Never floats for money, never `toFixed`, never `Math.round` on dollar values, never parse "29.99" style strings into cents with float math.
 2. All split math lives in `packages/money`. No other module computes fees, allocations, margins, or refund amounts. API and UI call these functions.
-3. Order fee is computed once at order level, half-up: `Math.floor((subtotalCents * feeBps + 5000) / 10000)` with `feeBps = 75` snapshotted on the order.
+3. Order fee is computed once at order level, rounded up to the cent (ADR-028): `Math.floor((subtotalCents * feeBps + 9999) / 10000)` with `feeBps = 75` snapshotted on the order. Orders priced from markups are also rounded once at order level (`priceOrder`), so the provider nets exactly qty x markup.
 4. Line fee allocation uses largest remainder, integer math only, ties broken by line `position` ascending.
 5. Invariants, per order and per line: `cogs + fee + margin = total`, and `margin >= 0`.
 6. The ledger is append-only. Never UPDATE or DELETE `journals` or `ledger_entries`. Corrections are new journals. The only exception is the demo purge of `is_synthetic = true` rows through `apps/api/src/admin/demo/reset.ts`.

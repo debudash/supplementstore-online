@@ -13,7 +13,7 @@ import type {
   AuditLedgerEntry,
   InvariantCheck
 } from './types'
-import { priceFromMarkupCents, markupBreakdown, maxRoundingCents } from '@cerbo/money'
+import { priceOrder } from '@cerbo/money'
 import { assertSafeInteger } from '../db/types'
 
 const iso = (d: Date | string | null): string | null =>
@@ -115,13 +115,12 @@ export async function loadAudit(db: Knex, orderId: string): Promise<AuditRespons
     entriesByJournal.set(e.journal_id, list)
   }
 
-  // Where every cent went (ADR-028): each split line's net margin = markup + price rounding.
-  const split = lineRows.every((l) => l.line_margin_cents !== null)
-  const breakdown = split
-    ? markupBreakdown(lineRows.map((l) => ({ qty: l.qty, unitMarkupCents: l.unit_markup_cents, marginCents: l.line_margin_cents as number })))
+  // Where every cent went (ADR-028): the provider's share is qty x markup on each line.
+  const markupCents = lineRows.length > 0 && lineRows.every((l) => l.unit_markup_cents !== null)
+    ? lineRows.reduce((a, l) => a + l.qty * (l.unit_markup_cents as number), 0)
     : null
 
-  const lines: AuditLine[] = lineRows.map((l, i) => ({
+  const lines: AuditLine[] = lineRows.map((l) => ({
     id: l.id,
     position: l.position,
     sku: l.sku,
@@ -134,8 +133,8 @@ export async function loadAudit(db: Knex, orderId: string): Promise<AuditRespons
     lineCogsCents: l.line_cogs_cents,
     lineFeeCents: l.line_fee_cents,
     lineMarginCents: l.line_margin_cents,
-    lineMarkupCents: breakdown?.lines[i]?.markupCents ?? null,
-    lineRoundingCents: breakdown?.lines[i]?.roundingCents ?? null
+    lineMarkupCents: l.unit_markup_cents === null ? null : l.qty * l.unit_markup_cents,
+    unitPriceIsAverage: l.line_total_cents !== null && l.line_total_cents % l.qty !== 0
   }))
 
   const journals: AuditJournal[] = journalRows.map((j) => {
@@ -177,8 +176,7 @@ export async function loadAudit(db: Knex, orderId: string): Promise<AuditRespons
       cogsCents: order.cogs_cents,
       feeCents: order.fee_cents,
       marginCents: order.margin_cents,
-      markupCents: breakdown?.markupCents ?? null,
-      roundingCents: breakdown?.roundingCents ?? null,
+      markupCents,
       isSynthetic: order.is_synthetic,
       createdAt: new Date(order.created_at).toISOString(),
       sentAt: iso(order.sent_at),
@@ -287,38 +285,32 @@ function computeInvariants(
       detail: { lineFeeSum, orderFee: fee }
     })
 
-    // ADR-028: a line priced from a markup carries exactly the price that markup derives
-    // from its snapshot COGS, and the provider nets at least what they marked up.
-    // Lines priced before ADR-028 have no markup and are not checked here.
-    const tracked = priced.filter((l) => l.unit_markup_cents !== null)
-    const priceMismatch = tracked
-      .filter(
-        (l) =>
-          l.line_total_cents !== l.qty * l.unit_price_cents ||
-          l.unit_price_cents !== priceFromMarkupCents(l.unit_cogs_cents, l.unit_markup_cents as number, order.fee_bps)
+    // ADR-028: when every line carries a markup, re-price the order from the stored snapshot
+    // COGS + markups with the same function the order used (rounding once), and check that
+    // the stored totals and fees are exactly that price, and that every cent is named:
+    // subtotal = cogs + fee + qty x markup, with nothing left over as rounding.
+    if (priced.length > 0 && priced.length === lines.length && priced.every((l) => l.unit_markup_cents !== null)) {
+      const repriced = priceOrder(
+        priced.map((l) => ({ position: l.position, qty: l.qty, unitCogsCents: l.unit_cogs_cents, markupCents: l.unit_markup_cents as number })),
+        order.fee_bps
       )
-      .map((l) => l.position)
-    checks.push({
-      name: 'lines.price_matches_markup',
-      pass: priceMismatch.length === 0,
-      detail: { offendingPositions: priceMismatch, trackedLines: tracked.length }
-    })
-    if (tracked.length > 0 && tracked.length === priced.length) {
-      // Every cent named: total = cogs + fee + markup + price rounding, and the rounding the
-      // provider receives is never negative and within the pricing rule's bound.
-      const b = markupBreakdown(priced.map((l) => ({ qty: l.qty, unitMarkupCents: l.unit_markup_cents, marginCents: l.line_margin_cents as number })))
-      const markup = b.markupCents as number
-      const rounding = b.roundingCents as number
+      const byPosition = new Map(repriced.lines.map((r) => [r.position, r]))
+      const mismatched = priced
+        .filter((l) => {
+          const r = byPosition.get(l.position)
+          return !r || r.total !== l.line_total_cents || r.fee !== l.line_fee_cents || r.margin !== l.line_margin_cents
+        })
+        .map((l) => l.position)
+      checks.push({
+        name: 'order.price_matches_markup',
+        pass: mismatched.length === 0 && repriced.subtotal === subtotal && repriced.fee === fee,
+        detail: { offendingPositions: mismatched, expectedSubtotal: repriced.subtotal, expectedFee: repriced.fee }
+      })
+      const markup = priced.reduce((a, l) => a + l.qty * (l.unit_markup_cents as number), 0)
       checks.push({
         name: 'order.every_cent_accounted',
-        pass: subtotal === cogs + fee + markup + rounding,
-        detail: { subtotal, cogs, fee, markup, rounding }
-      })
-      const maxRounding = maxRoundingCents(priced.map((l) => ({ qty: l.qty, unitMarkupCents: l.unit_markup_cents as number })))
-      checks.push({
-        name: 'order.rounding_within_bounds',
-        pass: rounding >= 0 && rounding <= maxRounding,
-        detail: { rounding, maxRounding }
+        pass: subtotal === cogs + fee + markup,
+        detail: { subtotal, cogs, fee, markup, leftover: subtotal - cogs - fee - markup }
       })
     }
   }

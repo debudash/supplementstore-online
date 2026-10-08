@@ -14,9 +14,9 @@ A provider creates a draft order for one of their practice's patients and adds o
 
 ### FR-2 Per-item pricing (Tier 1)
 The provider prices each line with a per-unit dollar markup (ADR-028). The patient pays COGS + markup + the 0.75% fee (built into the unit price; no fee line is shown to the patient).
-- AC1: Each line requires `markupCents`, integer cents from 0 to 100000 ($0 to $1,000). The server derives `unit_price = ceil((unit_cogs + max(markup, 1)) * 10000 / (10000 - fee_bps))` and stores both the price and `unit_markup_cents`. A $0 markup is priced as 1 cent of rounding headroom (a $0 line nets 0 or 1 cent). `unitPriceCents` and `marginBps` are rejected with 400 `INVALID_INPUT`
-- AC2: The UI shows a live, server-computed quote while the provider types the markup ("Patient pays $X per unit"; `GET /api/products/:sku/price-preview`), and the UI and the quote endpoint show, per line and per order: price, COGS, allocated fee, and net margin. Order net margin is always >= the sum of qty x markup; one line can be 1 cent under its markup after fee allocation
-- AC3: The split still guards every line: a line whose net margin after its allocated fee is below 0 is rejected with `MARGIN_NEGATIVE`, naming the line (EVAL-04). A markup-priced line cannot reach it (the round-up plus the 1-cent headroom always cover the fee); the guard remains for legacy pre-ADR-028 lines
+- AC1: Each line requires `markupCents`, integer cents from 0 to 100000 ($0 to $1,000). The server prices the whole order once (`priceOrder`): `need = sum(qty x (unit_cogs + markup))`, `subtotal = ceil(need x 10000 / (10000 - fee_bps))`, fee = `ceil(subtotal x fee_bps / 10000)`; the subtotal is split across lines by largest remainder of each line's exact share. It stores the line totals, line fees and `unit_markup_cents`. `unitPriceCents` and `marginBps` are rejected with 400 `INVALID_INPUT`
+- AC2: The UI shows a live, server-computed quote while the provider types the markup ("Patient pays $X per unit"; `GET /api/products/:sku/price-preview`). Per line the builder shows price, COGS and net margin; the order fee is shown once in the Order summary (line fees are stored and shown in the audit, not on the builder). Because the subtotal and the fee are both rounded up, subtotal - need = fee exactly: no rounding is left over, and every line's net margin is exactly qty x markup
+- AC3: The split still guards every line: a line whose net margin after its fee is below 0 is rejected with `MARGIN_NEGATIVE`, naming the line (EVAL-04). A markup-priced line cannot reach it (its margin is exactly qty x markup; a $0 markup nets exactly $0.00); the guard remains for legacy pre-ADR-028 lines, which keep their stored prices and the price-based split()
 
 ### FR-3 Stock check at add-to-cart (Tier 1)
 - AC1: Adding or increasing a line is allowed only if `available = on_hand - reserved` is >= the requested total quantity for that SKU in this cart
@@ -31,21 +31,21 @@ The provider prices each line with a per-unit dollar markup (ADR-028). The patie
 - AC5: Provider can cancel a `draft` or `sent` order. Cancelling a `sent` order releases the reservation
 
 ### FR-5 Patient payment, stubbed (Tier 1)
-- AC1: The pay page shows patient-safe data only: item names, quantities, unit prices, line totals, order total (EVAL-12)
+- AC1: The pay page shows patient-safe data only: item names, quantities, unit prices, line totals, order total (EVAL-12). A unit price may be an average (shown as "avg each" when qty x unit price differs from the line total); the line total is what is charged
 - AC2: Pay requires an idempotency key. Same key on a paid order returns the original result. A different key on a paid order returns `ALREADY_PAID`. Exactly one payment and one journal exist (EVAL-06)
 - AC3: Pay on an `expired` or `cancelled` order returns `ORDER_EXPIRED` or `ORDER_NOT_PAYABLE`
 - AC4: In one transaction: lock order, call `PaymentGateway.charge` (stub), insert payment, move reserved stock to sold (`on_hand -= qty`, `reserved -= qty`), post the PAYMENT journal, set status `paid`
 
 ### FR-6 Split computed and persisted (Tier 1)
-- AC1: Fee = 0.75% of subtotal, half-up, at order level (EVAL-01, 02, 03)
-- AC2: Fee is allocated to lines by largest remainder; line fees sum exactly to the order fee
+- AC1: Fee = 0.75% of subtotal, rounded UP to the cent, once at order level (ADR-028; EVAL-01, 02, 03)
+- AC2: Line fees sum exactly to the order fee. For markup-priced orders, line fee = line total - line cogs - qty x markup (each within 1 cent of the line's exact 0.75%); legacy orders allocate the fee by largest remainder (split())
 - AC3: For every order and every line, `cogs + fee + margin = total`
 - AC4: The PAYMENT journal posts per-line entries: CASH_CLEARING debit total, COGS_RECOVERY credit cogs, PROVIDER_PAYABLE credit margin, PLATFORM_FEE_REVENUE credit fee. The journal sums to zero
 
 ### FR-7 Auditability (Tier 1)
 - AC1: `GET /api/orders/:id/audit` returns: order snapshot, lines with every amount, status history, payments, refunds, journals with entries, inventory movements, and an `invariants` block where each check passes or fails explicitly
 - AC2: The provider UI has an audit view rendering this for any of their orders. Cerbo Admin can view any order
-- AC4 (ADR-028): The audit names every cent of a paid order: subtotal = COGS + platform fee (exactly 0.75%, half-up) + provider markup (qty x markup, as entered) + price rounding (the unit price is rounded up to the cent; the rounding goes to the provider, who set the price). Lines and the order carry `lineMarkupCents`/`lineRoundingCents` and `markupCents`/`roundingCents`, and the invariants `order.every_cent_accounted` and `order.rounding_within_bounds` (0 <= rounding <= 1 cent per unit, 2 on a $0 line) run on every order
+- AC4 (ADR-028): The audit names every cent of a paid order: subtotal = COGS + platform fee (0.75% rounded up, once per order) + provider markup (sum of qty x markup, as entered); nothing is left over as rounding. Audit lines carry `lineMarkupCents` and the order carries `markupCents` (= marginCents). Line fees are stored (`order_lines.line_fee_cents`) and audited, not shown on the provider order builder. The invariants `order.price_matches_markup` (re-prices the order from the stored snapshot COGS and markups with priceOrder; stored totals and fees must match) and `order.every_cent_accounted` run on every order
 - AC3: Ledger tables reject UPDATE and DELETE at the database level, except the synthetic purge path (RT-11)
 
 ### FR-8 Refunds (Tier 2)

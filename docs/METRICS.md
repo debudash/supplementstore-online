@@ -10,7 +10,7 @@ Every query takes `includeSynthetic` (default false). Basis: payment events coun
 | Refunded GMV | Sum of refunds.amount_cents in period | refunds |
 | Settled GMV | Total GMV - Refunded GMV | derived |
 | Platform fee revenue | -(sum of PLATFORM_FEE_REVENUE entries) in period. Includes fees on orders later refunded (retained) | ledger_entries |
-| Sunk fees on refunded GMV | Sum of refunds.fee_retained_cents in period. Approximately Refunded GMV x 0.0075 (exact cents may differ by rounding) | refunds |
+| Sunk fees on refunded GMV | Sum of refunds.fee_retained_cents in period. Approximately Refunded GMV x 0.0075 (each order's fee is rounded up to the cent, so exact cents may differ) | refunds |
 | Order count, AOV | Paid orders in period; Total GMV / order count (integer division, display only) | orders |
 | Recurring share | GMV from `recurring_cycle` orders / Total GMV | orders, ledger |
 
@@ -21,11 +21,11 @@ Every query takes `includeSynthetic` (default false). Basis: payment events coun
 | Markup units (`markupUnits`) | Units on those same lines |
 | Average markup per unit (`avgMarkupPerUnitCents`) | floor(providerMarkupCents / markupUnits); 0 when there are no such units |
 | Provider net margin from settled sales | Sum of margin_cents over orders paid in period and not refunded |
-| Reconciliation check | Per order: subtotal - cogs - orderFee(subtotal), where orderFee = 0.75% of subtotal, half-up (ADR-001). Summed across orders it must match the ledger figure. Shown as a pass/fail line in the report |
+| Reconciliation check | Per order: subtotal - cogs - orderFee(subtotal), where orderFee = 0.75% of subtotal rounded UP to the cent, once per order (ADR-001 as amended by ADR-028). For a markup-priced order this equals the ledger margin exactly (= sum of qty x markup). Summed across orders it must match the ledger figure. Shown as a pass/fail line in the report |
 | Provider net after sunk fees | Provider net margin from settled sales - sunk fees |
 | Payable balance | -(sum of PROVIDER_PAYABLE entries) up to period end |
 
-Note: the reconciliation is computed per order in integer cents and then summed; applying one blended margin % across orders with different margins produces a wrong number (ADR-015). Because each markup-priced line is rounded up to cover the fee (ADR-028), provider net margin from settled sales is always >= providerMarkupCents (the sum of qty x markup); the difference is the round-up headroom, a few cents per order.
+Note: the reconciliation is computed per order in integer cents and then summed; applying one blended margin % across orders with different margins produces a wrong number (ADR-015). Because the order total and the fee are both rounded up once per order (ADR-028), nothing is left over as rounding: for markup-priced orders, provider net margin from settled sales equals providerMarkupCents (the sum of qty x markup) exactly (EVAL-09: both 2681). Orders with lines priced before ADR-028 have no markup and can differ.
 
 ## Leading indicator: migration off third-party marketplaces
 | Metric | Definition |

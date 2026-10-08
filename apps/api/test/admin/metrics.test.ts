@@ -86,7 +86,8 @@ async function refundViaAdmin(orderId: string, reasonCode = 'patient_request'): 
 }
 
 // EVAL-01: subtotal 8497, cogs 4025, fee 64, margin 4408. EVAL-02: fee 37, margin 2682.
-const EVAL01: Line[] = [{ sku: SKU_MAG, qty: 2, price: 2999 }, { sku: SKU_VITD, qty: 1, price: 2499 }]
+// EVAL-01 (ADR-028): markups 1526 (MAG) + 1356 (VITD, 2500 alone) price the order once at exactly 8497.
+const EVAL01: Line[] = [{ sku: SKU_MAG, qty: 2, price: 2999 }, { sku: SKU_VITD, qty: 1, price: 2500 }]
 const EVAL02: Line[] = [{ sku: SKU_OMEGA, qty: 1, price: 4999 }]
 
 beforeAll(async () => {
@@ -104,7 +105,7 @@ describe('FR-13 / EVAL-09 Cerbo Admin metrics (exact values from docs/EVALS.md)'
   it('EVAL-09: EVAL-01 paid then refunded + EVAL-02 paid, same month -> exact headline + reconciliation pass', async () => {
     const world = await makeProviderWorld()
     const refunded = await payNewOrder(world, EVAL01) // GMV 8497, fee 64, margin 4408
-    await payNewOrder(world, EVAL02) // GMV 4999, fee 37, margin 2682 (kept)
+    await payNewOrder(world, EVAL02) // GMV 4999, fee 38, margin 2681 (kept)
     await refundViaAdmin(refunded) // EVAL-01 refunded through the REAL T5 path, same month
 
     const res = await asUser('admin-cerbo').get('/api/admin/metrics?groupBy=provider')
@@ -118,22 +119,23 @@ describe('FR-13 / EVAL-09 Cerbo Admin metrics (exact values from docs/EVALS.md)'
     expect(b.gmvCents).toBe(13496) // Total GMV
     expect(b.refundedGmvCents).toBe(8497) // Refunded GMV
     expect(b.settledGmvCents).toBe(4999) // Settled GMV
-    expect(b.platformFeeCents).toBe(101) // Platform fee revenue (incl. retained 64)
+    // ADR-028: the fee rounds up, so EVAL-02's 37.49 -> 38 and the provider nets 2681.
+    expect(b.platformFeeCents).toBe(102) // Platform fee revenue (64 retained + 38)
     expect(b.sunkFeeCents).toBe(64) // Sunk fees on refunded GMV
-    expect(b.providerNetMarginCents).toBe(2682) // Provider net margin from settled
-    expect(b.providerNetAfterSunkFeesCents).toBe(2618) // 2682 - 64
-    // ADR-028 markup tracking: only the settled EVAL-02 line counts (the refunded order is
-    // excluded). OMEGA @ 4999 is markup 2681; net margin 2682 is >= it (1 cent round-up).
+    expect(b.providerNetMarginCents).toBe(2681) // Provider net margin from settled
+    expect(b.providerNetAfterSunkFeesCents).toBe(2617) // 2681 - 64
+    // Markup tracking: only the settled EVAL-02 line counts (the refunded order is excluded).
+    // OMEGA @ 4999 is markup 2681 and the provider nets exactly that.
     expect(b.providerMarkupCents).toBe(2681)
     expect(b.markupUnits).toBe(1)
     expect(b.avgMarkupPerUnitCents).toBe(2681)
-    expect(b.providerNetMarginCents).toBeGreaterThanOrEqual(b.providerMarkupCents)
+    expect(b.providerNetMarginCents).toBe(b.providerMarkupCents)
 
     // Reconciliation line passes (ADR-015, per-order formula == ledger figure).
     expect((mine as MetricsGroup).reconciliation.pass).toBe(true)
     expect((mine as MetricsGroup).reconciliation.diffCents).toBe(0)
-    expect((mine as MetricsGroup).reconciliation.ledgerCents).toBe(2682)
-    expect((mine as MetricsGroup).reconciliation.formulaCents).toBe(2682)
+    expect((mine as MetricsGroup).reconciliation.ledgerCents).toBe(2681)
+    expect((mine as MetricsGroup).reconciliation.formulaCents).toBe(2681)
 
     // AOV = Total GMV / order count (2 paid orders) = 13496 / 2 = 6748, integer division.
     expect(b.orderCount).toBe(2)

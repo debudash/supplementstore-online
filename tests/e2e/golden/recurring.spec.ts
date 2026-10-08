@@ -47,7 +47,7 @@ async function runCycle(scheduleId: string) {
 const MAG_SCHEDULE: SchedLine[] = [{ sku: SKU.MAG, qty: 1, markupCents: markupFor(SKU.MAG, 2999) }]
 
 describe('recurring (golden)', () => {
-  evalCase('EVAL-11', 'authorized cycle pays: recurring_cycle, fee 22, margin 1527, MAG -1', async () => {
+  evalCase('EVAL-11', 'authorized cycle pays: recurring_cycle, fee 23, margin 1526, MAG -1', async () => {
     const { id, token } = await createSchedule(MAG_SCHEDULE)
     await authorize(token)
 
@@ -63,8 +63,8 @@ describe('recurring (golden)', () => {
     expect(order.status).toBe('paid')
     expect(order.subtotal_cents).toBe(2999)
     expect(order.cogs_cents).toBe(1450)
-    expect(order.fee_cents).toBe(22)
-    expect(order.margin_cents).toBe(1527)
+    expect(order.fee_cents).toBe(23) // 22.49 rounded up (ADR-028)
+    expect(order.margin_cents).toBe(1526) // exactly the schedule markup
 
     // Recurring sale: on_hand -1 (49), reserved untouched; one 'sale' movement of -1.
     const mag = await db('products').where({ sku: SKU.MAG }).first()
@@ -81,8 +81,8 @@ describe('recurring (golden)', () => {
     const sumBy = (acct: string) => entries.filter((e) => e.account === acct).reduce((a, e) => a + e.amount_cents, 0)
     expect(sumBy('CASH_CLEARING')).toBe(2999)
     expect(sumBy('COGS_RECOVERY')).toBe(-1450)
-    expect(sumBy('PROVIDER_PAYABLE')).toBe(-1527)
-    expect(sumBy('PLATFORM_FEE_REVENUE')).toBe(-22)
+    expect(sumBy('PROVIDER_PAYABLE')).toBe(-1526)
+    expect(sumBy('PLATFORM_FEE_REVENUE')).toBe(-23)
     expect(entries.reduce((a, e) => a + e.amount_cents, 0)).toBe(0)
   })
 
@@ -111,7 +111,7 @@ describe('recurring (golden)', () => {
     expect((await db('products').where({ sku: SKU.MAG }).first()).on_hand_qty).toBe(50) // untouched
   })
 
-  evalCase('EVAL-11d', 'COGS rise to 3000 -> cycle pays at 4561, provider still nets the 1527 markup (ADR-028)', async () => {
+  evalCase('EVAL-11d', 'COGS rise to 3000 -> cycle pays at 4561, provider still nets the 1526 markup (ADR-028)', async () => {
     const { id, token } = await createSchedule(MAG_SCHEDULE)
     await authorize(token)
     // Test helper: the catalog COGS rises. The cycle snapshots FRESH COGS and re-derives
@@ -124,8 +124,8 @@ describe('recurring (golden)', () => {
 
     const orderId = run.body.cycle.orderId as string
     const order = await db('orders').where({ id: orderId }).first()
-    // (3000 + 1526) * 10000 / 9925 = 4560.20 -> 4561; fee 34; margin 4561 - 3000 - 34 = 1527.
-    expect(order).toMatchObject({ subtotal_cents: 4561, cogs_cents: 3000, fee_cents: 34, margin_cents: 1527 })
+    // (3000 + 1526) * 10000 / 9925 = 4560.20 -> 4561; fee 34.21 -> 35; margin 4561 - 3000 - 35 = 1526.
+    expect(order).toMatchObject({ subtotal_cents: 4561, cogs_cents: 3000, fee_cents: 35, margin_cents: 1526 })
     expect(await db('journals').where({ order_id: orderId, type: 'PAYMENT' }).then((r) => r.length)).toBe(1)
   })
 

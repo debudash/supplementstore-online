@@ -40,7 +40,7 @@ export interface OrderSplit {
  * Pipeline (ADR-001/003/004):
  *   1. line total = qty * unitPriceCents;  line cogs = qty * unitCogsCents
  *   2. subtotal = sum of line totals
- *   3. order fee = orderFee(subtotal, feeBps)  -- half-up, once per order
+ *   3. order fee = orderFee(subtotal, feeBps)  -- rounded up, once per order
  *   4. allocate the order fee across lines by largest remainder
  *   5. line margin = total - cogs - fee
  *

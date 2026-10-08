@@ -5,7 +5,8 @@
 // write inventory_movements (money rule 8).
 import { randomBytes } from 'node:crypto'
 import type { Knex } from 'knex'
-import { split, priceFromMarkupCents, markupBreakdown, type OrderSplit, type SplitLineInput } from '@cerbo/money'
+import type { PricedOrder } from '@cerbo/money'
+import { priceLines, standaloneUnitPrice } from './pricing'
 import type { Actor } from '../auth/types'
 import type { Seams } from '../seams/types'
 import { createSeams } from '../seams'
@@ -83,8 +84,9 @@ export interface OrderLineView {
   unitCogsCents: number
   /** The provider's per-unit markup (ADR-028); null on lines priced before it. */
   unitMarkupCents: number | null
-  lineMarkupCents?: number | null
-  lineRoundingCents?: number | null
+  /** True when the line total is not qty x a whole-cent price (ADR-028 rounds the order
+   *  once), so unitPriceCents is an average for display; the line total is charged. */
+  unitPriceIsAverage: boolean
   lineTotalCents: number
   lineCogsCents: number
   lineFeeCents: number
@@ -104,8 +106,6 @@ export interface OrderView {
     cogsCents: number
     feeCents: number
     marginCents: number
-    markupCents?: number | null
-    roundingCents?: number | null
   } | null
   lines: OrderLineView[]
   payToken: string | null
@@ -144,53 +144,27 @@ async function productsBySku(db: Knex, skus: string[]): Promise<Map<string, Prod
 
 // ---- Split helpers ----
 
-/**
- * A line's unit price against a given COGS: COGS + the provider's markup, grossed up for
- * the order's fee (ADR-028). Lines priced before ADR-028 have no markup and keep their
- * stored price.
- */
-function priceFor(order: OrderRow, line: LineRow, unitCogsCents: number): number {
-  if (line.unit_markup_cents === null) return line.unit_price_cents
-  return priceFromMarkupCents(unitCogsCents, line.unit_markup_cents, order.fee_bps)
-}
 
 /**
- * Compute the live split for a draft from each line's markup and the CURRENT catalog
- * COGS (snapshot only happens at send, ADR-006). Throws MARGIN_NEGATIVE if any line's
- * margin after its allocated fee is < 0 (FR-2 AC3), which a markup price cannot cause.
- * Empty line sets are the caller's responsibility.
+ * Price a draft from each line's markup and the CURRENT catalog COGS (snapshot only
+ * happens at send, ADR-006), rounding once per order (ADR-028). Empty line sets are the
+ * caller's responsibility.
  */
-function liveSplit(order: OrderRow, lines: LineRow[], products: Map<string, ProductRow>): OrderSplit {
-  const inputs: SplitLineInput[] = lines.map((l) => {
-    const product = products.get(l.sku)
-    if (!product) throw notFound('No such product', { sku: l.sku })
-    return {
-      position: l.position,
-      qty: l.qty,
-      unitPriceCents: priceFor(order, l, product.unit_cogs_cents),
-      unitCogsCents: product.unit_cogs_cents
-    }
-  })
-  return split(inputs, order.fee_bps)
-}
-
-/**
- * Name every cent of a split order (ADR-028): each line's net margin is the provider's
- * markup plus the price rounding, so total = COGS + fee + markup + rounding. Applied only
- * once lines carry a split (a quote or a sent order).
- */
-function withMarkupBreakdown<T extends { totals: OrderView['totals']; lines: OrderLineView[] }>(v: T): T {
-  if (!v.totals || v.lines.length === 0) return v
-  const b = markupBreakdown(v.lines.map((l) => ({ qty: l.qty, unitMarkupCents: l.unitMarkupCents, marginCents: l.lineMarginCents })))
-  return {
-    ...v,
-    totals: { ...v.totals, markupCents: b.markupCents, roundingCents: b.roundingCents },
-    lines: v.lines.map((l, i) => ({
-      ...l,
-      lineMarkupCents: b.lines[i]?.markupCents ?? null,
-      lineRoundingCents: b.lines[i]?.roundingCents ?? null
-    }))
-  }
+function liveSplit(order: OrderRow, lines: LineRow[], products: Map<string, ProductRow>): PricedOrder {
+  return priceLines(
+    lines.map((l) => {
+      const product = products.get(l.sku)
+      if (!product) throw notFound('No such product', { sku: l.sku })
+      return {
+        position: l.position,
+        qty: l.qty,
+        unitCogsCents: product.unit_cogs_cents,
+        unitMarkupCents: l.unit_markup_cents,
+        unitPriceCents: l.unit_price_cents
+      }
+    }),
+    order.fee_bps
+  )
 }
 
 function viewFromRows(
@@ -212,7 +186,13 @@ function viewFromRows(
           marginCents: order.margin_cents
         }
       : null
-  return withMarkupBreakdown({
+  // A draft shows the price its markup derives from CURRENT COGS (as the quote does); a
+  // sent order shows its snapshot.
+  const live = order.status === 'draft' && products && lines.length > 0 && lines.every((l) => products.has(l.sku))
+    ? liveSplit(order, lines, products)
+    : null
+  const liveByPosition = new Map((live?.lines ?? []).map((l) => [l.position, l]))
+  return {
     id: order.id,
     status: order.status,
     providerId: order.provider_id,
@@ -226,14 +206,12 @@ function viewFromRows(
       sku: l.sku,
       name: names.get(l.sku) ?? l.sku,
       qty: l.qty,
-      // A draft shows the price its markup derives from CURRENT COGS (as the quote does);
-      // a sent order shows its snapshot.
-      unitPriceCents:
-        order.status === 'draft' && products?.has(l.sku)
-          ? priceFor(order, l, (products.get(l.sku) as ProductRow).unit_cogs_cents)
-          : l.unit_price_cents,
+      unitPriceCents: liveByPosition.get(l.position)?.unitPriceCents ?? l.unit_price_cents,
       unitCogsCents: l.unit_cogs_cents,
       unitMarkupCents: l.unit_markup_cents,
+      unitPriceIsAverage:
+        liveByPosition.get(l.position)?.unitPriceIsAverage ??
+        (l.line_total_cents !== null && l.line_total_cents % l.qty !== 0),
       lineTotalCents: l.line_total_cents ?? 0,
       lineCogsCents: l.line_cogs_cents ?? 0,
       lineFeeCents: l.line_fee_cents ?? 0,
@@ -243,7 +221,7 @@ function viewFromRows(
     reservationExpiresAt: iso(order.reservation_expires_at),
     sentAt: iso(order.sent_at),
     createdAt: new Date(order.created_at).toISOString()
-  })
+  }
 }
 
 /** Build an OrderView after a mutation, pulling fresh lines + product names. */
@@ -321,7 +299,6 @@ export async function addLine(
     const product = await trx<ProductRow>('products').where({ sku }).first()
     if (!product) throw notFound('No such product', { sku })
 
-    const unitPrice = priceFromMarkupCents(product.unit_cogs_cents, markupCents, order.fee_bps)
 
     // Merge into an existing line for this SKU (FR-1 AC2): quantities sum.
     const existing = await trx<LineRow>('order_lines').where({ order_id: orderId, sku }).first()
@@ -349,7 +326,7 @@ export async function addLine(
         .where({ id: existing.id })
         .update({
           qty: mergedQty,
-          unit_price_cents: unitPrice,
+          unit_price_cents: standaloneUnitPrice(mergedQty, product.unit_cogs_cents, markupCents, order.fee_bps),
           unit_cogs_cents: product.unit_cogs_cents,
           unit_markup_cents: markupCents
         })
@@ -363,7 +340,7 @@ export async function addLine(
         position: nextPosition,
         sku,
         qty,
-        unit_price_cents: unitPrice,
+        unit_price_cents: standaloneUnitPrice(qty, product.unit_cogs_cents, markupCents, order.fee_bps),
         unit_cogs_cents: product.unit_cogs_cents,
         unit_markup_cents: markupCents
       })
@@ -403,7 +380,8 @@ export async function updateLine(
 
     const newQty = qty ?? line.qty
     const newMarkup = markupCents ?? line.unit_markup_cents
-    const newPrice = priceFor(order, { ...line, unit_markup_cents: newMarkup }, product.unit_cogs_cents)
+    const newPrice =
+      newMarkup === null ? line.unit_price_cents : standaloneUnitPrice(newQty, product.unit_cogs_cents, newMarkup, order.fee_bps)
 
     // Stock gate for the new quantity (FR-3 AC1).
     const available = availableOf(product)
@@ -478,7 +456,7 @@ export async function getQuote(db: Knex, actor: Actor, orderId: string): Promise
   if (order.status === 'draft') {
     const result = liveSplit(order, lines, products)
     const bySplitPosition = new Map(result.lines.map((l) => [l.position, l]))
-    return withMarkupBreakdown({
+    return {
       orderId,
       status: order.status,
       totals: {
@@ -497,16 +475,17 @@ export async function getQuote(db: Knex, actor: Actor, orderId: string): Promise
           sku: l.sku,
           name: names.get(l.sku) ?? l.sku,
           qty: l.qty,
-          unitPriceCents: priceFor(order, l, unitCogsCents),
+          unitPriceCents: s?.unitPriceCents ?? l.unit_price_cents,
           unitCogsCents,
           unitMarkupCents: l.unit_markup_cents,
+          unitPriceIsAverage: s?.unitPriceIsAverage ?? false,
           lineTotalCents: s?.total ?? 0,
           lineCogsCents: s?.cogs ?? 0,
           lineFeeCents: s?.fee ?? 0,
           lineMarginCents: s?.margin ?? 0
         }
       })
-    })
+    }
   }
 
   const view = viewFromRows(order, lines, names)
@@ -541,22 +520,10 @@ export async function sendOrder(
     const locked = await trx<ProductRow>('products').whereIn('sku', skus).orderBy('sku').forUpdate()
     const bySku = new Map(locked.map((p) => [p.sku, p]))
 
-    // Re-price each line from its markup against the snapshot COGS (ADR-028), so the
-    // markup the provider set is exactly what the sent order carries.
-    const inputs: SplitLineInput[] = existingLines.map((l) => {
-      const product = bySku.get(l.sku)
-      if (!product) throw notFound('No such product', { sku: l.sku })
-      return {
-        position: l.position,
-        qty: l.qty,
-        unitPriceCents: priceFor(order, l, product.unit_cogs_cents),
-        unitCogsCents: product.unit_cogs_cents
-      }
-    })
-    const priceByPosition = new Map(inputs.map((i) => [i.position, i.unitPriceCents]))
-
-    // Compute the split from the snapshot (throws MARGIN_NEGATIVE -> rollback, nothing reserved).
-    const result = split(inputs, order.fee_bps)
+    // Re-price the whole order from each line's markup against the snapshot COGS, rounding
+    // once (ADR-028), so the sent order carries exactly the markup the provider set.
+    // (A legacy line without a markup can still throw MARGIN_NEGATIVE -> rollback.)
+    const result = liveSplit(order, existingLines, bySku)
     const bySplitPosition = new Map(result.lines.map((l) => [l.position, l]))
 
     // Re-check stock and reserve under the same lock (throws INSUFFICIENT_STOCK -> rollback).
@@ -572,7 +539,7 @@ export async function sendOrder(
       const s = bySplitPosition.get(l.position)
       if (!s) throw invalidInput('internal: missing split for line', { position: l.position })
       await trx('order_lines').where({ id: l.id }).update({
-        unit_price_cents: priceByPosition.get(l.position),
+        unit_price_cents: s.unitPriceCents,
         unit_cogs_cents: bySku.get(l.sku)?.unit_cogs_cents,
         line_total_cents: s.total,
         line_cogs_cents: s.cogs,

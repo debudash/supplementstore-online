@@ -46,3 +46,12 @@ export function formatBps(bps: number | null | undefined): string {
   const fracStr = String(frac).padStart(2, '0').replace(/0$/, '')
   return `${bps < 0 && whole === 0 ? '-' : ''}${whole}.${fracStr}%`
 }
+
+/**
+ * Whether a patient line's unit price is an average (ADR-028: the order total is rounded
+ * once, so a line total need not be qty x a whole-cent price). Display-only: it compares
+ * two server figures to pick a label ("each" vs "avg each"); it never computes a charge.
+ */
+export function isAverageUnitPrice(item: { qty: number; unitPriceCents: number; lineTotalCents: number }): boolean {
+  return item.qty * item.unitPriceCents !== item.lineTotalCents
+}

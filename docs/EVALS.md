@@ -24,12 +24,12 @@ These scenarios are the acceptance bar. T13 implements them in `tests/e2e/golden
 ## Money core (also unit-tested in packages/money)
 | ID | Scenario | Expected |
 |---|---|---|
-| EVAL-01 | `prov-ana` order for `pat-cara`: MAG-GLY-120 x2 @ 2999, VITD3-K2 x1 @ 2499 | subtotal 8497, cogs 4025, fee 64, line fees [45, 19], line margins [3053, 1355], order margin 4408 |
-| EVAL-02 | OMEGA3-1000 x1 @ 4999 | fee 37 (37.4925 rounds down), margin 2682 |
-| EVAL-03 | Half-up boundary: VITD3-K2 x1 @ 2200 | fee 17 (exact 16.5 rounds up), margin 1058 |
-| EVAL-04 | Margin floor on VITD3-K2 (cogs 1125) | split(): @1125 rejected MARGIN_NEGATIVE (margin -8); @1132 rejected (-1); @1133 accepted with margin 0. API (ADR-028): markup 0 prices at 1135 (cost + fee + 1 cent of rounding headroom) with margin 1; a $0 markup is priced as 1 cent so fee allocation can never push a line negative |
-| EVAL-04b | Markup mode (ADR-028): MAG-GLY-120 with markupCents 1000 | unit price 2469, fee 19, margin 1000 |
-| EVAL-P1 | Property tests (fast-check, 10k runs): random 1 to 10 lines, qty 1 to 100, prices >= cogs | line fees sum to order fee; each line cogs + fee + margin = total; fee = half-up of subtotal x 0.0075; allocation deterministic |
+| EVAL-01 | `prov-ana` order for `pat-cara`: MAG-GLY-120 x2 markup 1526, VITD3-K2 x1 markup 1356 (API, ADR-028) | subtotal 8497, cogs 4025, fee 64, line totals [5997, 2500], line fees [45, 19], line margins [3052, 1356] (exactly the markups), order margin 4408. Money-package level: split() on prices 2999 x2 + 2499 still gives 8497 / 64 / [45, 19] / [3053, 1355] |
+| EVAL-02 | OMEGA3-1000 x1 @ 4999 (markup 2681) | fee 38 (37.4925 rounded up), margin 2681 |
+| EVAL-03 | Rounding boundary: VITD3-K2 x1 @ 2200 | fee 17 (exact 16.5 rounded up), margin 1058 |
+| EVAL-04 | Margin floor on VITD3-K2 (cogs 1125) | split(): @1125 rejected MARGIN_NEGATIVE (margin -9); @1133 rejected (-1); @1134 accepted with margin 0. API (ADR-028): markup 0 prices at 1134, fee 9, margin exactly 0 |
+| EVAL-04b | Markup mode (ADR-028): MAG-GLY-120 with markupCents 1000; and with markupCents 0 | markup 1000: unit price 2469, fee 19, margin 1000. Markup 0: 1461, fee 11, margin 0 |
+| EVAL-P1 | Property tests (fast-check, 10k runs): random 1 to 10 lines, qty 1 to 100, prices >= cogs | line fees sum to order fee; each line cogs + fee + margin = total; fee = subtotal x 0.0075 rounded up; allocation deterministic |
 
 ## Inventory
 | ID | Scenario | Expected |
@@ -52,23 +52,23 @@ These scenarios are the acceptance bar. T13 implements them in `tests/e2e/golden
 |---|---|---|
 | EVAL-07 | Refund paid EVAL-01 (not fulfilled), reason patient_request | refund amount 8497; REFUND journal CASH -8497, COGS +4025, PAYABLE +4408 (margin_reversal) +64 (fee_retention); FEE unchanged; journal sum 0; MAG on_hand back to 50, VITD3 to 40; fee_retained 64; status refunded |
 | EVAL-07b | Refund again | 409 ALREADY_REFUNDED |
-| EVAL-08 | Pay EVAL-02, fulfill, refund reason damaged | no restock (OMEGA on_hand stays 29); writeoff_cogs 2280 |
+| EVAL-08 | Pay EVAL-02, fulfill, refund reason damaged | no restock (OMEGA on_hand stays 29); writeoff_cogs 2280; fee_retained 38 |
 | EVAL-08b | Refund a `sent` order | 409 NOT_REFUNDABLE |
 
 ## Reports
 | ID | Scenario | Expected |
 |---|---|---|
-| EVAL-09 | Same month: EVAL-01 paid then refunded, EVAL-02 paid (not refunded). Metrics for that month, synthetic off | Total GMV 13496; Refunded GMV 8497; Settled GMV 4999; Fee revenue 101; Sunk fees 64; Provider net margin from settled 2682; Provider net after sunk fees 2618; reconciliation pass |
-| EVAL-09b | Provider payables for `prov-ana`, same month | credits 7090, debits 4472, closing 2618 |
+| EVAL-09 | Same month: EVAL-01 paid then refunded, EVAL-02 paid (not refunded). Metrics for that month, synthetic off | Total GMV 13496; Refunded GMV 8497; Settled GMV 4999; Fee revenue 102 (64 + 38); Sunk fees 64; Provider net margin from settled 2681; Provider net after sunk fees 2617; provider markup 2681; reconciliation pass |
+| EVAL-09b | Provider payables for `prov-ana`, same month | credits 7089, debits 4472 (4408 + 64), closing 2617 |
 | EVAL-10 | Order paid in month M, month M closed, refund posted in month M+1 | M statement unchanged; M+1 shows debits = margin + fee of that order |
 
 ## Recurring
 | ID | Scenario | Expected |
 |---|---|---|
-| EVAL-11 | Schedule MAG-GLY-120 x1 @ 2999, authorized, run cycle | child order kind recurring_cycle, paid, fee 22, margin 1527, MAG on_hand -1 |
+| EVAL-11 | Schedule MAG-GLY-120 x1 markup 1526 (2999), authorized, run cycle | child order kind recurring_cycle, paid, fee 23, margin 1526, MAG on_hand -1 |
 | EVAL-11b | Schedule PROBIO-50B x6 | cycle on_hold, hold_reason INSUFFICIENT_STOCK, no journal |
 | EVAL-11c | Unauthorized schedule run | on_hold, NOT_AUTHORIZED |
-| EVAL-11d | Raise MAG cogs to 3000 (test helper), run cycle (schedule markup 1526) | paid at 4561 (fee 34); provider margin stays 1527 - the cost passes through (ADR-028) |
+| EVAL-11d | Raise MAG cogs to 3000 (test helper), run cycle (schedule markup 1526) | paid at 4561 (fee 35); provider margin stays 1526 - the cost passes through (ADR-028) |
 
 ## Privacy and demo isolation
 | ID | Scenario | Expected |

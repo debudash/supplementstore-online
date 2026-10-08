@@ -19,7 +19,7 @@ Express API (Node 20, TS) ----> Postgres 16
 AGENTS.md  CLAUDE.md  README.md  Dockerfile  docker-compose.yml  package.json
 .github/workflows/ci.yml
 docs/                       context pack (this folder)
-packages/money/             src/{fee,allocate,split,refund,pricing}.ts  test/**
+packages/money/             src/{fee,allocate,split,priceOrder,refund,pricing}.ts  test/**
 packages/contracts/         src/<module>.ts  (one file per module, owned by that module's task)
 apps/api/
   src/app.ts                route mounts (T0, pre-registered)
@@ -77,10 +77,10 @@ orders           id uuid pk, provider_id fk, practice_id fk, patient_id fk,
                  sent_at, paid_at, fulfilled_at, cancelled_at, expired_at, refunded_at  null,
                  is_synthetic bool default false, created_at, updated_at
 order_lines      id uuid pk, order_id fk, position int, sku fk, qty int check (1..100),
-                 unit_price_cents int > 0, unit_cogs_cents int > 0,
+                 unit_price_cents int > 0, unit_cogs_cents int > 0,   -- unit price is display (may be an average, ADR-028)
                  unit_markup_cents int null check (null or 0..100000)   -- ADR-028; null = priced before it
-                 line_total_cents int, line_cogs_cents int,
-                 line_fee_cents int null, line_margin_cents int null,
+                 line_total_cents int, line_cogs_cents int,           -- line_total_cents is authoritative (what is charged)
+                 line_fee_cents int null, line_margin_cents int null,  -- line fee stored; used by refunds and the audit
                  unique (order_id, sku), unique (order_id, position),
                  check (line_fee_cents is null or line_total_cents = line_cogs_cents + line_fee_cents + line_margin_cents)
 order_events     id bigserial, order_id fk, from_status, to_status, actor_user_id, at, note
@@ -120,7 +120,8 @@ baseline_orders  id uuid pk, import_batch_id fk, provider_id, practice_id, sourc
 Pure functions, integer only, exhaustively property-tested.
 
 ```
-orderFee(subtotal, feeBps=75) = floor((subtotal * feeBps + 5000) / 10000)
+orderFee(subtotal, feeBps=75) = ceil(subtotal * feeBps / 10000)       // rounded UP, once per order (ADR-028)
+                              = floor((subtotal * feeBps + 9999) / 10000)
 
 allocateFee(lines, orderFee):
   for each line i: num_i = orderFee * total_i
@@ -131,17 +132,23 @@ allocateFee(lines, orderFee):
 split(lines) -> per line { total, cogs, fee, margin = total - cogs - fee }, order totals
   error MARGIN_NEGATIVE if any line margin < 0 (reports position)
 
-priceFromMarkupCents(unitCogs, markupCents, feeBps)                 // ADR-028, 0 <= markupCents <= 100000
-  = ceil((unitCogs + max(markupCents, 1)) * 10000 / (10000 - feeBps))
-  // patient pays COGS + markup + fee; a $0 markup is priced as 1 cent of headroom so
-  // largest-remainder fee allocation never pushes a line negative (a $0 line nets 0 or 1 cent).
-  // Order margin >= sum(qty x markup); one line can be 1 cent under its markup.
+  // split() prices legacy orders (any line priced before ADR-028, no markup) from stored prices
+
+priceOrder(lines[{position, qty, unitCogs, markupCents}], feeBps)   // ADR-028, 0 <= markupCents <= 100000
+  need     = sum(qty x (unitCogs + markupCents))
+  subtotal = ceil(need * 10000 / (10000 - feeBps))                    // patient total, rounded ONCE
+  fee      = orderFee(subtotal)                                        // rounded up, once
+  // both rounded up, so subtotal - need = fee exactly: no rounding is left over
+  line totals: subtotal split by largest remainder of each line's exact share (ties by position)
+  line fee   = line total - line cogs - qty x markup   // within 1 cent of the line's exact 0.75%; sums to fee
+  line margin = qty x markup exactly ($0 markup nets exactly 0)
+  unitPriceCents = line total / qty half-up (display); unitPriceIsAverage when total % qty != 0
 
 refund(orderSplit) -> { patientAmount = subtotal, cogsReturned = cogs,
                         providerDebit = margin + fee, feeRetained = fee }
 ```
 
-Worked example (EVAL-01): lines 2 x 2999 (cogs 1450, markup 1526) and 1 x 2499 (cogs 1125, markup 1355). Subtotal 8497, fee 64, line fees 45 and 19, margins 3053 and 1355, order margin 4408.
+Worked example (EVAL-01, priceOrder): MAG-GLY-120 x2 (cogs 1450, markup 1526) and VITD3-K2 x1 (cogs 1125, markup 1356). need = 2 x 2976 + 2481 = 8433; subtotal = ceil(8433 x 10000 / 9925) = 8497; fee = ceil(63.7275) = 64 = 8497 - 8433. Line totals 5997 and 2500 (MAG shows $29.99 avg), line fees 45 and 19, margins 3052 and 1356 (exactly the markups), order margin 4408. (split() on prices 2 x 2999 + 2499 still gives 8497 / 64 / [45, 19] / [3053, 1355].)
 
 ## 5. Ledger posting
 Sign convention: debit positive, credit negative. Posted per line (`line_id` set) so every cent maps to a SKU.

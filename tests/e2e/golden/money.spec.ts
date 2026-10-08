@@ -6,9 +6,9 @@ import { afterAll, beforeEach, describe, expect } from 'vitest'
 import { asUser, db, evalCase, newDraft, resetState, PROV_ANA, SKU } from './_harness'
 import { markupFor } from './_harness'
 
-/** The order-level fee, half-up, from docs/ARCHITECTURE.md section 4. */
+/** The order-level fee, rounded UP to the cent (ADR-001 as amended by ADR-028). */
 function orderFee(subtotal: number, feeBps = 75): number {
-  return Math.floor((subtotal * feeBps + 5000) / 10000)
+  return Math.floor((subtotal * feeBps + 9999) / 10000)
 }
 
 async function addLine(orderId: string, body: object) {
@@ -26,10 +26,13 @@ afterAll(async () => {
 })
 
 describe('money core (golden)', () => {
-  evalCase('EVAL-01', 'MAG x2@2999 + VITD3 x1@2499 split', async () => {
+  // ADR-028: the order is priced from markups and rounded ONCE. Markups 1526 + 1356 give the
+  // brief's EVAL-01 order exactly (8497 / fee 64 / margin 4408 / line fees 45 + 19); the lines
+  // split 5997 + 2500 and the provider nets exactly the markups (3052 + 1356).
+  evalCase('EVAL-01', 'MAG x2 markup 1526 + VITD3 x1 markup 1356 -> order 8497, fee 64, margin 4408', async () => {
     const id = await newDraft()
-    expect((await addLine(id, { sku: SKU.MAG, qty: 2, markupCents: markupFor(SKU.MAG, 2999) })).status).toBe(200)
-    expect((await addLine(id, { sku: SKU.VITD, qty: 1, markupCents: markupFor(SKU.VITD, 2499) })).status).toBe(200)
+    expect((await addLine(id, { sku: SKU.MAG, qty: 2, markupCents: 1526 })).status).toBe(200)
+    expect((await addLine(id, { sku: SKU.VITD, qty: 1, markupCents: 1356 })).status).toBe(200)
 
     const q = await quote(id)
     expect(q.status).toBe(200)
@@ -41,39 +44,39 @@ describe('money core (golden)', () => {
     })
     const mag = q.body.lines.find((l: { sku: string }) => l.sku === SKU.MAG)
     const vit = q.body.lines.find((l: { sku: string }) => l.sku === SKU.VITD)
-    expect(mag).toMatchObject({ lineFeeCents: 45, lineMarginCents: 3053, lineCogsCents: 2900 })
-    expect(vit).toMatchObject({ lineFeeCents: 19, lineMarginCents: 1355, lineCogsCents: 1125 })
+    expect(mag).toMatchObject({ lineTotalCents: 5997, lineFeeCents: 45, lineMarginCents: 3052, lineCogsCents: 2900 })
+    expect(vit).toMatchObject({ lineTotalCents: 2500, lineFeeCents: 19, lineMarginCents: 1356, lineCogsCents: 1125 })
     // Line fees sum to the order fee (AI-02: order-level allocation, not per-line rounding).
     expect(mag.lineFeeCents + vit.lineFeeCents).toBe(64)
   })
 
-  evalCase('EVAL-02', 'OMEGA3 x1@4999 -> fee 37, margin 2682', async () => {
+  evalCase('EVAL-02', 'OMEGA3 x1@4999 -> fee 38 (37.49 rounded up), margin 2681', async () => {
     const id = await newDraft()
     expect((await addLine(id, { sku: SKU.OMEGA, qty: 1, markupCents: markupFor(SKU.OMEGA, 4999) })).status).toBe(200)
     const q = await quote(id)
-    expect(q.body.totals.feeCents).toBe(37)
-    expect(q.body.totals.marginCents).toBe(2682)
-    expect(q.body.lines[0].lineMarginCents).toBe(2682)
+    expect(q.body.totals.feeCents).toBe(38)
+    expect(q.body.totals.marginCents).toBe(2681)
+    expect(q.body.lines[0].lineMarginCents).toBe(2681)
   })
 
-  evalCase('EVAL-03', 'VITD3 x1@2200 half-up -> fee 17, margin 1058', async () => {
+  evalCase('EVAL-03', 'VITD3 x1@2200 -> fee 17 (16.5 rounded up), margin 1058', async () => {
     const id = await newDraft()
     expect((await addLine(id, { sku: SKU.VITD, qty: 1, markupCents: markupFor(SKU.VITD, 2200) })).status).toBe(200)
     const q = await quote(id)
-    // 16.5 rounds UP to 17 (half-up).
+    // 16.5 rounds UP to 17.
     expect(q.body.totals.feeCents).toBe(17)
     expect(q.body.totals.marginCents).toBe(1058)
   })
 
-  // ADR-028: the split still enforces the floor (packages/money EVAL-04 @1125/@1132/@1133);
-  // a markup price covers the fee and a $0 markup carries 1 cent of rounding headroom.
-  evalCase('EVAL-04', 'VITD3 margin floor: markup 0 -> price 1135 (cost + fee + 1 cent headroom), margin 1', async () => {
+  // ADR-028: the split still enforces the floor (packages/money EVAL-04 @1125/@1133 rejected,
+  // @1134 margin 0); an order priced from markups rounds once, so a $0 markup nets exactly 0.
+  evalCase('EVAL-04', 'VITD3 margin floor: markup 0 -> price 1134 (cost + fee), margin exactly 0', async () => {
     const id = await newDraft()
     const r = await addLine(id, { sku: SKU.VITD, qty: 1, markupCents: 0 })
     expect(r.status).toBe(200)
-    expect(r.body.lines[0].unitPriceCents).toBe(1135)
+    expect(r.body.lines[0].unitPriceCents).toBe(1134)
     const q = await quote(id)
-    expect(q.body.lines[0]).toMatchObject({ lineFeeCents: 9, lineMarginCents: 1 })
+    expect(q.body.lines[0]).toMatchObject({ lineFeeCents: 9, lineMarginCents: 0 })
   })
 
   evalCase('EVAL-04b', 'MAG markup 1000 -> unit price 2469, fee 19, margin 1000', async () => {
