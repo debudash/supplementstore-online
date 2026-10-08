@@ -15,6 +15,10 @@ There is a **2-minute version** for short slots, then the **full walkthrough** b
    3-month ramp every time, so Metrics and Evidence always show the same story. Real orders
    are never touched. Demo orders are dated in the past (this month's on the 15th or two
    days before today, whichever is earlier), so they never show as today's or future orders.
+   Do not use the **Generate synthetic data** card before the demo: **Regenerate baseline**
+   replaces the synthetic baseline, but **Generate migration activity** ADDS another batch of
+   demo orders on top, so the Metrics numbers stop matching the standard story until you
+   reset again.
 
 Demo logins (the picker stands in for sign-in; it carries a DEMO badge):
 
@@ -39,7 +43,7 @@ the patient pays cost + markup + the 0.75% fee (ADR-028). There is no list price
 
 ## The 2-minute version
 
-1. **Provider (Dr. Ana Reyes) > New order > Cara Lopez.** Add Magnesium x2 with markup
+1. **Provider (Dr. Ana Reyes) > New Order > Cara Lopez.** Add Magnesium x2 with markup
    **$15.26** and Vitamin D3 x1 with markup **$13.56**. Order summary: **Patient pays $84.97, COGS $40.25, fee $0.64, your net
    margin $44.08.** Review & send; copy the pay link.
 2. **Open the pay link** (phone-sized window). One total, one button: pay **$84.97**. Receipt.
@@ -51,7 +55,7 @@ the patient pays cost + markup + the 0.75% fee (ADR-028). There is no list price
 
 ## Act 1 - Provider builds and sends an order (EVAL-01)
 
-Switch to **Dr. Ana Reyes** > **New order** > choose **Cara Lopez** > **Start order**.
+Switch to **Dr. Ana Reyes** > **New Order** > choose **Cara Lopez** > **Start order**.
 
 1. Add **Magnesium Glycinate, quantity 2**, **Your markup $15.26**. Before you add it the live
    preview reads **Patient pays $29.99 per unit (cost $14.50 + your markup $15.26 + 0.75% fee)**.
@@ -111,7 +115,7 @@ Delete the draft from **Orders** (Delete asks for confirmation; drafts hold no s
 
 ## Act 3 - Patient pays (EVAL-05, EVAL-12)
 
-Open the pay link (or **Cara Lopez > My orders > Review and pay**). The page shows who is
+Open the pay link (or **Cara Lopez > My Orders > Review and pay**). The page shows who is
 being paid (Dr. Ana Reyes, Riverside Integrative), the items (Magnesium "Qty 2 - $29.99 avg each",
 line $59.97; Vitamin D3 $25.00), and one total, **$84.97**. There
 is no cost, fee or margin anywhere: the patient view is a strict whitelist (EVAL-12).
@@ -135,16 +139,18 @@ amounts, and **Invariants: all checks pass**. Tabs:
   (exactly as entered)**. There is no rounding row: nothing is left over. Each line shows the
   same parts: Magnesium x2 ($29.99 avg, line $59.97) = $29.00 + fee $0.45 + markup $30.52
   (2 x $15.26); Vitamin D3 ($25.00) = $11.25 + $0.19 + $13.56. The line fees ($0.45 + $0.19)
-  add up to the order fee. The **Checks** tab includes `order.every_cent_accounted`
-  (total = cost + fee + markup) and `order.price_matches_markup` (re-prices the order from the
-  stored cost and markups and gets the same totals and fees), both passing.
+  add up to the order fee. The **Provider (markup)** column shows each line's markup as
+  qty x per-unit markup (2 x $15.26). The **Checks** tab includes `order.every_cent_accounted`
+  (shown as "Order every cent accounted": total = cost + fee + markup) and
+  `order.price_matches_markup` (shown as "Order price matches markup": re-prices the order from
+  the stored cost and markups and gets the same totals and fees), both passing.
 - **Ledger:** the payment journal with Debit and Credit columns and a **Balanced** badge.
 - **Timeline:** draft, sent, paid. **Stock:** reserve at send, sale at pay.
 - **Checks:** each invariant in plain English, all passing.
 
 ## Act 5 - Refunds (EVAL-07, EVAL-08)
 
-**Patient asks.** As **Cara Lopez > My orders**, the paid order has **Request a refund** with
+**Patient asks.** As **Cara Lopez > My Orders**, the paid order has **Request a refund** with
 "Unopened products, until <date>" (30 days after payment, ADR-027). Pick a reason and tick
 **The product is unopened** (required; the server refuses without it). An order paid more
 than 30 days ago shows "The 30-day refund window closed" instead. Return shipping is out of
@@ -178,8 +184,9 @@ only**: demo data is never included, because payables are money Cerbo actually o
 
 **Dashboard**: GMV, refunded, settled, platform fees and net margin, all read from the ledger,
 each sale counted in the month it was paid. Real orders only by default; turn on **Include
-demo data** (a "Demo data included" banner appears) to see Dr. Reyes's demo orders, and pick
-last month or the month before to see their sales land in the month they were paid.
+demo data** (a "Demo data included" banner appears) to see Dr. Reyes's demo orders, and set
+**From** / **To** to last month or the month before (then **Apply**) to see their sales land in
+the month they were paid.
 
 ## Act 7 - Recurring orders (EVAL-11)
 
@@ -187,13 +194,15 @@ last month or the month before to see their sales land in the month they were pa
 $15.26**, every 30 days. The card shows next run, the per-cycle amount at today's cost ($29.99
 each, incl. your $15.26) and the authorize link. Authorize as the patient (consent checkbox; the
 copy says the amount is current and can change if product costs change), then **Run cycle
-now**: a paid cycle of **$29.99** at **fee $0.23, net $15.26** (exactly the markup).
+now**: the toast reads "Cycle 1 paid ($29.99)." Open **Cycle 1** from the Cycles table for its
+audit: **fee $0.23, net $15.26** (exactly the markup).
 
 **A cost rise passes through** (EVAL-11d, set by a test helper; there is no cost editor in the
 UI): with Magnesium's cost raised to $30.00, the next cycle pays **$45.61** (fee $0.35) and the
 provider still nets **$15.26**. The patient pays the new cost; the provider keeps the markup.
-On-hold stories: Probiotic x6 (out of stock) or an unauthorized schedule. Each cycle is parked
-**On hold** with the reason and the fix, never charged at a loss.
+On-hold stories: Probiotic x6 ("Not enough stock": only 5 on hand) or an unauthorized schedule
+("Patient has not authorized"). Each cycle is parked **On hold** with the reason and the fix,
+never charged at a loss.
 
 ## Act 8 - Cerbo Admin: proof and economics
 
@@ -210,8 +219,8 @@ On-hold stories: Probiotic x6 (out of stock) or an unauthorized schedule. Each c
 **Migration leading indicator (the headline story):** on **Metrics**, turn on **Include
 synthetic demo data** and click **Last 3 months**. The **Migration off third-party
 marketplaces** card shows **Migration by month**: each month's in-house GMV against the
-providers' 6-month marketplace baseline, climbing month over month (for example 10% -> 18% ->
-44%). That climb is the leading indicator: providers are moving volume they used to send to
+providers' 6-month marketplace baseline, climbing month over month (after a fresh Reset demo story in October 2026:
+14.2% -> 27.7% -> 53.2%; the exact values shift as the month advances). That climb is the leading indicator: providers are moving volume they used to send to
 marketplaces into Cerbo. The headline reads **Average monthly migration** for the range, and
 each provider row shows its own trend. The data comes from **Reset demo story** (Before you
 start, step 3): a seeded 6-month baseline per provider plus a 3-month in-house ramp, all marked
@@ -228,7 +237,7 @@ or see a margin percent (ADR-028). Stock restock is in its own Demo-only section
 
 **Operations:** look up any order (each line lists the provider's markup per unit), fulfill,
 refund (reason required), each with a confirmation. The order audit shows the same markup in
-its **Markup / unit** column.
+its **Provider (markup)** column (line markup, with qty x per-unit markup beneath).
 **Payables:** a month can be closed only after it ends; closed statements are immutable.
 
 ## If something fails mid-demo

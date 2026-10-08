@@ -1,7 +1,7 @@
 // @cerbo/contracts - recurring schedule request/response types (T9, FR-12, ADR-017).
 //
 // A recurring schedule generates one CHILD ORDER per cycle. The patient authorizes
-// ONCE (token route); each cycle locks the schedule's prices but snapshots FRESH COGS,
+// ONCE (token route); each cycle re-prices from FRESH COGS + the schedule's markup (ADR-028),
 // and goes `on_hold` with a reason when stock is short, margin would go negative, or the
 // schedule is not authorized (ADR-017) rather than silently absorbing a cost increase.
 //
@@ -22,7 +22,7 @@ export type HoldReason =
 
 // ---- Provider surface ----
 
-/** One schedule line as the provider defines it: SKU, quantity, locked unit price. */
+/** One schedule line as the provider defines it: SKU, quantity, markup; the unit price is today's indicative price. */
 export interface ScheduleLineView {
   id: string
   position: number

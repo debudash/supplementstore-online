@@ -26,10 +26,10 @@ These scenarios are the acceptance bar. T13 implements them in `tests/e2e/golden
 |---|---|---|
 | EVAL-01 | `prov-ana` order for `pat-cara`: MAG-GLY-120 x2 markup 1526, VITD3-K2 x1 markup 1356 (API, ADR-028) | subtotal 8497, cogs 4025, fee 64, line totals [5997, 2500], line fees [45, 19], line margins [3052, 1356] (exactly the markups), order margin 4408. Money-package level: split() on prices 2999 x2 + 2499 still gives 8497 / 64 / [45, 19] / [3053, 1355] |
 | EVAL-02 | OMEGA3-1000 x1 @ 4999 (markup 2681) | fee 38 (37.4925 rounded up), margin 2681 |
-| EVAL-03 | Rounding boundary: VITD3-K2 x1 @ 2200 | fee 17 (exact 16.5 rounded up), margin 1058 |
+| EVAL-03 | Rounding boundary: VITD3-K2 x1 @ 2200 (markup 1058) | fee 17 (exact 16.5 rounded up), margin 1058 |
 | EVAL-04 | Margin floor on VITD3-K2 (cogs 1125) | split(): @1125 rejected MARGIN_NEGATIVE (margin -9); @1133 rejected (-1); @1134 accepted with margin 0. API (ADR-028): markup 0 prices at 1134, fee 9, margin exactly 0 |
 | EVAL-04b | Markup mode (ADR-028): MAG-GLY-120 with markupCents 1000; and with markupCents 0 | markup 1000: unit price 2469, fee 19, margin 1000. Markup 0: 1461, fee 11, margin 0 |
-| EVAL-P1 | Property tests (fast-check, 10k runs): random 1 to 10 lines, qty 1 to 100, prices >= cogs | line fees sum to order fee; each line cogs + fee + margin = total; fee = subtotal x 0.0075 rounded up; allocation deterministic |
+| EVAL-P1 | Property tests (fast-check, 10k runs): split() on random 1 to 10 lines, qty 1 to 100, prices >= cogs; priceOrder() on random 1 to 8 lines, qty 1 to 100, markup 0 to 100000. The golden suite also drives 24 seeded random baskets through the API quote | line fees sum to order fee; each line cogs + fee + margin = total; fee = subtotal x 0.0075 rounded up; allocation deterministic. priceOrder: subtotal - need = fee, line totals sum to subtotal, each line margin = qty x markup exactly, each line fee within 1 cent of its exact 0.75% |
 
 ## Inventory
 | ID | Scenario | Expected |

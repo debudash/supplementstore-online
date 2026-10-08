@@ -94,7 +94,7 @@ describe('money core (golden)', () => {
   // real quote endpoint and assert the invariants hold every time:
   //   - line fees sum to the order fee (allocation, not per-line rounding)
   //   - each line: cogs + fee + margin = total; margin >= 0
-  //   - order fee = half-up of subtotal x 0.0075
+  //   - order fee = subtotal x 0.0075 rounded up (ADR-028)
   //   - allocation is deterministic (same basket -> same split twice)
   evalCase('EVAL-P1', 'property: fee allocation + invariants over seeded random baskets', async () => {
     // Small deterministic LCG so the run is reproducible (seed fixed).

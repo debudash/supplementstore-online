@@ -43,7 +43,7 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'EVAL-03', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 x1@2200 -> fee 17 (16.5 rounded up), margin 1058' },
   { id: 'EVAL-04', area: 'money', task: 'T1/T3', plan: 'live', summary: 'VITD3 margin floor: markup 0 -> price 1134 (cost + fee), margin exactly 0 (split floor still rejects @1125/@1133, accepts @1134)' },
   { id: 'EVAL-04b', area: 'money', task: 'T1/T3', plan: 'live', summary: 'MAG markup 1000 -> unit price 2469, fee 19, margin 1000 (ADR-028)' },
-  { id: 'EVAL-P1', area: 'money', task: 'T1/T3', plan: 'live', summary: 'Property: line fees sum to order fee; cogs+fee+margin=total; fee half-up; deterministic (API-driven)' },
+  { id: 'EVAL-P1', area: 'money', task: 'T1/T3', plan: 'live', summary: 'Property: line fees sum to order fee; cogs+fee+margin=total; fee rounded up; deterministic (API-driven)' },
 
   // Inventory (T3, merged).
   { id: 'EVAL-05', area: 'inventory', task: 'T3', plan: 'live', summary: 'PROBIO x6 -> 409 INSUFFICIENT_STOCK available 5; x5 succeeds' },
@@ -91,7 +91,7 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'RT-09', area: 'redteam', task: 'T0/T11', plan: 'live', summary: 'provider calls restock/metrics/demo -> 403 FORBIDDEN (role guard)' },
   { id: 'RT-10', area: 'redteam', task: 'T4', plan: 'live', summary: 'patient routes and error bodies never leak COGS/margin/fee' },
   { id: 'RT-11', area: 'redteam', task: 'T2', plan: 'live', summary: 'direct SQL UPDATE/DELETE on ledger tables -> trigger raises; synthetic purge gated' },
-  { id: 'RT-12', area: 'redteam', task: 'T3', plan: 'live', summary: 'SQL injection via sku / date filters -> parameterized, no injection, table intact', note: 'CSV-import row validation portion belongs to T10 (cut) and is reported separately' },
+  { id: 'RT-12', area: 'redteam', task: 'T3', plan: 'live', summary: 'SQL injection via sku / date filters -> parameterized, no injection, table intact', note: 'CSV-import row validation is covered by the baseline import API test (apps/api/test/admin/demo.test.ts, RT-12)' },
   { id: 'RT-13', area: 'redteam', task: 'T9', plan: 'live', summary: 'recurring cycle triggered twice (concurrent) for the same period -> exactly ONE child order', note: 'enforced by a schedule row lock + next_run_at due-gate, NOT a DB unique constraint (none exists on (schedule_id, cycle_number) in the approved data model)' },
   { id: 'RT-14', area: 'redteam', task: 'T10', plan: 'live', summary: 'demo endpoints refused in production mode (403 DEMO_DISABLED); no real data purged; payable_statements never deletable even with the purge flag set' },
   { id: 'RT-15', area: 'redteam', task: 'T4', plan: 'live', summary: 'pay an expired order after reservation released -> 409 ORDER_EXPIRED; no oversell' }

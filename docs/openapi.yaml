@@ -26,7 +26,8 @@ info:
       - Patient id for pat-cara: `cccccccc-0000-0000-0000-000000000001`.
       - SKUs: `MAG-GLY-120` (unit COGS 1450), `VITD3-K2` (unit COGS 1125),
         `OMEGA3-1000`, `PROBIO-50B`, `ZINC-30`.
-      - EVAL-01 order: MAG-GLY-120 x2 @ 2999 and VITD3-K2 x1 @ 2499.
+      - EVAL-01 order (ADR-028 markups): MAG-GLY-120 x2 markupCents 1526 and VITD3-K2 x1
+        markupCents 1356 -> subtotal 8497, fee 64, line totals 5997 + 2500.
       - The patient pay token is NOT guessable: get it from the `send` response
         (`order.payToken` / `payUrl`) or from `GET /api/orders` (`payToken`/`payPath`).
 
@@ -217,7 +218,9 @@ paths:
         Price the line with a required per-unit markup `markupCents` (integer cents,
         0..100000). The server derives the unit price as COGS + markup grossed up for the
         0.75% fee (ADR-028). `unitPriceCents` and `marginBps` are no longer accepted and
-        return 400 INVALID_INPUT. A repeated SKU merges into the existing line.
+        return 400 INVALID_INPUT. A repeated SKU merges into the existing line (quantities
+        sum, the new markup applies). Add-to-cart stock gate: 409 INSUFFICIENT_STOCK
+        (details.available, details.remaining) when available stock cannot cover the line.
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
       requestBody:
         required: true
@@ -225,8 +228,8 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/AddLineRequest" }
             examples:
-              eval01Line1: { summary: EVAL-01 line 1 (prices at 2999), value: { sku: "MAG-GLY-120", qty: 2, markupCents: 1526 } }
-              eval01Line2: { summary: EVAL-01 line 2 (prices at 2499), value: { sku: "VITD3-K2", qty: 1, markupCents: 1355 } }
+              eval01Line1: { summary: EVAL-01 line 1 (line total 5997 in the full order), value: { sku: "MAG-GLY-120", qty: 2, markupCents: 1526 } }
+              eval01Line2: { summary: EVAL-01 line 2 (line total 2500; order subtotal 8497), value: { sku: "VITD3-K2", qty: 1, markupCents: 1356 } }
       responses:
         "200":
           description: Updated order
@@ -237,7 +240,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/OrderNotEditable" }
+        "409": { description: "ORDER_NOT_EDITABLE (not a draft) or INSUFFICIENT_STOCK", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "422": { $ref: "#/components/responses/MarginNegative" }
 
   /api/orders/{id}/lines/{lineId}:
@@ -268,7 +271,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/OrderNotEditable" }
+        "409": { description: "ORDER_NOT_EDITABLE (not a draft) or INSUFFICIENT_STOCK", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
         "422": { $ref: "#/components/responses/MarginNegative" }
     delete:
       tags: [Provider - orders]
@@ -309,8 +312,10 @@ paths:
       tags: [Provider - orders]
       summary: Snapshot, reserve stock, and issue the patient pay link
       description: |
-        Moves draft -> sent, snapshots the split, reserves stock (7-day expiry), and
-        returns the copyable pay URL. The returned `order.payToken` is what the patient
+        Moves draft -> sent under a products row lock: snapshots COGS, re-prices the whole
+        order from each line's markup (rounded once, ADR-028), stores the split, reserves
+        stock (7-day expiry), and returns the copyable pay URL. 400 when the order has no
+        lines. The returned `order.payToken` is what the patient
         uses at `/api/pay/{token}`.
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
       responses:
@@ -319,6 +324,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SendResponse" }
+        "400": { $ref: "#/components/responses/InvalidInput" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -451,7 +457,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { description: "Schedule not in a pausable state", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "SCHEDULE_NOT_ACTIONABLE - the schedule is cancelled (pausing a paused schedule is a no-op)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/schedules/{id}/resume:
     post:
@@ -463,19 +469,18 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { description: "Schedule not in a resumable state", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "SCHEDULE_NOT_ACTIONABLE - the schedule is cancelled (resuming an active schedule is a no-op)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/schedules/{id}/cancel:
     post:
       tags: [Provider - recurring]
-      summary: Cancel a schedule
+      summary: Cancel a schedule (idempotent - cancelling a cancelled schedule returns it unchanged)
       parameters: [{ $ref: "#/components/parameters/ScheduleId" }]
       responses:
         "200": { description: Updated schedule, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleView" } } } }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { description: "Schedule already cancelled", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/schedules/{id}/run:
     post:
@@ -493,7 +498,7 @@ paths:
     get:
       tags: [Provider - reports]
       summary: Provider sales dashboard (from the ledger)
-      description: "All figures integer cents, read from ledger entries for THIS provider. Sales, fees and margin count in the month the order was PAID (orders.paid_at); refunds in the month of the refund. Demo orders are excluded unless includeSynthetic=true."
+      description: "All figures integer cents, read from ledger entries for THIS provider. Sales, fees, margin and units count in the month the order was PAID (orders.paid_at); refunds in the month of the refund (refunds.created_at); ordersByStatus counts orders created in the period. Demo orders are excluded unless includeSynthetic=true (the Dashboard's Include demo data switch)."
       parameters:
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
@@ -508,6 +513,7 @@ paths:
     get:
       tags: [Provider - reports]
       summary: Provider payable report (balance owed, from the ledger)
+      description: "PROVIDER_PAYABLE entries for THIS provider, bucketed by journals.posted_at (when the money moved). Synthetic rows are excluded unless includeSynthetic=true. Closed statements (/api/admin/payables) are always real-only."
       parameters:
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
@@ -524,8 +530,14 @@ paths:
       summary: Ask the provider for a refund (ADR-026, ADR-027 - unopened, within 30 days of payment)
       description: Own paid, non-synthetic orders only, within 30 days of payment; one pending request per order. Body { reasonCode (damaged|wrong_item|patient_request|other), unopened (must be true), note? (<=500) }. The response never carries the review token.
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefundRequestCreate" }
+            example: { reasonCode: damaged, unopened: true, note: "Seal was broken on arrival" }
       responses:
-        "201": { description: Request created (status pending, unopenedConfirmed true) }
+        "201": { description: Request created (status pending, unopenedConfirmed true), content: { application/json: { schema: { $ref: "#/components/schemas/RefundRequestView" } } } }
         "400": { $ref: "#/components/responses/InvalidInput" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "NOT_REFUNDABLE (not paid), REFUND_WINDOW_CLOSED (more than 30 days after payment; details.windowEndsAt) or REFUND_REQUEST_EXISTS (one already pending)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
@@ -537,7 +549,7 @@ paths:
       description: Token-addressed like a pay link, but role = provider and only the provider who owns the order (404 otherwise). Returns { request (with reviewPath, unopenedConfirmed), order { id, status, patientName, subtotalCents, paidAt, shipped, refundWindowEndsAt, items[] } }.
       parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
       responses:
-        "200": { description: "{ request, order }" }
+        "200": { description: "{ request, order }", content: { application/json: { schema: { $ref: "#/components/schemas/RefundReview" } } } }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -546,8 +558,10 @@ paths:
       tags: [Provider - orders]
       summary: Accept - refunds immediately through the standard refund path (same as /api/orders/{id}/refund-request/approve)
       parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/ApproveRefundRequestBody" } } } }
       responses:
-        "200": { description: "{ request, refund } - refund is null if the order had already been refunded" }
+        "200": { description: "{ request, refund } - refund is null if the order had already been refunded", content: { application/json: { schema: { $ref: "#/components/schemas/RefundRequestDecision" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "NO_PENDING_REQUEST, or a refund error such as NOT_REFUNDABLE", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
@@ -558,7 +572,7 @@ paths:
       parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string, minLength: 3, maxLength: 500 } } } } } }
       responses:
-        "200": { description: "{ request } with status declined" }
+        "200": { description: "{ request } with status declined", content: { application/json: { schema: { type: object, properties: { request: { $ref: "#/components/schemas/ProviderRefundRequestView" } } } } } }
         "400": { $ref: "#/components/responses/InvalidInput" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: NO_PENDING_REQUEST, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
@@ -569,7 +583,7 @@ paths:
       summary: The latest patient refund request on one of the provider's orders (or null)
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
       responses:
-        "200": { description: "{ request } (null when none); request.reviewPath is the provider review link (/refund-review/<token>)" }
+        "200": { description: "{ request } (null when none); request.reviewPath is the provider review link (/refund-review/<token>)", content: { application/json: { schema: { type: object, properties: { request: { oneOf: [ { $ref: "#/components/schemas/ProviderRefundRequestView" }, { type: "null" } ] } } } } } }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/orders/{id}/refund-request/approve:
@@ -577,8 +591,10 @@ paths:
       tags: [Provider - orders]
       summary: Approve the pending request - runs the standard refund (ADR-012/013), then closes the request
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
+      requestBody: { required: false, content: { application/json: { schema: { $ref: "#/components/schemas/ApproveRefundRequestBody" } } } }
       responses:
-        "200": { description: "{ request, refund } - refund is null if the order had already been refunded" }
+        "200": { description: "{ request, refund } - refund is null if the order had already been refunded", content: { application/json: { schema: { $ref: "#/components/schemas/RefundRequestDecision" } } } }
+        "400": { $ref: "#/components/responses/InvalidInput" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: "NO_PENDING_REQUEST, or a refund error such as NOT_REFUNDABLE", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
@@ -589,7 +605,7 @@ paths:
       parameters: [{ $ref: "#/components/parameters/OrderId" }]
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string, minLength: 3, maxLength: 500 } } } } } }
       responses:
-        "200": { description: "{ request } with status declined" }
+        "200": { description: "{ request } with status declined", content: { application/json: { schema: { type: object, properties: { request: { $ref: "#/components/schemas/ProviderRefundRequestView" } } } } } }
         "400": { $ref: "#/components/responses/InvalidInput" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { description: NO_PENDING_REQUEST, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
@@ -709,6 +725,7 @@ paths:
       responses:
         "200": { description: Authorized, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleAuthorizeResult" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "SCHEDULE_NOT_ACTIONABLE - the schedule is cancelled", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/admin/inventory:
     get:
@@ -767,7 +784,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: Order is not fulfillable (not paid, or refunded)
+          description: Order is not fulfillable (not paid, or refunded) - returned with code ORDER_NOT_PAYABLE
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -834,8 +851,9 @@ paths:
       description: |
         The one remaining stub. This endpoint is the admin hook into the recurring-order
         engine's run-due job; it currently returns 501 NOT_IMPLEMENTED. (The recurring
-        engine itself IS live via /api/schedules and /api/pay/schedule/{token}; only this
-        on-demand admin trigger is unwired.)
+        engine itself IS live via /api/schedules/{id}/run and /api/pay/schedule/{token}, and
+        the sweep function `runDueSchedules` exists in apps/api/src/jobs/recurring.ts; only
+        this on-demand admin trigger is unwired, and no interval timer calls it.)
       responses:
         "501":
           description: Not implemented
@@ -850,7 +868,12 @@ paths:
     get:
       tags: [Cerbo Admin - metrics & payables]
       summary: Global metrics across all providers (from the ledger)
-      description: All figures integer cents; percentages are integer basis points.
+      description: |
+        All figures integer cents; percentages are integer basis points. Payment events count
+        on orders.paid_at, refunds on refunds.created_at. The migration report divides in-house
+        GMV by baseline monthly GMV x the calendar months in the period (an average month) and
+        carries a per-month trend (`byMonth`) overall and per provider. `providerNames` maps
+        every provider id in the response to display names.
       parameters:
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
@@ -878,7 +901,18 @@ paths:
         - { name: processingRateBps, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 2000 }, example: 290 }
         - { name: processingFixedCents, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1000 }, example: 30 }
       responses:
-        "200": { description: Evidence, content: { application/json: { schema: { type: object } } } }
+        "200":
+          description: Evidence (EvidenceResponse in packages/contracts/src/admin.ts)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedAt: { type: string }
+                  includeSynthetic: { type: boolean }
+                  integrity: { type: object, description: "journals { total, unbalanced }, orders { checked, passing, failing, capped, failures[] }, stock { issues[] }, guards { expected, present, missing[] }, reconciliation" }
+                  unitEconomics: { type: object, description: "assumptions, orderCount, gmvCents, platformFeeCents, processingCostCents, cerboNetCents, perOrder, breakevenFeeBps (nullable)" }
+                  refundExposure: { type: object, description: "refundCount, paidOrderCount, refundRateBps, refundedCents, feeRetainedCents, cogsWrittenOffCents, restockedCount, writtenOffCount, byReason[], cerboNetAfterWriteoffsCents" }
         "400": { $ref: "#/components/responses/InvalidInput" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -903,7 +937,7 @@ paths:
                         id: { type: string, format: uuid }
                         name: { type: string }
                         practiceId: { type: string, format: uuid }
-                        practiceName: { type: string, nullable: true }
+                        practiceName: { type: [string, "null"] }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -911,6 +945,7 @@ paths:
     get:
       tags: [Cerbo Admin - metrics & payables]
       summary: View a month's payable statements (stored if closed, else a live preview)
+      description: Figures come from REAL (non-synthetic) PROVIDER_PAYABLE entries bucketed by journals.posted_at; demo data is never paid out. Statements carry providerName / practiceName for display.
       parameters:
         - { name: month, in: query, required: true, description: "UTC month, YYYY-MM", schema: { type: string }, example: "2026-10" }
       responses:
@@ -985,6 +1020,14 @@ paths:
     post:
       tags: [Cerbo Admin - demo data]
       summary: Generate synthetic in-house migration activity (DEMO_MODE only)
+      description: |
+        Synthetic paid orders (is_synthetic) priced with priceOrder from per-unit markups and
+        posted through the real postPaymentJournal; inventory is never touched. Orders ramp
+        toward the present (`months - r` orders per baseline provider in month r, r = 0 the
+        current month) and are
+        dated the 15th of each month at 12:00 UTC; the current month uses the earlier of the
+        15th and two days ago, so no order is dated today or later. 403 DEMO_DISABLED unless
+        DEMO_MODE=true.
       requestBody:
         required: false
         content:
@@ -1003,9 +1046,10 @@ paths:
       summary: One click - purge synthetic data and regenerate the standard demo story (DEMO ONLY)
       description: Fixed seeds (baseline 1337 x 6 months, migration 4242 x 3 months), so every reset produces the same numbers. Real orders are never touched. 403 DEMO_DISABLED unless DEMO_MODE=true.
       responses:
-        "201": { description: Reset and regenerated, content: { application/json: { schema: { type: object } } } }
+        "201": { description: Reset and regenerated, content: { application/json: { schema: { $ref: "#/components/schemas/DemoStoryResetResult" } } } }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrDemoDisabled" }
+        "409": { description: "DEMO_RESET_BLOCKED - a synthetic order has real (non-synthetic) journals/payments/refunds attached; nothing was changed (details: journals, payments, refunds, total)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /api/admin/demo/reset:
     post:
@@ -1133,7 +1177,13 @@ components:
             details: { type: object, additionalProperties: true }
     ErrorCode:
       type: string
-      description: Canonical API error codes (docs/ARCHITECTURE.md section 9).
+      description: |
+        API error codes (docs/ARCHITECTURE.md section 9). INVALID_INPUT .. INTERNAL are the
+        canonical union in packages/contracts ErrorCode. The rest are module-specific codes the
+        API also returns (the envelope's code is typed `ErrorCode | string`): refund requests
+        (apps/api/src/orders/errors.ts: REFUND_REQUEST_EXISTS, REFUND_WINDOW_CLOSED,
+        NO_PENDING_REQUEST), recurring (SCHEDULE_NOT_ACTIONABLE), payables close
+        (ALREADY_CLOSED, PERIOD_NOT_ENDED) and demo reset (DEMO_RESET_BLOCKED). All 409.
       enum:
         - INVALID_INPUT
         - UNAUTHENTICATED
@@ -1152,6 +1202,13 @@ components:
         - PAYMENT_DECLINED
         - NOT_IMPLEMENTED
         - INTERNAL
+        - REFUND_REQUEST_EXISTS
+        - REFUND_WINDOW_CLOSED
+        - NO_PENDING_REQUEST
+        - SCHEDULE_NOT_ACTIONABLE
+        - ALREADY_CLOSED
+        - PERIOD_NOT_ENDED
+        - DEMO_RESET_BLOCKED
 
     OrderStatus:
       type: string
@@ -1298,6 +1355,7 @@ components:
         sentAt: { type: [string, "null"] }
         payToken: { type: [string, "null"], description: Pay token so the provider can recover the link after send (null for drafts) }
         payPath: { type: [string, "null"], description: 'Ready-made pay path, e.g. /pay/<token>' }
+        refundRequestStatus: { type: [string, "null"], enum: [pending, approved, declined, null], description: "Latest patient refund request on the order (paid/refunded orders only), else null" }
 
     RefundRequest:
       type: object
@@ -1351,6 +1409,9 @@ components:
         providerId: { type: string, format: uuid }
         practiceId: { type: string, format: uuid }
         patientId: { type: string, format: uuid }
+        patientName: { type: [string, "null"], description: Display name (provider/admin audit only) }
+        providerName: { type: [string, "null"] }
+        practiceName: { type: [string, "null"] }
         feeBps: { type: integer }
         subtotalCents: { type: [integer, "null"] }
         cogsCents: { type: [integer, "null"] }
@@ -1452,6 +1513,15 @@ components:
 
     AuditInvariants:
       type: object
+      description: |
+        Each check passes or fails on its own; `ok` is the AND (apps/api/src/ledger/audit.ts).
+        Once totals are set: order.split_balances, order.margin_nonnegative,
+        lines.split_balances, lines.fee_allocation_sums_to_order_fee; when every line has a
+        markup (ADR-028) also order.price_matches_markup (re-priced with priceOrder from the
+        snapshot COGS + markups equals the stored totals and line fees) and
+        order.every_cent_accounted (subtotal = cogs + fee + sum of qty x markup). Per journal:
+        journal.<id>.sums_to_zero. When paid: payment.amount_matches_subtotal and
+        ledger.cash_clearing_matches_subtotal.
       properties:
         ok: { type: boolean }
         checks:
@@ -1498,8 +1568,8 @@ components:
       type: object
       description: Who the patient is paying. Separate from the pay view so its strict whitelist is unchanged.
       properties:
-        practiceName: { type: string, nullable: true }
-        providerName: { type: string, nullable: true }
+        practiceName: { type: [string, "null"] }
+        providerName: { type: [string, "null"] }
 
     PatientOrderListItem:
       type: object
@@ -1514,6 +1584,79 @@ components:
         payPath: { type: [string, "null"], description: e.g. /pay/<token> }
         isPayable: { type: boolean, description: True only when status is 'sent' }
         items: { type: array, items: { $ref: "#/components/schemas/PatientPayItem" } }
+        refundRequest:
+          oneOf:
+            - { $ref: "#/components/schemas/RefundRequestView" }
+            - { type: "null" }
+        canRequestRefund: { type: boolean, description: "True when the patient may ask for a refund now (paid, within 30 days, nothing pending)" }
+        refundWindowEndsAt: { type: [string, "null"], description: "When the 30-day refund window closes (ADR-027); null if not paid" }
+
+    RefundRequestCreate:
+      type: object
+      required: [reasonCode, unopened]
+      properties:
+        reasonCode: { type: string, enum: [damaged, wrong_item, patient_request, other] }
+        unopened: { type: boolean, enum: [true], description: Must be true - the patient confirms the product is unopened (ADR-027) }
+        note: { type: string, maxLength: 500 }
+
+    RefundRequestView:
+      type: object
+      description: A patient refund request (ADR-027). No economics and no review token.
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        reasonCode: { type: string, enum: [damaged, wrong_item, patient_request, other] }
+        note: { type: [string, "null"] }
+        status: { type: string, enum: [pending, approved, declined] }
+        decisionNote: { type: [string, "null"] }
+        decidedAt: { type: [string, "null"] }
+        createdAt: { type: string }
+        unopenedConfirmed: { type: boolean, description: False only on pre-ADR-027 requests }
+
+    ProviderRefundRequestView:
+      allOf:
+        - { $ref: "#/components/schemas/RefundRequestView" }
+        - type: object
+          properties:
+            reviewPath: { type: string, description: "Provider review page, e.g. /refund-review/<token>" }
+
+    ApproveRefundRequestBody:
+      type: object
+      properties:
+        note: { type: string, maxLength: 500, description: Optional decision note }
+
+    RefundRequestDecision:
+      type: object
+      properties:
+        request: { $ref: "#/components/schemas/ProviderRefundRequestView" }
+        refund:
+          oneOf:
+            - { $ref: "#/components/schemas/RefundResult" }
+            - { type: "null" }
+
+    RefundReview:
+      type: object
+      properties:
+        request: { $ref: "#/components/schemas/ProviderRefundRequestView" }
+        order:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            status: { $ref: "#/components/schemas/OrderStatus" }
+            patientName: { type: [string, "null"] }
+            subtotalCents: { type: [integer, "null"] }
+            paidAt: { type: [string, "null"] }
+            shipped: { type: boolean, description: "fulfilled_at is set (shipped returns are written off, ADR-013)" }
+            refundWindowEndsAt: { type: [string, "null"] }
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  sku: { type: string }
+                  name: { type: string }
+                  qty: { type: integer }
+                  lineTotalCents: { type: [integer, "null"] }
 
     ScheduleLineView:
       type: object
@@ -1646,6 +1789,8 @@ components:
             type: object
             properties:
               orderId: { type: string, format: uuid }
+              patientId: { type: [string, "null"], format: uuid }
+              patientName: { type: [string, "null"] }
               creditsCents: { type: integer }
               debitsCents: { type: integer }
               netCents: { type: integer }
@@ -1666,6 +1811,8 @@ components:
         closingCents: { type: integer }
         closedAt: { type: string }
         closedBy: { type: [string, "null"] }
+        providerName: { type: [string, "null"], description: Display name (admin views; optional) }
+        practiceName: { type: [string, "null"], description: Display name (admin views; optional) }
 
     ClosePayablesRequest:
       type: object
@@ -1788,10 +1935,19 @@ components:
         period: { $ref: "#/components/schemas/ReportPeriod" }
         includeSynthetic: { type: boolean }
         groupBy: { type: string, enum: [none, month, provider] }
+        providerId: { type: [string, "null"], format: uuid, description: The provider the whole report is scoped to, or null for all providers }
         headline: { $ref: "#/components/schemas/MetricsBlock" }
         reconciliation: { $ref: "#/components/schemas/ReconciliationLine" }
         migration: { $ref: "#/components/schemas/MigrationReport" }
-        groups: { type: array, items: { $ref: "#/components/schemas/MetricsGroup" } }
+        groups: { type: array, items: { $ref: "#/components/schemas/MetricsGroup" }, description: Empty when groupBy = none }
+        providerNames:
+          type: object
+          description: Display names keyed by every provider id referenced above (migration rows, the no-baseline list, provider groups)
+          additionalProperties:
+            type: object
+            properties:
+              providerName: { type: [string, "null"] }
+              practiceName: { type: [string, "null"] }
 
     DemoSeedMonthsRequest:
       type: object
@@ -1829,6 +1985,21 @@ components:
         months: { type: integer }
         orderCount: { type: integer }
         gmvCents: { type: integer, description: INTEGER CENTS }
+
+    DemoStoryResetResult:
+      type: object
+      description: POST /api/admin/demo/reset-story result - the purge, then the standard story regenerated with fixed seeds.
+      properties:
+        story:
+          type: object
+          properties:
+            baselineSeed: { type: integer, example: 1337 }
+            baselineMonths: { type: integer, example: 6 }
+            migrationSeed: { type: integer, example: 4242 }
+            migrationMonths: { type: integer, example: 3 }
+        reset: { $ref: "#/components/schemas/DemoResetResult" }
+        baseline: { $ref: "#/components/schemas/BaselineRegenerateResult" }
+        migration: { $ref: "#/components/schemas/MigrationGenerateResult" }
 
     DemoResetResult:
       type: object

@@ -9,7 +9,7 @@ If these documents conflict with each other or with your task, STOP and report t
 - `apps/web` - Vue 3 + Vite + Vue Router, small fetch-based API client, no UI library required
 - `packages/money` - pure TypeScript, zero runtime dependencies, Vitest + fast-check
 - `packages/contracts` - shared request/response TypeScript types
-- Docker Compose for local, GitHub Actions for CI, Railway for deploy (see `docs/DEPLOY.md`)
+- Docker Compose for local, GitLab CI for CI (`.gitlab-ci.yml`), Railway for deploy (see `docs/DEPLOY.md`)
 
 ## 2. Commands (created by T0, must exist exactly)
 ```
@@ -20,7 +20,7 @@ npm run db:seed
 npm run dev          # api + web
 npm run lint
 npm run typecheck
-npm test             # unit + api tests
+npm test             # unit + api + web tests
 npm run test:e2e     # scenario evals from docs/EVALS.md
 npm run build
 ```

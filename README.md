@@ -56,7 +56,7 @@ Other commands (all defined in `package.json` / the workspace `package.json` fil
 ```
 npm run lint                # eslint across the repo
 npm run typecheck           # builds packages/* then typechecks every workspace
-npm test                    # unit tests (packages/money) + api tests (apps/api)
+npm test                    # unit (packages/money) + api (apps/api) + web (apps/web) tests
 npm run test:e2e            # scenario evals in tests/e2e against Postgres
 npm run build               # build packages, apps/web (Vite), apps/api (tsc)
 ```
@@ -66,7 +66,8 @@ Copy `.env.example` to `.env` for local overrides. The defaults match
 `PORT=3000`, `DEMO_MODE=true`). The db scripts and the api dev server load `.env`
 from `apps/api`, so copy it there too (`apps/api/.env`).
 
-Before pushing, run the whole CI gate locally in one command (Windows PowerShell):
+Before pushing, run CI's `build-test` and `e2e` jobs locally in one command (Windows
+PowerShell; it also starts the `db` container if needed):
 
 ```
 powershell -ExecutionPolicy Bypass -File scripts/local-check.ps1
@@ -109,8 +110,10 @@ The pipeline is not just a test runner; these checks actively gate `main` and th
 
 - **Strict `npm ci`** - the committed lockfile must be genuinely in sync (no `npm install`
   fallback), which is what proves the Railway build will succeed.
-- **AI-01 float-money guard** - a grep that fails the build if forbidden float-money tokens
-  (`toFixed`, `parseFloat`) appear in the money, ledger, payment, refund, or report code.
+- **AI-01 float-money guard** - a grep that fails the build if a float-money call
+  (`.toFixed(`, `parseFloat(`, `Number.parseFloat(`) appears in the money, ledger, payment,
+  refund, report, or order code. It matches call syntax, so a comment merely naming the
+  token no longer trips it.
 - **AI-03 protected-path guard** - diffs the protected docs and test paths against `main`; any
   change requires explicit human approval, so a worker cannot quietly weaken a test or a spec.
 - **The end-to-end eval and red-team suite** runs as its own `e2e` job against real Postgres,
@@ -118,6 +121,10 @@ The pipeline is not just a test runner; these checks actively gate `main` and th
 - **A post-deploy health poll** against the live `/api/health` URL fails the deploy job if the
   site does not return 200, which catches a crash-looping release that `railway up` alone
   would report as green.
+
+Fast path (2026-10-08, `docs/DEPLOY.md` "CI fast path"): one pipeline per change (a branch
+push with an open MR runs only the MR pipeline), docs-only MRs skip `build-test` and `e2e`
+(the guardrails still run), and `main` still re-runs the full suite before deploying.
 
 ## The money model, in plain language
 
@@ -246,8 +253,9 @@ the product:
   line carries `markupCents` ($0 to $1,000); the patient pays COGS + markup + fee. A dollar
   amount is what providers think in, the fee never eats into it, and a cost rise passes through
   to the patient instead of putting a recurring cycle on hold. Cerbo Admin no longer sets a list
-  price or sees a margin percent; it sees the provider's markup in the order audit ("Markup /
-  unit") and in Metrics. Supersedes ADR-005, ADR-025 and the price clause of ADR-024.
+  price or sees a margin percent; it sees the provider's markup in the order audit ("Provider
+  (markup)" column), in Operations (markup per unit on each line) and in Metrics ("Provider
+  markup (settled)"). Supersedes ADR-005, ADR-025 and the price clause of ADR-024.
 
 ## What is stubbed
 
@@ -313,14 +321,28 @@ These capabilities are implemented and merged, and each is covered by at least o
 - **Cerbo Admin metrics with a synthetic toggle (FR-13, ADR-015).** GMV, refunded GMV, settled
   GMV, platform fee revenue, sunk fees, provider net margin, provider markup (total and average
   per unit, ADR-028), and the migration view, all summed from ledger cents. Each figure carries the per-order reconciliation check, and an
-  `includeSynthetic` toggle (default off) decides whether demo rows are counted (EVAL-09, 13).
+  `includeSynthetic` toggle ("Include synthetic demo data", default off) decides whether demo
+  rows are counted (EVAL-09, 13). With a multi-month range ("Last 3 months" / "Last 6 months")
+  the migration card shows "Migration by month" - the leading indicator - plus an "Average
+  monthly migration" headline and a per-provider trend.
+- **Provider dashboard and payables.** The provider dashboard counts each sale in the month it
+  was paid and has an "Include demo data" switch (default off, with a "Demo data included"
+  banner when on). Provider payables are always "Real orders only": demo data never enters
+  money Cerbo actually owes.
+- **Evidence page (Cerbo Admin).** Live integrity checks (balanced journals, per-order
+  invariants, stock consistency, append-only guards, reconciliation), unit economics against an
+  adjustable card-processing estimate (default 2.9% + 30c) with the break-even platform fee,
+  and refund exposure by reason.
 - **CSV baseline import and the migration percentage (FR-14, ADR-018).** A Cerbo Admin uploads
   historical marketplace volume as CSV; rows are validated one by one and bad rows are reported
   rather than inserted. Migration percent is then in-house GMV against the baseline monthly
   average.
 - **Guarded demo reset.** The demo data tools generate synthetic baseline and migration activity
   through the real split and posting code (backdated via the `Clock` seam, flagged
-  `is_synthetic`, never touching inventory), and the reset purges only `is_synthetic` rows
+  `is_synthetic`, never touching inventory). "Reset demo story" purges synthetic data and
+  regenerates the same fixed-seed story (6-month baseline + 3-month ramp) every time;
+  "Regenerate baseline" replaces the synthetic baseline, while "Generate migration activity"
+  adds orders on top of what is there. The reset purges only `is_synthetic` rows
   through the one narrow append-only exception. Real ledger rows are untouched, and
   `payable_statements` are never deletable even with the purge flag set (EVAL-13, EVAL-15, RT-14).
 - **Admin inventory restock, labeled demo only (FR-15, ADR-009).** Cerbo Admin can raise a SKU's
@@ -348,7 +370,8 @@ From `docs/SPEC.md` "Out of scope"; none of these is a cut, they were never in s
 - **A real job scheduler** - the admin "run jobs" endpoints stand in for cron.
 - **A real baseline source** - CSV import is the interim mechanism; the real source for
   historical marketplace volume is undefined.
-- **A card-processing cost model** - processing fees are ignored in this slice (see risks).
+- **A card-processing cost model** - processing fees are not charged or priced in this slice;
+  the Evidence page only estimates them (adjustable rate) to show the break-even fee (see risks).
 - No real payments, auth, email, shipping, or payouts; no tax, shipping cost, compliance,
   multi-currency, or multi-location stock.
 
@@ -358,7 +381,9 @@ From the bottom of `docs/DECISIONS.md`:
 
 - **Card processing cost vs the 0.75% fee.** Real card processing typically costs well above
   0.75%. If Cerbo absorbs processing fees, each order can lose money. The pricing model has
-  to account for this; it is not solved in this slice (ADR assumption A-3).
+  to account for this; it is not solved in this slice (ADR assumption A-3), but the Evidence
+  page quantifies it: Cerbo's net per order at an adjustable processing estimate and the
+  break-even platform fee.
 - **Post-fulfillment refunds cost Cerbo the full COGS** while the provider only loses the
   fee (ADR-013). ADR-027 limits patient requests to unopened products within 30 days, and
   reason codes are recorded so the exposure is measurable (Evidence page).
@@ -390,7 +415,8 @@ Where it misled, and how it was caught:
 - **A comment reddened the build.** The AI-01 guardrail greps for the literal token `toFixed`;
   a source comment in `packages/money` that named the forbidden token matched the grep and
   turned `main` red, blocking every downstream pipeline. The comment was reworded; the grep was
-  left comment-blind on purpose so it cannot be weakened.
+  left comment-blind on purpose so it cannot be weakened. (It was later narrowed to match call
+  syntax such as `.toFixed(`, which still catches real use but not a comment naming the token.)
 - **A worker merged before a human gate.** The shared GitLab token let a worker merge money
   code to `main` before the owner performed the G1 review. The orchestrator issued a hard
   no-merge directive; merge authority is now the orchestrator and owner only.

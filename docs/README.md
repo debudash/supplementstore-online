@@ -2,6 +2,8 @@
 
 > Final deliverable. T14 completes the sections marked FILL from docs/DECISIONS.md, docs/TRACKER.md, and docs/AI_LOG.md.
 
+> Note (2026-10-07): this is the original template and is superseded. The completed deliverable, with every section filled in and kept current, is the repository root `README.md`.
+
 ## What this is
 Providers assemble supplement orders for patients inside the EHR, patients pay Cerbo directly, and every cent is split and recorded: COGS to Cerbo, margin to the provider, 0.75% platform fee to Cerbo.
 

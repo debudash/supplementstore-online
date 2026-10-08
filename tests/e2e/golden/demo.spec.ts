@@ -75,7 +75,7 @@ describe('admin metrics + demo data (golden)', () => {
     const world = await makeProviderWorld('t13m')
     const refunded = await payNewOrderAs(world, EVAL01) // GMV 8497, fee 64, margin 4408
     expect((await refundAsAdmin(refunded)).status).toBe(200) // refund EVAL-01
-    await payNewOrderAs(world, EVAL02) // GMV 4999, fee 37, margin 2682 (kept)
+    await payNewOrderAs(world, EVAL02) // GMV 4999, fee 38, margin 2681 (kept)
 
     const res = await asUser(ADMIN).get('/api/admin/metrics').query({ from, to, groupBy: 'provider' })
     expect(res.status).toBe(200)
