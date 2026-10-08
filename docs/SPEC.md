@@ -116,6 +116,34 @@ A demonstration of where the platform can go, not a delivered capability: no eva
 - No action buttons, nothing stored, no money computed; provider-only (never on patient pages); a patient with no panel sees "No recent lab results on file (DEMO)"
 - Simulated panels exist for the two seeded patients (Cara Lopez, Dev Patel) in `apps/web/src/demo/labSuggestions.ts`; a production version would move panels and rules server-side behind provider-scoped access and source them from a lab feed (HL7 / FHIR)
 
+Approved wireframe (option C, chosen over a per-line block and an order-level panel with Add buttons). The block sits under the Items table on the order builder, draft orders only:
+
+```
++---------------------------------------------------------------------------------+
+| Items (1)                                                                       |
+| ITEM            QTY       UNIT PRICE   LINE TOTAL   COGS     NET MARGIN         |
+| Vitamin D3+K2   [-] 1 [+]     $25.00       $25.00   $11.25       $13.56         |
++---------------------------------------------------------------------------------+
++---------------------------------------------------------------------------------+
+| Suggestions from Cara's latest labs  [DEMO - simulated labs]  Panel collected   |
+|                                                                Sep 28, 2026     |
+|  * Vitamin D3 + K2 - 25-OH Vitamin D 22 ng/mL, low (30-100).                    |
+|                                                 Already on this order.  (green) |
+|  * Magnesium Glycinate 120ct - RBC magnesium 4.0 mg/dL, low (4.2-6.8).          |
+|                                     Also helps the body use vitamin D.          |
+|  * Omega-3 Fish Oil 1000mg - Omega-3 Index 3.6%, low (8% or more).              |
+|  * Zinc Picolinate 30mg - Zinc 64 ug/dL, low (70-120).                          |
+|                                             Currently out of stock.  (red)      |
+|  Normal results in this panel: hs-CRP 0.6 mg/L. Decision support for the        |
+|  provider only; not shown to the patient. The provider decides what to          |
+|  prescribe.                                                                     |
++---------------------------------------------------------------------------------+
+  No buttons. Updates live as items change. No panel on file:
+  "No recent lab results on file (DEMO)."
+```
+
+As built (matches the wireframe): ![Lab suggestions block, option C](images/lab-suggestions-option-c.png)
+
 ## Non-functional requirements
 - NFR-1 Integrity: money invariants hold for every order, line, and journal, enforced in code, tests, and database constraints
 - NFR-2 Idempotency and concurrency: no double charge, no double refund, no oversell under parallel requests (RT-04, RT-05)
