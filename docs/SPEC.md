@@ -56,7 +56,7 @@ Whole-order refunds only.
 - AC4: If not yet fulfilled, units are restocked (`on_hand += qty`). If fulfilled, no restock and `writeoff_cogs_cents` records Cerbo's COGS loss (EVAL-08)
 - AC5: Second refund returns `ALREADY_REFUNDED`. Refund of a non-paid order returns `NOT_REFUNDABLE`
 - AC6 (ADR-026, ADR-027): A patient can request a refund on their own paid order only for UNOPENED products (a required confirmation; 400 without it) and only within 30 days of payment (`REFUND_WINDOW_CLOSED` after). One pending request per order
-- AC7 (ADR-027): Each request has a review link (`/refund-review/:token`) usable only by the provider who owns the order (404 otherwise). Accept runs the AC1-AC5 refund immediately; Decline requires a note the patient sees. The patient view never contains the token. Return shipping is out of scope
+- AC7 (ADR-027): Each request has a review link (`/refund-review/:token`) usable only by the provider who owns the order (404 otherwise); the owning provider can also accept or decline from the order audit. Accept runs the AC1-AC5 refund immediately; Decline requires a note the patient sees. The patient view never contains the token. Return shipping is out of scope
 
 ### FR-9 Fulfillment stub (Tier 2)
 - AC1: Cerbo Admin can mark a `paid` order fulfilled via `FulfillmentService` (stub). Sets `fulfilled_at`

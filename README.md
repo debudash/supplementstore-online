@@ -75,7 +75,7 @@ Notes:
 The app is one Docker image (multi-stage: build the Vue SPA and the API, then a slim
 runtime that serves both) plus a Railway Postgres database. On boot the container runs
 Knex migrations, seeds the catalog if the products table is empty, and listens on the
-Railway-provided `PORT`. `GET /api/health` returns 200 with database connectivity.
+Railway-provided `PORT`. `GET /api/health` returns 200 only when the database is reachable and the catalog is seeded.
 
 The repo lives on self-hosted GitLab, and Railway's deploy-on-push only supports GitHub,
 so a `deploy-railway` job on `main` runs `railway up` and then polls the live
@@ -156,8 +156,11 @@ The full log, with the options considered, is `docs/DECISIONS.md`. These shape t
   history.
 - **Append-only, per-line, trigger-enforced ledger (ADR-007).**
 - **Idempotent pay in a single locked transaction (ADR-008).**
-- **One inventory pool under Cerbo (ADR-009).** Restock is a Cerbo Admin action, because a
-  provider-side restock would change stock for every practice.
+- **One inventory pool under Cerbo (ADR-009).** The brief asks for the provider dashboard to
+  "update inventory", but it also says Cerbo holds the inventory, and a single pool is shared
+  by every practice. A provider restock would change stock for everyone else, so restock is a
+  Cerbo Admin action. Providers see each product's stock (in stock, low, out) as they add it
+  to an order, and the dashboard shows what they have sold.
 - **Stock checked three times (ADR-011).** At add-to-cart, reserved at send (7-day expiry),
   and rechecked at pay. Checking only at add-to-cart allows oversell while orders sit unpaid.
 - **Refunds return 100% to the patient; Cerbo keeps the fee and charges it to the provider
@@ -203,14 +206,14 @@ so its existence isn't leaked.
 
 ## Features beyond the core flow
 
-Each of these has at least one eval in `tests/e2e/RESULTS.md`.
+Each is covered by API or web tests, and most also by an e2e eval in `tests/e2e/RESULTS.md`.
 
 - **Recurring orders.** A provider creates a schedule (products, quantities, markups, interval).
   Each cycle is a normal order going through the same payment and posting path, so it is fully
   auditable. Problem cycles go `on_hold` with a reason.
 - **Cerbo Admin metrics.** GMV, refunded and settled GMV, platform fee revenue, sunk fees,
-  provider margin and markup, and migration, all summed from ledger cents with a reconciliation
-  check per figure. Synthetic demo data is excluded by default. Over a multi-month range the
+  provider margin and markup, and migration, all summed from ledger cents, with provider net margin reconciled
+  per order against the blended margin formula. Synthetic demo data is excluded by default. Over a multi-month range the
   migration card shows the monthly trend and a per-provider breakdown.
 - **Provider dashboard and payables.** Sales count in the month they were paid. Payables
   always show real orders only, so demo data never touches money Cerbo actually owes.
@@ -270,6 +273,21 @@ product design.
 - **Metrics run on synthetic volume**, and the baseline comes from a CSV import rather than
   a real marketplace feed.
 
+## What I'd do next
+
+In rough priority order:
+
+1. **Real payments.** Replace the stub gateway with Stripe PaymentIntents confirmed by webhook,
+   posting through the same function the stub uses, and price card-processing cost into the fee
+   model (see the first business risk).
+2. **A scheduler.** Run reservation expiry and due recurring cycles on a schedule, and wire the
+   run-due-schedules route that returns 501 today.
+3. **Line-level refunds.** The ledger and stored line fees already support them; the UI and
+   posting path are the remaining work.
+4. **Staging and production split**, with demo mode off in production.
+5. **A real migration baseline** from marketplace order history instead of a CSV import.
+6. **Real auth and provider payouts** behind the existing seams.
+
 ## Business risks
 
 - **Card processing costs more than 0.75%.** If Cerbo absorbs processing fees, orders can lose
@@ -311,7 +329,7 @@ gated on the live health check.
 - `apps/api`: Express API, Knex, Postgres, auth stub, seams, jobs.
 - `apps/web`: Vue 3 SPA with the role switcher (`src/demo/` holds the lab showcase).
 - `tests/e2e`: golden scenario and red-team evals.
-- `docs/`: spec, architecture, decisions, metrics, evals, red team, deploy, diagrams, AI log
-  and demo script.
+- `docs/`: the original brief, spec, architecture, decisions, metrics, evals, red team, deploy,
+  diagrams, AI log and demo script (indexed in `docs/README.md`).
 
 A step-by-step demo walkthrough by role, with exact seed figures, is in `docs/DEMO_SCRIPT.md`.

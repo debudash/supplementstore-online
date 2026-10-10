@@ -18,7 +18,7 @@ Totals: PASS 43 | PENDING 0 | CUT 0 | FAIL 0
 | EVAL-05 | PASS | inventory | T3 | PROBIO x6 -> 409 INSUFFICIENT_STOCK available 5; x5 succeeds |
 | EVAL-05b | PASS | inventory | T3 | ZINC x1 -> 409 available 0 |
 | EVAL-05c | PASS | inventory | T3 | cross-order reservation: ben 409 available 0; after ana cancels, available 5 |
-| EVAL-14 | PASS | inventory | T3 | reservation expiry after 7d+1m -> expired, released, pay ORDER_EXPIRED _(driven via the merged runExpireReservations job fn; the admin HTTP job route is a T11-cut 501 stub)_ |
+| EVAL-14 | PASS | inventory | T3 | reservation expiry after 7d+1m -> expired, released, pay ORDER_EXPIRED _(driven via the merged runExpireReservations job fn; the admin HTTP route POST /api/admin/jobs/expire-reservations calls the same function)_ |
 | EVAL-06 | PASS | payment | T4 | pay twice same key -> same payment id; new key -> 409 ALREADY_PAID; exactly 1 payment/1 journal |
 | EVAL-06b | PASS | payment | T4 | PAYMENT journal: CASH +8497, COGS -4025, PAYABLE -4408, FEE -64, sum 0; MAG 48 / VITD3 39, reserved 0 |
 | EVAL-06c | PASS | payment | T4 | audit: all invariant checks pass; history draft->sent->paid |

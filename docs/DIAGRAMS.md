@@ -411,7 +411,7 @@ approved by the provider (`/api/orders/:id/refund-request/approve` or the
 `/api/refund-review/:token/accept` link, ADR-027) runs the same function with the request's
 reason code. Rules: ADR-012 (patient gets 100% back; platform fee retained and charged to
 the provider), ADR-013 (restock before fulfilment, write off after), ADR-014 (whole-order
-only), ADR-023 (patient told to keep or dispose, never return).
+only), ADR-023 as amended by ADR-027 (unopened products may be returned within 30 days; shipped returns are written off).
 
 ```mermaid
 sequenceDiagram
