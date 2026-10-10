@@ -7,7 +7,7 @@
 //  - Fulfill  POST /api/admin/orders/:id/fulfill
 //  - Refund   POST /api/admin/orders/:id/refund   { reasonCode } - reason required
 //  - Expire reservations  POST /api/admin/jobs/expire-reservations
-//  - Run due schedules    POST /api/admin/jobs/run-due-schedules
+//  - Run due schedules    POST /api/admin/jobs/run-due-schedules (button disabled: route returns 501, FR-12 AC6)
 // Every irreversible action goes through a ConfirmDialog that states the consequence,
 // and the server's actual response is shown in a result card.
 //
@@ -293,10 +293,10 @@ const rawBody = computed(() => (result.value?.ok ? JSON.stringify(result.value.b
           <p class="subtle">Releases stock held by sent orders whose 7-day reservation has lapsed.</p>
         </div>
         <div class="job">
-          <UiButton :disabled="busy !== null" :busy="busy === 'schedules'" busy-label="Running..." data-testid="job-schedules" @click="pending = 'schedules'">
+          <UiButton disabled data-testid="job-schedules">
             Run due schedules
           </UiButton>
-          <p class="subtle">Charges recurring orders whose next cycle is due. The server reports what it did.</p>
+          <p class="subtle">Not wired yet: the recurring sweep exists but this route returns 501 until a real scheduler owns it. Run a cycle from the provider's Recurring page ("Run cycle now").</p>
         </div>
       </div>
     </Card>

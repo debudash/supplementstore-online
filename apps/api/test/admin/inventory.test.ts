@@ -215,9 +215,9 @@ describe('FR-9 demo jobs: expire-reservations and run-due-schedules', () => {
     expect(res.body.expired).toEqual([])
   })
 
-  // run-due-schedules is the hook for the recurring engine (a separate task, T9), which is
-  // not part of this build; the endpoint honestly reports 501 rather than faking a run.
-  it('run-due-schedules reports NOT_IMPLEMENTED (recurring engine not in this build)', async () => {
+  // run-due-schedules is not wired to the recurring sweep (FR-12 AC6); cycles run per
+  // schedule. The endpoint honestly reports 501 rather than faking a run.
+  it('run-due-schedules reports NOT_IMPLEMENTED (sweep not wired to the route)', async () => {
     const res = await asUser(ADMIN_USER).post('/api/admin/jobs/run-due-schedules')
     expect(res.status).toBe(501)
     expect(res.body.error.code).toBe('NOT_IMPLEMENTED')
