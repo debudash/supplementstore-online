@@ -1,9 +1,8 @@
 # DIAGRAMS.md - Architecture and sequence diagrams
 
-These diagrams describe the system **as merged on `main`**, not the aspiration. They were
-first drawn while T4/T5 were still in review and have since been re-checked against the
-code (ADR-028 markup pricing, payments, refunds, jobs). Every diagram cites the source
-file(s) a reader can check it against.
+These diagrams describe the system **as merged on `main`**, not the aspiration, and have
+been re-checked against the code (ADR-028 markup pricing, payments, refunds, jobs). Every
+diagram cites the source file(s) a reader can check it against.
 
 Rendering: all diagrams are Mermaid fenced code blocks, which GitLab renders natively. No
 image files, no external tooling, no new dependencies.
@@ -96,8 +95,7 @@ flowchart LR
 
 Source: `.gitlab-ci.yml` (`deploy-railway` job), `railway.json`, `Dockerfile`,
 `docs/DEPLOY.md`. `railway up` returns at queue time, so the health poll (not the `up`
-exit code) is the real deploy gate. The live deploy itself is human gate G5 and is not
-performed by workers.
+exit code) is the real deploy gate. A merge to `main` is what triggers a deploy.
 
 ---
 
@@ -257,7 +255,7 @@ Source: `apps/api/src/db/migrations/20261005120001_reference_and_catalog.ts`,
 
 ---
 
-## 3. Sequence - order creation to send (MERGED, T3)
+## 3. Sequence - order creation to send
 
 Provider builds a draft, adds lines with a per-unit dollar markup (the server derives the
 price as COGS + markup + fee, ADR-028), watches the live server-computed quote, then sends. Send takes a `products`
@@ -328,7 +326,7 @@ Source: `apps/api/src/orders/service.ts` (`createDraft`, `addLine`, `updateLine`
 
 ---
 
-## 4. Sequence - patient payment and ledger posting (MERGED, T4)
+## 4. Sequence - patient payment and ledger posting
 
 This is the most important flow in the document. The patient route uses the unguessable
 `pay_token` in the URL, never `X-Demo-User`. The status change, ledger posting, and
@@ -403,7 +401,7 @@ Source: `apps/api/src/payments/router.ts`, `apps/api/src/payments/service.ts` (`
 
 ---
 
-## 5. Sequence - refund (MERGED, T5)
+## 5. Sequence - refund
 
 `POST /api/orders/:id/refund` (provider, own orders) and `POST /api/admin/orders/:id/refund`
 (Cerbo Admin, any order) share `refunds/service.ts` `refundOrder`. A patient refund request
@@ -463,7 +461,7 @@ Rules: `docs/DECISIONS.md` ADR-012/013/014/023/027, `docs/ARCHITECTURE.md` secti
 
 ---
 
-## 6. Sequence - reservation expiry job (MERGED)
+## 6. Sequence - reservation expiry job
 
 The admin endpoint (there is no in-process interval timer; `server.ts` starts none) sweeps
 `sent` orders whose `reservation_expires_at` has passed, releases their reserved stock, and moves them to
@@ -509,7 +507,7 @@ Source: `apps/api/src/jobs/expire.ts`, `apps/api/src/admin/operations/router.ts`
 
 ---
 
-## 7. Money split flow (MERGED, packages/money)
+## 7. Money split flow (packages/money)
 
 Markup-priced orders (ADR-028) are priced by `priceOrder`: need = sum(qty x (COGS + markup)),
 subtotal = ceil(need x 10000 / (10000 - feeBps)) rounded once, fee = 0.75% of the subtotal
