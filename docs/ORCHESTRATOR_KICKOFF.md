@@ -1,4 +1,6 @@
-# ORCHESTRATOR_KICKOFF.md - Paste this into the AO project orchestrator
+# ORCHESTRATOR_KICKOFF.md - Build kickoff prompt (historical)
+
+> Kept as a record: this is the prompt used to start the agent orchestrator at the beginning of the build. The deadline, tier plan and cut rules below are as written then; Tier 3 was later reinstated and every task merged (see `docs/TRACKER.md`).
 
 ---
 

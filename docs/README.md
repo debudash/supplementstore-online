@@ -1,34 +1,19 @@
-# Cerbo In-House Supplement Ordering - Vertical Slice
+# Docs
 
-> Final deliverable. T14 completes the sections marked FILL from docs/DECISIONS.md, docs/TRACKER.md, and docs/AI_LOG.md.
+The project overview is the root [`README.md`](../README.md). The original project brief is [`BRIEF.md`](BRIEF.md).
 
-> Note (2026-10-07): this is the original template and is superseded. The completed deliverable, with every section filled in and kept current, is the repository root `README.md`.
-
-## What this is
-Providers assemble supplement orders for patients inside the EHR, patients pay Cerbo directly, and every cent is split and recorded: COGS to Cerbo, margin to the provider, 0.75% platform fee to Cerbo.
-
-Live demo: FILL (Railway URL)
-
-## Run locally
-FILL (commands from AGENTS.md section 2)
-
-## Demo walkthrough
-See docs/DEMO_SCRIPT.md
-
-## Key decisions and trade-offs
-FILL (summarize docs/DECISIONS.md)
-
-## What is stubbed
-FILL (PaymentGateway, FulfillmentService, Notifier, PayoutService, auth role switcher, job scheduler)
-
-## What was deliberately cut, and what is next
-FILL (from TRACKER cut items and SPEC out of scope: partial refunds, refund policy, real scheduler, real baseline source, processor fee model)
-
-## Business risks surfaced
-FILL (from DECISIONS open risks)
-
-## How AI was used
-FILL (summarize docs/AI_LOG.md: tools, what worked, where it misled, how it was corrected)
-
-## Limitations
-FILL
+| File | What it holds |
+|---|---|
+| `BRIEF.md` | The project brief and PRD as received |
+| `SPEC.md` | The brief restated as numbered requirements (FR ids) with acceptance criteria |
+| `DECISIONS.md` | Every decision (ADR) with the options considered, plus open business risks |
+| `ARCHITECTURE.md` | Data model, ledger postings, API surface, seams |
+| `METRICS.md` | How GMV, platform fee revenue and migration are computed |
+| `EVALS.md`, `RED_TEAM.md` | The scenario evals and red-team cases; results in `tests/e2e/RESULTS.md` |
+| `DEPLOY.md` | Railway deploy through GitLab CI, and recovery |
+| `DIAGRAMS.md` | Sequence and flow diagrams |
+| `DEMO_SCRIPT.md` | Step-by-step demo walkthrough by role |
+| `AI_LOG.md` | Where AI helped and where it misled |
+| `CONTEXT.md` | Business and product context |
+| `TASKS.md`, `TRACKER.md`, `ORCHESTRATOR_KICKOFF.md` | The build plan and its record |
+| `openapi.yaml` | The API contract |
