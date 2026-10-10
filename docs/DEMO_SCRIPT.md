@@ -105,7 +105,7 @@ lists Vitamin D3 + K2 (vitamin D 22 ng/mL, low - *Already on this order*), Magne
 (64 ug/dL, low - *Currently out of stock*), with hs-CRP listed as normal. Add Magnesium to the
 order and its line changes to "Already on this order". Talking point: read-only decision
 support from fixed, explainable rules, provider-only; the panels are simulated and a real
-version would come from a lab feed (README "Beyond the brief"). As Dr. Ben Cole, a draft for Dev Patel shows a
+version would come from a lab feed (README "Lab-informed suggestions (showcase)"). As Dr. Ben Cole, a draft for Dev Patel shows a
 different profile (Omega-3 and gut microbiome low).
 
 ## Act 2 - Guardrails (fail on purpose)
