@@ -49,7 +49,7 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'EVAL-05', area: 'inventory', task: 'T3', plan: 'live', summary: 'PROBIO x6 -> 409 INSUFFICIENT_STOCK available 5; x5 succeeds' },
   { id: 'EVAL-05b', area: 'inventory', task: 'T3', plan: 'live', summary: 'ZINC x1 -> 409 available 0' },
   { id: 'EVAL-05c', area: 'inventory', task: 'T3', plan: 'live', summary: 'cross-order reservation: ben 409 available 0; after ana cancels, available 5' },
-  { id: 'EVAL-14', area: 'inventory', task: 'T3', plan: 'live', summary: 'reservation expiry after 7d+1m -> expired, released, pay ORDER_EXPIRED', note: 'driven via the merged runExpireReservations job fn; the admin HTTP job route is a T11-cut 501 stub' },
+  { id: 'EVAL-14', area: 'inventory', task: 'T3', plan: 'live', summary: 'reservation expiry after 7d+1m -> expired, released, pay ORDER_EXPIRED', note: 'driven via the merged runExpireReservations job fn; the admin HTTP route POST /api/admin/jobs/expire-reservations calls the same function' },
 
   // Payment + ledger (T4, merged).
   { id: 'EVAL-06', area: 'payment', task: 'T4', plan: 'live', summary: 'pay twice same key -> same payment id; new key -> 409 ALREADY_PAID; exactly 1 payment/1 journal' },
@@ -63,7 +63,7 @@ export const MANIFEST: ManifestEntry[] = [
   { id: 'EVAL-08', area: 'refund', task: 'T5', plan: 'live', summary: 'pay EVAL-02, fulfill, refund damaged: no restock (OMEGA stays 29); writeoff_cogs 2280' },
   { id: 'EVAL-08b', area: 'refund', task: 'T5', plan: 'live', summary: 'refund a sent order -> 409 NOT_REFUNDABLE' },
 
-  // Reports / payables (T8, pending) and admin metrics (T10, cut).
+  // Reports / payables (T8, merged) and admin metrics (T10, merged).
   { id: 'EVAL-09', area: 'metrics', task: 'T10', plan: 'live', summary: 'admin metrics (groupBy=provider): GMV 13496, refunded 8497, settled 4999, fee revenue 102, sunk fees 64, net margin 2681, net after sunk fees 2617; reconciliation passes' },
   { id: 'EVAL-09b', area: 'reports', task: 'T8', plan: 'live', summary: 'provider payables: credits 7089, debits 4472, closing 2617; refunded order nets -64 (ADR-012)' },
   { id: 'EVAL-10', area: 'reports', task: 'T8', plan: 'live', summary: 'late refund of a closed-month order: M statement frozen (credits 4408); current period debits 4472, closing -64 (ADR-014/016)' },

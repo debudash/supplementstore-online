@@ -49,10 +49,10 @@ adminOperationsRouter.get('/orders/:id/audit', async (req: Request, res: Respons
     sendError(res, 500, 'INTERNAL', 'Internal server error')
   }
 })
-// Expire-reservations demo job (FR-4 AC3, EVAL-14, T11). The admin console button that
-// drives a demo deterministically instead of waiting for the 60s interval timer. Thin
-// wrapper over T3's runExpireReservations (idempotent, row-locked, safe to run next to
-// the interval - see apps/api/src/jobs/expire.ts). Returns the ids expired this run.
+// Expire-reservations demo job (FR-4 AC3, EVAL-14). There is no interval timer, so this
+// admin console button is how the sweep runs. Thin wrapper over runExpireReservations
+// (idempotent, row-locked, safe to run concurrently - see apps/api/src/jobs/expire.ts).
+// Returns the ids expired this run.
 adminOperationsRouter.post('/jobs/expire-reservations', async (_req: Request, res: Response) => {
   try {
     res.status(200).json(await runExpireReservations(db))
@@ -62,15 +62,13 @@ adminOperationsRouter.post('/jobs/expire-reservations', async (_req: Request, re
   }
 })
 
-// Run-due-schedules demo job (FR-12, T11 hook / T9 engine). This endpoint is the admin
-// console's hook into the recurring-order engine - the job that finds schedules whose
-// next cycle is due and charges them. That engine is a SEPARATE task (T9) and is not part
-// of this deployed slice, so there is nothing to run yet and we must not fake one. When
-// the recurring engine ships, wiring it here is a one-line change - the handler, the
-// cerbo_admin guard (parent router) and the response shape are already in place; only the
-// engine call is missing:
+// Run-due-schedules demo job (FR-12 AC6). The sweep that finds schedules whose next cycle
+// is due and charges them exists (jobs/recurring.ts runDueSchedules) but is deliberately
+// not wired to this route: the spec keeps it a 501 until a real scheduler owns it.
+// Recurring cycles run per schedule through POST /api/schedules/:id/run. Wiring it here is
+// a one-line change - the cerbo_admin guard (parent router) and response shape are in place:
 //
-//   import { runDueSchedules } from '../../jobs/recurring'   // provided by T9
+//   import { runDueSchedules } from '../../jobs/recurring'
 //   res.status(200).json(await runDueSchedules(db))
 //
 // Until then, report honestly with the standard 501 envelope rather than a staged result.

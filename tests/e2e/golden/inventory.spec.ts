@@ -72,10 +72,9 @@ describe('inventory (golden)', () => {
     const { orderId, token } = await sendOrderHttp([{ sku: SKU.MAG, qty: 2, price: 2999 }])
     expect((await db('products').where({ sku: SKU.MAG }).first()).reserved_qty).toBe(2)
 
-    // Advance the Clock 7 days + 1 minute and run the expiry sweep. The admin HTTP job
-    // route (/api/admin/jobs/expire-reservations) is a T11-cut 501 stub, so we drive the
-    // merged, in-process job function with an injected Clock - the same mechanism the
-    // 60s interval timer uses in production (ARCHITECTURE section 10).
+    // Advance the Clock 7 days + 1 minute and run the expiry sweep. We call the job
+    // function directly (the admin route /api/admin/jobs/expire-reservations wraps the same
+    // function) because only the in-process call accepts an injected Clock.
     const future = new Date(Date.now() + RESERVATION_DAYS * 24 * 60 * 60 * 1000 + 60 * 1000)
     const result = await runExpireReservations(db, { now: () => future })
     expect(result.expired).toContain(orderId)

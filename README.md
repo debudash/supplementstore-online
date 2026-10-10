@@ -262,7 +262,7 @@ product design.
   multi-currency or multi-location stock.
 - **No scheduler.** Recurring cycles run from the provider's "Run cycle now" button, and
   reservation expiry from an admin button. `POST /api/admin/jobs/run-due-schedules` returns
-  501: the sweep function exists but isn't wired to the route yet.
+  501 and its admin button is disabled: the sweep function exists but isn't wired to the route yet.
 - **Whole-order refunds only.** The ledger and stored per-line fees support line-level
   refunds; the UI and posting path don't exist yet. Return shipping is out of scope.
 - **One environment.** Railway runs production only, with `DEMO_MODE=true`. Merging to `main`
